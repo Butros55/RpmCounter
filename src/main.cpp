@@ -1,112 +1,213 @@
-#include "BluetoothSerial.h"
+#include <Arduino.h>
+#include <BLEDevice.h>
+#include <BLEClient.h>
+#include <BLERemoteCharacteristic.h>
 
-BluetoothSerial SerialBT;
+// UUIDs laut Car Scanner
+static BLEUUID SERVICE_UUID("0000fff0-0000-1000-8000-00805f9b34fb");
+static BLEUUID CHAR_UUID_NOTIFY("0000fff1-0000-1000-8000-00805f9b34fb"); // OBD -> ESP32
+static BLEUUID CHAR_UUID_WRITE("0000fff2-0000-1000-8000-00805f9b34fb");  // ESP32 -> OBD
 
-#define DEBUG_PORT Serial
-#define ELM_PORT SerialBT
+// MAC-Adresse deines OBDII-Adapters aus dem Scan
+static const char *TARGET_ADDR = "66:1e:32:9d:2e:5d";
 
-#define LED_PIN 2
+// LED zur Statusanzeige (meist GPIO2 beim ESP32-Devkit)
+const int LED_PIN = 2;
 
-bool lastConnected = false;
-unsigned long lastConnectTry = 0;
-const unsigned long CONNECT_INTERVAL = 5000; // alle 5s neuer Versuch
+BLEClient *g_client = nullptr;
+BLERemoteCharacteristic *g_charWrite = nullptr;
+BLERemoteCharacteristic *g_charNotify = nullptr;
 
-void setLEDConnected()
+bool g_connected = false;
+String g_serialLine;
+
+// ---------- LED-Helfer ----------
+void setLED(bool on)
 {
-  digitalWrite(LED_PIN, HIGH); // AN
+  digitalWrite(LED_PIN, on ? HIGH : LOW);
 }
 
-void setLEDDisconnected()
+// ---------- Notify-Callback: Daten vom OBD-Adapter ----------
+static void notifyCallback(
+    BLERemoteCharacteristic *pBLERemoteCharacteristic,
+    uint8_t *pData,
+    size_t length,
+    bool isNotify)
 {
-  digitalWrite(LED_PIN, LOW); // AUS
-}
+  for (size_t i = 0; i < length; i++)
+  {
+    char c = (char)pData[i];
 
-void setup()
-{
-  pinMode(LED_PIN, OUTPUT);
-  setLEDDisconnected();
-
-  DEBUG_PORT.begin(115200);
-  delay(200);
-
-  // ESP32 Bluetooth im Master-Mode starten
-  if (!ELM_PORT.begin("ESP32-OBD", true))
-  { // Name vom ESP32, egal wie
-    DEBUG_PORT.println("❌ Bluetooth konnte nicht initialisiert werden!");
-    while (true)
+    // ELM327 antwortet oft mit '>' als Prompt -> optisch trennen
+    if (c == '>')
     {
-      delay(1000);
-    }
-  }
-
-  // PIN NACH begin() setzen
-  ELM_PORT.setPin("1234");
-
-  DEBUG_PORT.println("ESP32 OBD-Connector gestartet");
-
-  // Direkt beim ersten loop()-Durchlauf einen Verbindungsversuch erlauben
-  lastConnectTry = millis() - CONNECT_INTERVAL;
-}
-
-void loop()
-{
-  unsigned long now = millis();
-  bool connected = ELM_PORT.connected();
-
-  // Übergang: wurde gerade VERBUNDEN?
-  if (connected && !lastConnected)
-  {
-    DEBUG_PORT.println("✅ Verbunden mit ELM327!");
-    setLEDConnected();
-  }
-
-  // Übergang: wurde gerade GETRENNT?
-  if (!connected && lastConnected)
-  {
-    DEBUG_PORT.println("⚠️ Verbindung zu ELM327 verloren.");
-    setLEDDisconnected();
-  }
-
-  // Wenn NICHT verbunden → in Abständen aktiv connecten
-  if (!connected && (now - lastConnectTry >= CONNECT_INTERVAL))
-  {
-    lastConnectTry = now;
-    DEBUG_PORT.println("🔄 Versuche Verbindung zu 'OBDII'...");
-
-    // Das hier kann einige Sekunden blocken (Suche/Pairing)
-    bool ok = ELM_PORT.connect("OBDII"); // Name des OBD2-Adapters
-
-    if (ok)
-    {
-      DEBUG_PORT.println("👉 connect(\"OBDII\") hat true zurückgegeben");
-      // LED wird im nächsten loop-Durchlauf oben eingeschaltet
+      Serial.println(">");
     }
     else
     {
-      DEBUG_PORT.println("❌ connect(\"OBDII\") fehlgeschlagen");
-      // LED bleibt AUS, es wird später nochmal versucht
+      Serial.print(c);
+    }
+  }
+}
+
+// ---------- BLE-Client-Callbacks ----------
+class MyClientCallback : public BLEClientCallbacks
+{
+  void onConnect(BLEClient *pclient) override
+  {
+    Serial.println("BLE-Client: onConnect()");
+    g_connected = true;
+    setLED(true);
+  }
+
+  void onDisconnect(BLEClient *pclient) override
+  {
+    Serial.println("BLE-Client: onDisconnect()");
+    g_connected = false;
+    setLED(false);
+  }
+};
+
+// ---------- Verbindung zum OBD-II per MAC ----------
+bool connectToObd()
+{
+  Serial.print("Versuche Verbindung zu OBDII bei ");
+  Serial.println(TARGET_ADDR);
+
+  BLEAddress obdAddress(TARGET_ADDR);
+
+  g_client = BLEDevice::createClient();
+  g_client->setClientCallbacks(new MyClientCallback());
+
+  // Optional: MTU hochsetzen (mehr Bytes pro Paket)
+  g_client->setMTU(200);
+
+  if (!g_client->connect(obdAddress))
+  {
+    Serial.println("❌ BLE connect() fehlgeschlagen.");
+    return false;
+  }
+
+  Serial.println("✅ Verbunden, suche Service FFF0...");
+
+  BLERemoteService *pService = g_client->getService(SERVICE_UUID);
+  if (pService == nullptr)
+  {
+    Serial.println("❌ Service FFF0 nicht gefunden, trenne.");
+    g_client->disconnect();
+    return false;
+  }
+
+  g_charWrite = pService->getCharacteristic(CHAR_UUID_WRITE);
+  g_charNotify = pService->getCharacteristic(CHAR_UUID_NOTIFY);
+
+  if (!g_charWrite || !g_charNotify)
+  {
+    Serial.println("❌ Write-/Notify-Characteristic nicht gefunden, trenne.");
+    g_client->disconnect();
+    return false;
+  }
+
+  Serial.println("✅ Characteristics gefunden.");
+
+  if (g_charNotify->canNotify())
+  {
+    g_charNotify->registerForNotify(notifyCallback);
+  }
+  else
+  {
+    Serial.println("WARNUNG: Notify-Characteristic kann nicht notify-en.");
+  }
+
+  Serial.println("🎉 BLE-Verbindung steht! Jetzt kannst du AT/OBD-Befehle eintippen.");
+  Serial.println("Beispiel:  ATI  oder  0100   (ENTER drücken)");
+  return true;
+}
+
+// ---------- Befehl an OBD schreiben ----------
+void sendObdCommand(const String &cmd)
+{
+  if (!g_connected || !g_charWrite)
+  {
+    Serial.println("\r\n[!] Nicht verbunden, kann nicht senden.");
+    return;
+  }
+
+  // String -> std::string + CR anhängen
+  std::string s(cmd.c_str());
+  if (s.empty() || s.back() != '\r')
+  {
+    s.push_back('\r');
+  }
+
+  Serial.print("[TX] ");
+  Serial.println(cmd);
+
+  // ohne Write-Response
+  g_charWrite->writeValue((uint8_t *)s.data(), s.size(), false);
+}
+
+// ---------- SETUP ----------
+void setup()
+{
+  pinMode(LED_PIN, OUTPUT);
+  setLED(false);
+
+  Serial.begin(115200);
+  delay(200);
+
+  Serial.println();
+  Serial.println("=== ESP32 BLE-OBD Client (MAC-basiert) ===");
+
+  BLEDevice::init("ESP32-OBD-BLE");
+  BLEDevice::setPower(ESP_PWR_LVL_P7); // etwas mehr Sendeleistung
+
+  // Direkt versuchen, per MAC zu verbinden
+  if (!connectToObd())
+  {
+    Serial.println("❌ Initiale Verbindung fehlgeschlagen. Prüfe:");
+    Serial.println("  • Dongle steckt und Auto-Zündung an?");
+    Serial.println("  • Kein Handy/Car Scanner gerade verbunden?");
+  }
+}
+
+// ---------- LOOP ----------
+void loop()
+{
+  // Wenn Verbindung weg ist, einfach alle paar Sekunden neu probieren
+  static unsigned long lastRetry = 0;
+  unsigned long now = millis();
+
+  if (!g_connected && now - lastRetry > 5000)
+  {
+    lastRetry = now;
+    Serial.println("🔄 Verbindung verloren – versuche Reconnect...");
+    connectToObd();
+  }
+
+  // ----- Serial-Monitor -> OBD-Befehl -----
+  while (Serial.available())
+  {
+    char c = (char)Serial.read();
+
+    // Echo
+    Serial.write(c);
+
+    if (c == '\r' || c == '\n')
+    {
+      // ganze Zeile fertig
+      g_serialLine.trim();
+      if (g_serialLine.length() > 0)
+      {
+        sendObdCommand(g_serialLine);
+      }
+      g_serialLine = "";
+    }
+    else
+    {
+      g_serialLine += c;
     }
   }
 
-  // Zustand für nächsten Loop-Moment merken
-  lastConnected = connected;
-
-  // --- Serieller Durchsatz PC → ELM ---
-  if (DEBUG_PORT.available())
-  {
-    char c = DEBUG_PORT.read();
-    DEBUG_PORT.write(c);
-    ELM_PORT.write(c);
-  }
-
-  // --- Serieller Durchsatz ELM → PC ---
-  if (ELM_PORT.available())
-  {
-    char c = ELM_PORT.read();
-
-    if (c == '>')
-      DEBUG_PORT.println();
-
-    DEBUG_PORT.write(c);
-  }
+  delay(10);
 }
