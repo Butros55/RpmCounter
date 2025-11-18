@@ -8,15 +8,75 @@
 #include "config.h"
 #include "led_bar.h"
 #include "logo_anim.h"
+#include "vehicle_info.h"
 #include "state.h"
 
 namespace
 {
     WebServer server(80);
 
+    String colorToHex(const RgbColor &color)
+    {
+        char buf[8];
+        snprintf(buf, sizeof(buf), "#%02X%02X%02X", color.r, color.g, color.b);
+        return String(buf);
+    }
+
+    RgbColor parseHexColor(const String &value, const RgbColor &fallback)
+    {
+        if (value.length() != 7 || value[0] != '#')
+            return fallback;
+        RgbColor c;
+        c.r = (uint8_t)strtol(value.substring(1, 3).c_str(), nullptr, 16);
+        c.g = (uint8_t)strtol(value.substring(3, 5).c_str(), nullptr, 16);
+        c.b = (uint8_t)strtol(value.substring(5, 7).c_str(), nullptr, 16);
+        return c;
+    }
+
+    String safeLabel(const String &value, const String &fallback)
+    {
+        String trimmed = value;
+        trimmed.trim();
+        if (trimmed.length() == 0)
+            return fallback;
+        return trimmed;
+    }
+
+    String jsonEscape(const String &input)
+    {
+        String out;
+        for (size_t i = 0; i < input.length(); ++i)
+        {
+            char c = input[i];
+            switch (c)
+            {
+            case '\\':
+            case '"':
+                out += '\\';
+                out += c;
+                break;
+            case '\n':
+                out += "\\n";
+                break;
+            case '\r':
+                break;
+            default:
+                out += c;
+                break;
+            }
+        }
+        return out;
+    }
+
     String htmlPage()
     {
         String page;
+        String greenName = (cfg.greenLabel.length() > 0) ? cfg.greenLabel : String("Green");
+        String yellowName = (cfg.yellowLabel.length() > 0) ? cfg.yellowLabel : String("Yellow");
+        String redName = (cfg.redLabel.length() > 0) ? cfg.redLabel : String("Red");
+        String greenHex = colorToHex(cfg.greenColor);
+        String yellowHex = colorToHex(cfg.yellowColor);
+        String redHex = colorToHex(cfg.redColor);
         page += F("<!DOCTYPE html><html><head><meta charset='utf-8'>");
         page += F("<meta name='viewport' content='width=device-width,initial-scale=1'>");
         page += F("<title>ShiftLight Setup</title>");
@@ -25,7 +85,7 @@ namespace
                   "color:#eee;padding:16px;margin:0;}"
                   "h1{font-size:20px;margin:0 0 12px 0;display:flex;"
                   "align-items:center;justify-content:space-between;}"
-                  "h2{font-size:16px;margin:16px 0 8px 0;}"
+                  "h2{font-size:18px;margin:18px 0 10px 0;}"
                   "label{display:block;margin-top:8px;}"
                   "input,select{width:100%;padding:6px;margin-top:4px;"
                   "border-radius:6px;border:1px solid #444;background:#222;color:#eee;}"
@@ -38,7 +98,8 @@ namespace
                   ".small{font-size:12px;color:#aaa;}"
                   ".section{margin-top:12px;padding:10px 12px;border-radius:8px;"
                   "background:#181818;border:1px solid #333;}"
-                  ".section-title{font-weight:600;margin-bottom:4px;font-size:14px;}"
+                  ".section-title{font-weight:600;margin-bottom:8px;font-size:18px;letter-spacing:0.3px;}"
+                  ".section-title small{display:block;font-size:12px;font-weight:400;color:#aaa;}"
                   ".toggle-row{display:flex;justify-content:space-between;align-items:center;margin-top:8px;}"
                   ".toggle-label{font-size:14px;}"
                   ".switch{position:relative;display:inline-block;width:46px;height:24px;margin-left:8px;}"
@@ -54,6 +115,10 @@ namespace
                   "border:2px solid rgba(255,255,255,0.2);border-top-color:#0af;"
                   "animation:spin 1s linear infinite;margin-left:6px;}"
                   ".hidden{display:none;}"
+                  ".color-row{border:1px solid #222;border-radius:6px;padding:8px;margin-top:8px;background:#151515;}"
+                  ".color-row h3{margin:0 0 6px 0;font-size:14px;color:#bbb;}"
+                  ".color-row label{margin-top:6px;font-size:12px;color:#aaa;}"
+                  ".color-row input[type=color]{padding:0;height:40px;}")
                   "@keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}"
                   "</style></head><body>");
 
@@ -88,9 +153,39 @@ namespace
         page += "<div class='small'>Wert: <span id='bval'>";
         page += String(cfg.brightness);
         page += "</span></div>";
-        page += "<input type='hidden' name='brightness' id='brightness' value='";
+        page += "<input type='hidden' name='brightness' id='brightness' value='"; 
         page += String(cfg.brightness);
         page += "'>";
+
+        page += F("<div class='color-row'>");
+        page += F("<h3>Farbe 1 – Low RPM</h3>");
+        page += "<label for='greenLabelInput'>Bezeichnung</label><input type='text' id='greenLabelInput' name='greenLabel' value='";
+        page += greenName;
+        page += "'>";
+        page += "<label for='greenColorInput'>Farbe</label><input type='color' id='greenColorInput' name='greenColor' value='";
+        page += greenHex;
+        page += "'>";
+        page += F("</div>");
+
+        page += F("<div class='color-row'>");
+        page += F("<h3>Farbe 2 – Mid RPM</h3>");
+        page += "<label for='yellowLabelInput'>Bezeichnung</label><input type='text' id='yellowLabelInput' name='yellowLabel' value='";
+        page += yellowName;
+        page += "'>";
+        page += "<label for='yellowColorInput'>Farbe</label><input type='color' id='yellowColorInput' name='yellowColor' value='";
+        page += yellowHex;
+        page += "'>";
+        page += F("</div>");
+
+        page += F("<div class='color-row'>");
+        page += F("<h3>Farbe 3 – Shift / Warnung</h3>");
+        page += "<label for='redLabelInput'>Bezeichnung</label><input type='text' id='redLabelInput' name='redLabel' value='";
+        page += redName;
+        page += "'>";
+        page += "<label for='redColorInput'>Farbe</label><input type='color' id='redColorInput' name='redColor' value='";
+        page += redHex;
+        page += "'>";
+        page += F("</div>");
 
         page += F("</div>");
 
@@ -110,26 +205,32 @@ namespace
         page += String(cfg.fixedMaxRpm);
         page += "'>";
 
-        page += F("<label>Green End (% von Max RPM)</label>");
-        page += "<input type='range' name='greenEndPct' min='0' max='100' value='";
+        page += "<label id='greenEndLabel' data-fallback='Green'>";
+        page += greenName;
+        page += " End (% von Max RPM)</label>";
+        page += "<input type='range' name='greenEndPct' min='0' max='100' value='"; 
         page += String(cfg.greenEndPct);
-        page += "' id='greenEndSlider'>";
+        page += "' id='greenEndSlider' data-display='greenEndVal'>";
         page += "<div class='small'>Wert: <span id='greenEndVal'>";
         page += String(cfg.greenEndPct);
         page += "%</span></div>";
 
-        page += F("<label>Yellow End (% von Max RPM)</label>");
-        page += "<input type='range' name='yellowEndPct' min='0' max='100' value='";
+        page += "<label id='yellowEndLabel' data-fallback='Yellow'>";
+        page += yellowName;
+        page += " End (% von Max RPM)</label>";
+        page += "<input type='range' name='yellowEndPct' min='0' max='100' value='"; 
         page += String(cfg.yellowEndPct);
-        page += "' id='yellowEndSlider'>";
+        page += "' id='yellowEndSlider' data-display='yellowEndVal'>";
         page += "<div class='small'>Wert: <span id='yellowEndVal'>";
         page += String(cfg.yellowEndPct);
         page += "%</span></div>";
 
-        page += F("<label>Blink Start (% von Max RPM)</label>");
-        page += "<input type='range' name='blinkStartPct' min='0' max='100' value='";
+        page += "<label id='blinkStartLabel' data-fallback='Red'>";
+        page += redName;
+        page += " Start (% von Max RPM)</label>";
+        page += "<input type='range' name='blinkStartPct' min='0' max='100' value='"; 
         page += String(cfg.blinkStartPct);
-        page += "' id='blinkStartSlider'>";
+        page += "' id='blinkStartSlider' data-display='blinkStartVal'>";
         page += "<div class='small'>Wert: <span id='blinkStartVal'>";
         page += String(cfg.blinkStartPct);
         page += "%</span></div>";
@@ -231,6 +332,30 @@ namespace
 
         page += F("<script>"
                   "let saveDirty=false;"
+                  "let lastStatus=null;"
+                  "let pendingSpinner=0;"
+                  "let lastSpinnerTs=0;"
+                  "function updateSpinnerVisibility(forceHide){"
+                  " const sp=document.getElementById('debugSpinner');"
+                  " if(!sp) return;"
+                  " const idle=(Date.now()-lastSpinnerTs)>3000;"
+                  " if(forceHide || pendingSpinner<=0 || idle || (lastStatus && lastStatus.connected===false)){"
+                  "  sp.classList.add('hidden');"
+                  " }else{"
+                  "  sp.classList.remove('hidden');"
+                  " }"
+                  "}"
+                  "function beginRequest(opts={}){"
+                  " const requireConn=opts.onlyWhenConnected||false;"
+                  " if(requireConn && lastStatus && lastStatus.connected===false){"
+                  "  updateSpinnerVisibility(true);"
+                  "  return ()=>{};"
+                  " }"
+                  " pendingSpinner++;"
+                  " lastSpinnerTs=Date.now();"
+                  " updateSpinnerVisibility(false);"
+                  " return ()=>{pendingSpinner=Math.max(0,pendingSpinner-1);updateSpinnerVisibility(false);};"
+                  "}"
                   "function markDirty(){"
                   " saveDirty=true;"
                   " var b=document.getElementById('btnSave');"
@@ -241,6 +366,61 @@ namespace
                   " document.getElementById('brightness').value=v;"
                   " markDirty();"
                   " fetch('/brightness?val='+v).catch(()=>{});"
+                  "}"
+                  "function updateSliderDisplay(el){"
+                  " var targetId=el.dataset.display;"
+                  " if(!targetId) return;"
+                  " var t=document.getElementById(targetId);"
+                  " if(t) t.innerText=el.value+'%';"
+                  "}"
+                  "function enforceSliderOrder(changedId){"
+                  " var g=document.getElementById('greenEndSlider');"
+                  " var y=document.getElementById('yellowEndSlider');"
+                  " var b=document.getElementById('blinkStartSlider');"
+                  " if(!g||!y||!b) return;"
+                  " var gv=parseInt(g.value,10);"
+                  " var yv=parseInt(y.value,10);"
+                  " var bv=parseInt(b.value,10);"
+                  " function sync(el,val){"
+                  "  if(parseInt(el.value,10)!==val){"
+                  "   el.value=val;"
+                  "   updateSliderDisplay(el);"
+                  "  }"
+                  " }"
+                  " if(changedId==='greenEndSlider'){"
+                  "  if(yv<gv){ yv=gv; sync(y,yv); }"
+                  "  if(bv<yv){ bv=yv; sync(b,bv); }"
+                  " }else if(changedId==='yellowEndSlider'){"
+                  "  if(yv<gv){ gv=yv; sync(g,gv); }"
+                  "  if(bv<yv){ bv=yv; sync(b,bv); }"
+                  " }else if(changedId==='blinkStartSlider'){"
+                  "  if(bv<yv){ yv=bv; sync(y,yv); }"
+                  "  if(yv<gv){ gv=yv; sync(g,gv); }"
+                  " }"
+                  "}"
+                  "function handleSliderChange(e){"
+                  " enforceSliderOrder(e.target.id);"
+                  " updateSliderDisplay(e.target);"
+                  " markDirty();"
+                  "}"
+                  "function updateRangeLabels(){"
+                  " var entries=["
+                  "  {key:'green',label:'greenEndLabel',suffix:' End (% von Max RPM)'},"
+                  "  {key:'yellow',label:'yellowEndLabel',suffix:' End (% von Max RPM)'},"
+                  "  {key:'red',label:'blinkStartLabel',suffix:' Start (% von Max RPM)'}"
+                  " ];"
+                  " entries.forEach(entry=>{"
+                  "  var lbl=document.getElementById(entry.label);"
+                  "  if(!lbl) return;"
+                  "  var nameInput=document.getElementById(entry.key+'LabelInput');"
+                  "  var colorInput=document.getElementById(entry.key+'ColorInput');"
+                  "  var fallback=lbl.dataset.fallback||'';"
+                  "  var base=(nameInput && nameInput.value.trim().length>0)?nameInput.value.trim():fallback;"
+                  "  lbl.innerText=base+entry.suffix;"
+                  "  if(colorInput && colorInput.value){"
+                  "   lbl.style.color=colorInput.value;"
+                  "  }"
+                  " });"
                   "}"
                   "function onSaveClicked(){"
                   " var btn=document.getElementById('btnSave');"
@@ -257,21 +437,22 @@ namespace
                   " btn.disabled=true;"
                   " var form=document.getElementById('mainForm');"
                   " var data=new FormData(form);"
-                  " fetch('/test',{method:'POST',body:data})"
+                  " fetch('/test',{method:'POST',body=data})"
                   "  .then(r=>r.text())"
                   "  .finally(()=>{btn.disabled=false;});"
                   "}"
                   "function postSimple(path){"
-                  " var sp=document.getElementById('debugSpinner');"
-                  " if(sp) sp.classList.remove('hidden');"
-                  " fetch(path,{method:'POST'}).catch(()=>{});"
+                  " var done=beginRequest({});"
+                  " fetch(path,{method:'POST'})"
+                  "  .catch(()=>{})"
+                  "  .finally(()=>{done();});"
                   "}"
                   "function fetchStatus(){"
-                  " var sp=document.getElementById('debugSpinner');"
-                  " if(sp) sp.classList.remove('hidden');"
+                  " var done=beginRequest({onlyWhenConnected:true});"
                   " fetch('/status')"
                   "  .then(r=>r.json())"
                   "  .then(s=>{"
+                  "    lastStatus=s;"
                   "    var e;"
                   "    if((e=document.getElementById('rpmVal'))) e.innerText=s.rpm;"
                   "    if((e=document.getElementById('rpmMaxVal'))) e.innerText=s.maxRpm;"
@@ -285,29 +466,41 @@ namespace
                   "      else{btnC.style.display='block';btnD.style.display='none';}"
                   "    }"
                   "  })"
-                  "  .finally(()=>{if(sp) sp.classList.add('hidden');});"
+                  "  .catch(()=>{})"
+                  "  .finally(()=>{done();updateSpinnerVisibility(false);});"
                   "}"
                   "function initUI(){"
                   " var form=document.getElementById('mainForm');"
                   " if(form){"
                   "  form.querySelectorAll('input,select').forEach(el=>{"
                   "    if(el.id==='brightness_slider') return;"
-                  "    el.addEventListener('change',markDirty);"
-                  "    el.addEventListener('input',markDirty);"
+                  "    if(el.type==='range'){"
+                  "      el.addEventListener('input',handleSliderChange);"
+                  "      el.addEventListener('change',handleSliderChange);"
+                  "    }else{"
+                  "      el.addEventListener('change',markDirty);"
+                  "      el.addEventListener('input',markDirty);"
+                  "    }"
                   "  });"
                   " }"
-                  " var g=document.getElementById('greenEndSlider');"
-                  " if(g) g.addEventListener('input',e=>{"
-                  "   var v=e.target.value;var t=document.getElementById('greenEndVal');"
-                  "   if(t) t.innerText=v+'%';});"
-                  " var y=document.getElementById('yellowEndSlider');"
-                  " if(y) y.addEventListener('input',e=>{"
-                  "   var v=e.target.value;var t=document.getElementById('yellowEndVal');"
-                  "   if(t) t.innerText=v+'%';});"
-                  " var b=document.getElementById('blinkStartSlider');"
-                  " if(b) b.addEventListener('input',e=>{"
-                  "   var v=e.target.value;var t=document.getElementById('blinkStartVal');"
-                  "   if(t) t.innerText=v+'%';});"
+                  " ['green','yellow','red'].forEach(name=>{"
+                  "  var color=document.getElementById(name+'ColorInput');"
+                  "  if(color){"
+                  "    color.addEventListener('input',()=>{updateRangeLabels();markDirty();});"
+                  "    color.addEventListener('change',()=>{updateRangeLabels();markDirty();});"
+                  "  }"
+                  "  var labelInput=document.getElementById(name+'LabelInput');"
+                  "  if(labelInput){"
+                  "    labelInput.addEventListener('input',()=>{updateRangeLabels();markDirty();});"
+                  "  }"
+                  " });"
+                  " ['greenEndSlider','yellowEndSlider','blinkStartSlider'].forEach(id=>{"
+                  "  var el=document.getElementById(id);"
+                  "  if(el){"
+                  "    updateSliderDisplay(el);"
+                  "  }"
+                  " });"
+                  " updateRangeLabels();"
                   " var sb=document.getElementById('btnSave');"
                   " if(sb) sb.addEventListener('click',onSaveClicked);"
                   " var tb=document.getElementById('btnTest');"
@@ -318,6 +511,7 @@ namespace
                   " if(bd) bd.addEventListener('click',()=>postSimple('/disconnect'));"
                   " fetchStatus();"
                   " setInterval(fetchStatus,1000);"
+                  " setInterval(()=>updateSpinnerVisibility(false),1000);"
                   "}"
                   "document.addEventListener('DOMContentLoaded',initUI);"
                   "</script>");
@@ -357,7 +551,7 @@ namespace
 
         page += "<h1><a href=\"/\">‹ Zurück</a><span>Einstellungen</span></h1>";
 
-        page += F("<form method='POST' action='/settings'>");
+        page += F("<form id='settingsForm' method='POST' action='/settings'>");
         page += F("<div class='section'>");
         page += F("<div class='section-title'>Modus</div>");
         page += F("<div class='toggle-row'><span class='toggle-label'>Entwicklermodus</span>"
@@ -371,8 +565,41 @@ namespace
                   "im Hauptbildschirm ausgeblendet und OBD-Auto-Reconnect bleibt immer aktiv."
                   "</div>");
         page += F("</div>");
-        page += F("<button type='submit'>Speichern</button>");
+        page += F("<div class='section'>");
+        page += F("<div class='section-title'>Mein Fahrzeug</div>");
+        page += "<div class='row small'>VIN: <strong>" + readVehicleVin() + "</strong></div>";
+        page += "<div class='row small'>Modell: <strong>" + readVehicleModel() + "</strong></div>";
+        page += "<div class='row small'>Diagnose: <strong>" + readVehicleDiagStatus() + "</strong></div>";
+        String vehStatus;
+        if (g_vehicleInfoRequestRunning)
+        {
+            vehStatus = "Abruf läuft ...";
+        }
+        else if (g_vehicleInfoAvailable && g_vehicleInfoLastUpdate > 0)
+        {
+            unsigned long age = (millis() - g_vehicleInfoLastUpdate) / 1000;
+            vehStatus = String("Letztes Update vor ") + String(age) + String("s");
+        }
+        else
+        {
+            vehStatus = "Noch keine Daten (wartet auf OBD-Verbindung)";
+        }
+        page += "<div class='row small'>Status: " + vehStatus + "</div>";
+        page += F("</div>");
+        page += F("<button type='submit' id='settingsSave' disabled>Speichern</button>");
         page += F("</form>");
+
+        page += F("<script>"
+                  "document.addEventListener('DOMContentLoaded',()=>{"
+                  " var form=document.getElementById('settingsForm');"
+                  " var btn=document.getElementById('settingsSave');"
+                  " if(form && btn){"
+                  "  form.querySelectorAll('input').forEach(el=>{"
+                  "    el.addEventListener('change',()=>{btn.disabled=false;});"
+                  "  });"
+                  " }"
+                  "});"
+                  "</script>");
 
         page += F("</body></html>");
         return page;
@@ -453,6 +680,33 @@ namespace
         cfg.logoOnEngineStart = server.hasArg("logoEngStart");
         cfg.logoOnIgnitionOff = server.hasArg("logoIgnOff");
 
+        if (server.hasArg("greenColor"))
+        {
+            cfg.greenColor = parseHexColor(server.arg("greenColor"), cfg.greenColor);
+        }
+        if (server.hasArg("yellowColor"))
+        {
+            cfg.yellowColor = parseHexColor(server.arg("yellowColor"), cfg.yellowColor);
+        }
+        if (server.hasArg("redColor"))
+        {
+            cfg.redColor = parseHexColor(server.arg("redColor"), cfg.redColor);
+        }
+
+        if (server.hasArg("greenLabel"))
+        {
+            cfg.greenLabel = safeLabel(server.arg("greenLabel"), "Green");
+        }
+        if (server.hasArg("yellowLabel"))
+        {
+            cfg.yellowLabel = safeLabel(server.arg("yellowLabel"), "Yellow");
+        }
+        if (server.hasArg("redLabel"))
+        {
+            cfg.redLabel = safeLabel(server.arg("redLabel"), "Red");
+        }
+
+        bool previousAutoReconnect = g_autoReconnect;
         if (g_devMode)
         {
             g_autoReconnect = server.hasArg("autoReconnect");
@@ -460,6 +714,12 @@ namespace
         else
         {
             g_autoReconnect = true;
+        }
+
+        if (!previousAutoReconnect && g_autoReconnect)
+        {
+            g_forceImmediateReconnect = true;
+            g_lastBleRetryMs = 0;
         }
 
         server.send(200, "text/plain", "OK");
@@ -558,7 +818,19 @@ namespace
         g_lastHttpMs = millis();
 
         Serial.println("[WEB] Manueller Connect-Button gedrückt.");
-        bool ok = connectToObd();
+        bool ok = false;
+        for (int attempt = 1; attempt <= MANUAL_CONNECT_RETRY_COUNT; ++attempt)
+        {
+            Serial.printf("[WEB] Verbinde Versuch %d/%d...\n", attempt, MANUAL_CONNECT_RETRY_COUNT);
+            ok = connectToObd();
+            if (ok)
+            {
+                Serial.println("[WEB] Manueller Connect erfolgreich.");
+                break;
+            }
+            delay(MANUAL_CONNECT_RETRY_DELAY_MS);
+        }
+
         if (!ok)
         {
             Serial.println("[WEB] Manueller Connect fehlgeschlagen.");
@@ -601,6 +873,11 @@ namespace
             json += " (Auto-Reconnect AN)";
         else
             json += " (Auto-Reconnect AUS)";
+        json += "\"";
+        json += ",\"vehicleVin\":\"" + jsonEscape(g_vehicleVin) + "\"";
+        json += ",\"vehicleModel\":\"" + jsonEscape(g_vehicleModel) + "\"";
+        json += ",\"vehicleDiag\":\"" + jsonEscape(g_vehicleDiagStatus) + "\"";
+        json += ",\"vehicleInfoReady\":" + String(g_vehicleInfoAvailable ? "true" : "false");
         json += "\"}";
         server.send(200, "application/json", json);
     }

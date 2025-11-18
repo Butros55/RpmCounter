@@ -22,4 +22,10 @@ void initConfig()
     cfg.logoOnIgnitionOn = true;
     cfg.logoOnEngineStart = true;
     cfg.logoOnIgnitionOff = true;
+    cfg.greenColor = {0, 255, 0};
+    cfg.yellowColor = {255, 180, 0};
+    cfg.redColor = {255, 0, 0};
+    cfg.greenLabel = "Green";
+    cfg.yellowLabel = "Yellow";
+    cfg.redLabel = "Red";
 }

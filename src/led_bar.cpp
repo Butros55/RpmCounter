@@ -8,6 +8,90 @@
 
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
+namespace
+{
+    const unsigned long PREVIEW_HOLD_MS = 2500;
+    const unsigned long PREVIEW_FADE_MS = 900;
+    bool previewFadeActive = false;
+    unsigned long previewFadeStart = 0;
+    uint32_t previewSnapshot[NUM_LEDS];
+    bool previewSnapshotValid = false;
+
+    uint32_t toStripColor(const RgbColor &c)
+    {
+        return strip.Color(c.r, c.g, c.b);
+    }
+
+    void renderPreviewFade()
+    {
+        if (!g_brightnessPreviewActive)
+        {
+            previewFadeActive = false;
+            return;
+        }
+
+        unsigned long now = millis();
+        if (!previewFadeActive)
+        {
+            if (!previewSnapshotValid)
+            {
+                return;
+            }
+
+            if (now - g_lastBrightnessChangeMs < PREVIEW_HOLD_MS)
+            {
+                return;
+            }
+
+            previewFadeActive = true;
+            previewFadeStart = now;
+        }
+
+        float t = (float)(now - previewFadeStart) / (float)PREVIEW_FADE_MS;
+        if (t >= 1.0f)
+        {
+            previewFadeActive = false;
+            g_brightnessPreviewActive = false;
+            strip.clear();
+            strip.show();
+            if (!g_testActive)
+            {
+                updateRpmBar(g_currentRpm);
+            }
+            return;
+        }
+
+        float scale = 1.0f - t;
+        if (scale < 0.0f)
+            scale = 0.0f;
+
+        for (int i = 0; i < NUM_LEDS; i++)
+        {
+            uint32_t col = previewSnapshot[i];
+            uint8_t gVal = (col >> 16) & 0xFF;
+            uint8_t rVal = (col >> 8) & 0xFF;
+            uint8_t bVal = col & 0xFF;
+
+            uint8_t r = (uint8_t)(rVal * scale);
+            uint8_t g = (uint8_t)(gVal * scale);
+            uint8_t b = (uint8_t)(bVal * scale);
+            strip.setPixelColor(i, strip.Color(r, g, b));
+        }
+
+        strip.show();
+    }
+}
+
+void rememberPreviewPixels()
+{
+    for (int i = 0; i < NUM_LEDS; i++)
+    {
+        previewSnapshot[i] = strip.getPixelColor(i);
+    }
+    previewSnapshotValid = true;
+    previewFadeActive = false;
+}
+
 void setStatusLED(bool on)
 {
     digitalWrite(STATUS_LED_PIN, on ? HIGH : LOW);
@@ -26,7 +110,7 @@ void initLeds()
 
 void updateRpmBar(int rpm)
 {
-    if (g_animationActive)
+    if (g_animationActive || g_brightnessPreviewActive)
     {
         return;
     }
@@ -79,24 +163,6 @@ void updateRpmBar(int rpm)
     static bool blinkState = false;
     unsigned long now = millis();
 
-    if (g_brightnessPreviewActive && (now - g_lastBrightnessChangeMs > 1000))
-    {
-        g_brightnessPreviewActive = false;
-
-        if (!g_testActive)
-        {
-            if (g_currentRpm > 0)
-            {
-                updateRpmBar(g_currentRpm);
-            }
-            else
-            {
-                strip.clear();
-                strip.show();
-            }
-        }
-    }
-
     bool shiftBlink = ((cfg.mode == 1 || cfg.mode == 2) && fraction >= blinkStart);
 
     if (shiftBlink && now - lastBlink > 100)
@@ -128,21 +194,21 @@ void updateRpmBar(int rpm)
             {
                 if (pos < greenEnd)
                 {
-                    color = strip.Color(0, 255, 0);
+                    color = toStripColor(cfg.greenColor);
                 }
                 else if (pos < yellowEnd)
                 {
-                    color = strip.Color(255, 180, 0);
+                    color = toStripColor(cfg.yellowColor);
                 }
                 else
                 {
                     if (cfg.mode == 1 && shiftBlink)
                     {
-                        color = blinkState ? strip.Color(255, 0, 0) : strip.Color(0, 0, 0);
+                        color = blinkState ? toStripColor(cfg.redColor) : strip.Color(0, 0, 0);
                     }
                     else
                     {
-                        color = strip.Color(255, 0, 0);
+                        color = toStripColor(cfg.redColor);
                     }
                 }
             }
@@ -163,6 +229,12 @@ void updateRpmBar(int rpm)
 
 void ledBarLoop()
 {
+    if (g_brightnessPreviewActive)
+    {
+        renderPreviewFade();
+        return;
+    }
+
     if (g_testActive)
     {
         unsigned long now = millis();
