@@ -37,6 +37,9 @@ String g_obdLine;    // Eingehende OBD-Zeilen (Notify)
 int g_currentRpm = 0; // letzte erkannte Drehzahl
 int g_maxSeenRpm = 0; // höchste bisher gesehene Drehzahl
 
+unsigned long g_lastRpmRequest = 0;
+const unsigned long RPM_INTERVAL_MS = 100; // etwas schneller: alle 100 ms 010C senden
+
 // ================== ShiftLight-Konfiguration =================
 struct ShiftConfig
 {
@@ -67,6 +70,10 @@ ShiftConfig cfg = {
     true  // logoOnIgnitionOff
 };
 
+// ================== Reconnect-Konfiguration ==================
+// Steuert, ob die automatische Reconnect-Schleife aktiv ist
+bool g_autoReconnect = true;
+
 // ================== Test-Sweep-Konfiguration =================
 bool g_testActive = false;
 unsigned long g_testStartMs = 0;
@@ -95,12 +102,17 @@ bool g_leavingPlayedThisCycle = false;
 // ================== Debug / Logging ==========================
 String g_lastTxInfo;
 String g_lastObdInfo;
+unsigned long g_lastTxLogMs = 0;
+const unsigned long TX_LOG_INTERVAL_MS = 2500; // ~2,5 s für 010C-Logs
 
 // ================== WiFi / Webserver ========================
 const char *AP_SSID = "ShiftLight-ESP32";
 const char *AP_PASS = "shift1234";
 
 WebServer server(80);
+
+// Letzter HTTP-Zugriff (für evtl. Pausen beim Auto-Reconnect)
+unsigned long g_lastHttpMs = 0;
 
 // Vorwärtsdeklarationen
 void updateRpmBar(int rpm);
@@ -111,6 +123,7 @@ void handleRoot();
 void handleSave();
 void handleTest();
 void handleBrightness();
+void handleConnect();
 void showMLogoAnimation();
 void showMLogoPreview();
 void showMLogoLeavingAnimation();
@@ -474,6 +487,13 @@ void updateRpmBar(int rpm)
   }
 
   strip.show();
+
+  Serial.print("[LED] rpm=");
+  Serial.print(rpm);
+  Serial.print(" fraction=");
+  Serial.print(fraction, 2);
+  Serial.print(" ledsOn=");
+  Serial.println(ledsOn);
 }
 
 // ================== HEX-Helfer ==============================
@@ -499,7 +519,10 @@ void processObdLine(const String &lineIn)
   if (line.length() == 0)
     return;
 
-  // fürs Web-UI speichern (Debug-Info)
+  Serial.print("[OBD] ");
+  Serial.println(line);
+
+  // fürs Web-UI speichern
   g_lastObdInfo = line;
 
   String compact;
@@ -538,6 +561,11 @@ void processObdLine(const String &lineIn)
   }
 
   g_currentRpm = rpm;
+  Serial.print("=> RPM: ");
+  Serial.print(rpm);
+  Serial.print("   (max: ");
+  Serial.print(g_maxSeenRpm);
+  Serial.println(")");
 
   // Zündung / Motor aktualisieren
   unsigned long nowMs = millis();
@@ -605,11 +633,7 @@ static void notifyCallback(
       }
       if (c == '>')
       {
-        // OBD ist bereit -> direkt neue RPM-Anfrage
-        if (!g_testActive && g_connected && g_charWrite)
-        {
-          sendObdCommand("010C");
-        }
+        Serial.println(">");
       }
     }
     else
@@ -669,10 +693,6 @@ bool connectToObd()
     return false;
   }
 
-  // Verbindung steht
-  g_connected = true;
-  setStatusLED(true);
-
   Serial.println("✅ Verbunden, suche Service FFF0...");
 
   BLERemoteService *pService = g_client->getService(SERVICE_UUID);
@@ -680,8 +700,6 @@ bool connectToObd()
   {
     Serial.println("❌ Service FFF0 nicht gefunden, trenne.");
     g_client->disconnect();
-    g_connected = false;
-    setStatusLED(false);
     return false;
   }
 
@@ -692,8 +710,6 @@ bool connectToObd()
   {
     Serial.println("❌ Write-/Notify-Characteristic nicht gefunden, trenne.");
     g_client->disconnect();
-    g_connected = false;
-    setStatusLED(false);
     return false;
   }
 
@@ -708,20 +724,16 @@ bool connectToObd()
     Serial.println("WARNUNG: Notify-Characteristic kann nicht notify-en.");
   }
 
-  Serial.println("🎉 BLE-Verbindung steht! Starte erste RPM-Anfrage...");
-
-  // Erste RPM-Anfrage anstoßen -> danach übernimmt notifyCallback mit '>'
-  sendObdCommand("010C");
-
+  Serial.println("🎉 BLE-Verbindung steht! Serial-Monitor kann weiterhin AT/OBD-Befehle schicken.");
   return true;
 }
 
 // ================== OBD-Befehl senden =======================
 void sendObdCommand(const String &cmd)
 {
-  if (!g_charWrite)
+  if (!g_connected || !g_charWrite)
   {
-    Serial.println("\r\n[!] Write-Char nicht verfügbar, kann nicht senden.");
+    Serial.println("\r\n[!] Nicht verbunden, kann nicht senden.");
     return;
   }
 
@@ -734,13 +746,15 @@ void sendObdCommand(const String &cmd)
   unsigned long nowMs = millis();
   bool isRpmCmd = (cmd == "010C");
 
-  // Nur manuelle / nicht-RPM-Befehle loggen (RPM würde sonst spammen)
-  if (!isRpmCmd)
+  // Manuelle Befehle immer loggen, RPM-Requests nur alle 2,5 s
+  if (!isRpmCmd || (nowMs - g_lastTxLogMs > TX_LOG_INTERVAL_MS))
   {
     String info = cmd + " @ " + String(nowMs / 1000) + "s";
     Serial.print("[TX] ");
     Serial.println(info);
-    g_lastTxInfo = info;
+
+    g_lastTxInfo = info; // fürs Web-UI
+    g_lastTxLogMs = nowMs;
   }
 
   g_charWrite->writeValue((uint8_t *)s.data(), s.size(), false);
@@ -846,6 +860,18 @@ String htmlPage()
     page += "checked";
   page += "> Leaving-Animation bei Zündung aus</label>";
 
+  // Auto-Reconnect Checkbox
+  page += F("<label><input type='checkbox' name='autoReconnect' ");
+  if (g_autoReconnect)
+    page += "checked";
+  page += "> OBD automatisch verbinden (Reconnect)</label>";
+
+  // Statuszeile
+  page += F("<div class='row small'>BLE-Status: ");
+  page += g_connected ? "Verbunden" : "Getrennt";
+  page += g_autoReconnect ? " (Auto-Reconnect AN)" : " (Auto-Reconnect AUS)";
+  page += F("</div>");
+
   page += F("<div class='row small'>");
   page += "Aktuelle RPM: ";
   page += String(g_currentRpm);
@@ -872,6 +898,11 @@ String htmlPage()
   page += F("<button type='submit'>Testlauf: RPM-Sweep</button>");
   page += F("</form>");
 
+  // Manuelle Connect-Form
+  page += F("<form method='POST' action='/connect'>");
+  page += F("<button type='submit'>Jetzt mit OBD verbinden</button>");
+  page += F("</form>");
+
   // JS für Brightness-Live-Update
   page += F("<script>"
             "function onBrightnessChange(v){"
@@ -889,11 +920,14 @@ String htmlPage()
 
 void handleRoot()
 {
+  g_lastHttpMs = millis();
   server.send(200, "text/html", htmlPage());
 }
 
 void handleSave()
 {
+  g_lastHttpMs = millis();
+
   if (server.hasArg("mode"))
   {
     cfg.mode = server.arg("mode").toInt();
@@ -960,12 +994,17 @@ void handleSave()
   cfg.logoOnEngineStart = server.hasArg("logoEngStart");
   cfg.logoOnIgnitionOff = server.hasArg("logoIgnOff");
 
+  // Auto-Reconnect aus Formular
+  g_autoReconnect = server.hasArg("autoReconnect");
+
   server.sendHeader("Location", "/");
   server.send(303);
 }
 
 void handleTest()
 {
+  g_lastHttpMs = millis();
+
   if (!cfg.autoScaleMaxRpm)
   {
     g_testMaxRpm = (cfg.fixedMaxRpm > 1000) ? cfg.fixedMaxRpm : 4000;
@@ -989,6 +1028,8 @@ void handleTest()
 // Live-Brightness-Endpoint
 void handleBrightness()
 {
+  g_lastHttpMs = millis();
+
   if (server.hasArg("val"))
   {
     int b = server.arg("val").toInt();
@@ -1007,6 +1048,22 @@ void handleBrightness()
   }
 
   server.send(200, "text/plain", "OK");
+}
+
+// Manueller Connect-Handler
+void handleConnect()
+{
+  g_lastHttpMs = millis();
+
+  Serial.println("[WEB] Manueller Connect-Button gedrückt.");
+  bool ok = connectToObd();
+  if (!ok)
+  {
+    Serial.println("[WEB] Manueller Connect fehlgeschlagen.");
+  }
+
+  server.sendHeader("Location", "/");
+  server.send(303);
 }
 
 // ================== SETUP ===========================
@@ -1041,15 +1098,20 @@ void setup()
   server.on("/save", HTTP_POST, handleSave);
   server.on("/test", HTTP_POST, handleTest);
   server.on("/brightness", HTTP_GET, handleBrightness);
+  server.on("/connect", HTTP_POST, handleConnect);
   server.begin();
   Serial.println("Webserver gestartet (http://192.168.4.1/)");
 
   BLEDevice::init("ESP32-OBD-BLE");
   BLEDevice::setPower(ESP_PWR_LVL_P7);
 
-  if (!connectToObd())
+  // Initialer Verbindungsversuch nur, wenn Auto-Reconnect aktiv ist
+  if (g_autoReconnect)
   {
-    Serial.println("❌ Initiale OBD-Verbindung fehlgeschlagen.");
+    if (!connectToObd())
+    {
+      Serial.println("❌ Initiale OBD-Verbindung fehlgeschlagen.");
+    }
   }
 }
 
@@ -1077,11 +1139,18 @@ void loop()
     g_logoPlayedThisCycle = false;
   }
 
+  // Auto-Reconnect-Schleife (nur wenn aktiviert)
   static unsigned long lastRetry = 0;
-  if (!g_connected && now - lastRetry > 5000)
+  const unsigned long RECONNECT_INTERVAL_MS = 5000;
+  const unsigned long HTTP_GRACE_MS = 5000;
+
+  if (g_autoReconnect &&
+      !g_connected &&
+      now - lastRetry > RECONNECT_INTERVAL_MS &&
+      now - g_lastHttpMs > HTTP_GRACE_MS)
   {
     lastRetry = now;
-    Serial.println("🔄 Verbindung verloren – versuche Reconnect...");
+    Serial.println("🔄 Verbindung verloren – versuche Reconnect (auto)...");
     connectToObd();
   }
 
@@ -1146,6 +1215,12 @@ void loop()
     }
   }
 
+  if (!g_testActive && g_connected && g_charWrite && (now - g_lastRpmRequest > RPM_INTERVAL_MS))
+  {
+    g_lastRpmRequest = now;
+    sendObdCommand("010C");
+  }
+
   while (Serial.available())
   {
     char c = (char)Serial.read();
@@ -1165,7 +1240,5 @@ void loop()
       g_serialLine += c;
     }
   }
-
-  // Kein künstliches delay nötig, aber 1ms schadet nicht
   delay(1);
 }
