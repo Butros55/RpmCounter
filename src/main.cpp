@@ -37,9 +37,6 @@ String g_obdLine;    // Eingehende OBD-Zeilen (Notify)
 int g_currentRpm = 0; // letzte erkannte Drehzahl
 int g_maxSeenRpm = 0; // höchste bisher gesehene Drehzahl
 
-unsigned long g_lastRpmRequest = 0;
-const unsigned long RPM_INTERVAL_MS = 200; // alle 200 ms 010C senden
-
 // ================== ShiftLight-Konfiguration =================
 struct ShiftConfig
 {
@@ -51,7 +48,7 @@ struct ShiftConfig
   int brightness;       // 0–255
   int mode;             // 0 = Casual, 1 = F1-Style, 2 = Überempfindlich
 
-  // Neue Optionen für Logo-Trigger
+  // Logo-Optionen
   bool logoOnIgnitionOn;  // M-Logo bei Zündung an
   bool logoOnEngineStart; // M-Logo bei Motorstart
   bool logoOnIgnitionOff; // Leaving-Animation bei Zündung aus
@@ -83,17 +80,21 @@ unsigned long g_lastBrightnessChangeMs = 0;
 // Zündung / Motor / Timings
 bool g_ignitionOn = false;
 bool g_engineRunning = false;
-unsigned long g_lastObdMs = 0;                  // wann zuletzt OBD-Daten
-unsigned long g_lastLogoMs = 0;                 // wann zuletzt Logo-Animation
-const unsigned long IGNITION_TIMEOUT_MS = 3000; // nach 8 s ohne OBD -> Zündung aus
-const unsigned long LOGO_COOLDOWN_MS = 1000;    // mind. 2s zwischen Logos
+unsigned long g_lastObdMs = 0;  // wann zuletzt OBD-Daten
+unsigned long g_lastLogoMs = 0; // wann zuletzt Logo-Animation
+
+const unsigned long IGNITION_TIMEOUT_MS = 8000; // nach 8 s ohne OBD -> Zündung aus
+const unsigned long LOGO_COOLDOWN_MS = 2000;    // mind. 2s zwischen Logos
 const int ENGINE_START_RPM_THRESHOLD = 400;     // ab ~400 rpm = Motor läuft
+
+// Animations-Zustände
+bool g_animationActive = false;     // solange true, keine RPM-Bar-Updates
+bool g_logoPlayedThisCycle = false; // pro Zündungszyklus max. 1 Logo
+bool g_leavingPlayedThisCycle = false;
 
 // ================== Debug / Logging ==========================
 String g_lastTxInfo;
 String g_lastObdInfo;
-unsigned long g_lastTxLogMs = 0;
-const unsigned long TX_LOG_INTERVAL_MS = 2500; // ~2,5 s für 010C-Logs
 
 // ================== WiFi / Webserver ========================
 const char *AP_SSID = "ShiftLight-ESP32";
@@ -123,7 +124,6 @@ void setStatusLED(bool on)
 // ================== BMW M Logo (statisch, für Preview) ======
 void showMLogoPreview()
 {
-  // Basisfarben (M-Farben)
   const uint8_t lbR = 0, lbG = 120, lbB = 255; // light blue
   const uint8_t dbR = 0, dbG = 0, dbB = 120;   // dark blue
   const uint8_t rR = 255, rG = 0, rB = 0;      // red
@@ -173,6 +173,10 @@ void showMLogoPreview()
 // ================== BMW M Logo Animation (Auf) ===============
 void showMLogoAnimation()
 {
+  if (g_animationActive)
+    return;
+  g_animationActive = true;
+
   Serial.println("[MLOGO] Starte BMW M Boot-Animation");
 
   const uint8_t lbR = 0, lbG = 120, lbB = 255;
@@ -213,8 +217,8 @@ void showMLogoAnimation()
     }
   }
 
-  const int steps = 80;
-  const int frameDelay = 20;
+  const int steps = 40;      // halb so viele Schritte
+  const int frameDelay = 10; // schneller -> ~0,8s gesamt
 
   // Fade-In
   for (int s = 0; s <= steps; s++)
@@ -234,7 +238,7 @@ void showMLogoAnimation()
     delay(frameDelay);
   }
 
-  delay(500);
+  delay(200);
 
   // Fade-Out
   for (int s = steps; s >= 0; s--)
@@ -258,11 +262,23 @@ void showMLogoAnimation()
   strip.show();
 
   Serial.println("[MLOGO] Animation fertig");
+
+  g_animationActive = false;
+
+  // Nach Logo direkt wieder RPM-Bar zeichnen (falls Zündung an und Test aus)
+  if (!g_testActive && g_currentRpm > 0)
+  {
+    updateRpmBar(g_currentRpm);
+  }
 }
 
 // ================== BMW M Leaving Animation =================
 void showMLogoLeavingAnimation()
 {
+  if (g_animationActive)
+    return;
+  g_animationActive = true;
+
   Serial.println("[MLOGO] Starte Leaving-Animation");
 
   const uint8_t lbR = 0, lbG = 120, lbB = 255;
@@ -303,10 +319,10 @@ void showMLogoLeavingAnimation()
     }
   }
 
-  const int steps = 50;
-  const int frameDelay = 20;
+  const int steps = 30;
+  const int frameDelay = 15;
 
-  // Start: volles Logo, dann nur Fade-Out (etwas anders als Boot)
+  // Einfacher Fade-Out von vollem Logo
   for (int s = 0; s <= steps; s++)
   {
     float t = (float)s / (float)steps; // 0..1
@@ -328,12 +344,19 @@ void showMLogoLeavingAnimation()
   strip.show();
 
   Serial.println("[MLOGO] Leaving-Animation fertig");
+  g_animationActive = false;
 }
 
 // ================== RPM -> LED-Bar Logik ====================
 
 void updateRpmBar(int rpm)
 {
+  if (g_animationActive)
+  {
+    // während Logo/Leaving keine RPM-Bar schreiben
+    return;
+  }
+
   if (rpm < 0)
     rpm = 0;
 
@@ -451,13 +474,6 @@ void updateRpmBar(int rpm)
   }
 
   strip.show();
-
-  Serial.print("[LED] rpm=");
-  Serial.print(rpm);
-  Serial.print(" fraction=");
-  Serial.print(fraction, 2);
-  Serial.print(" ledsOn=");
-  Serial.println(ledsOn);
 }
 
 // ================== HEX-Helfer ==============================
@@ -483,10 +499,7 @@ void processObdLine(const String &lineIn)
   if (line.length() == 0)
     return;
 
-  Serial.print("[OBD] ");
-  Serial.println(line);
-
-  // fürs Web-UI speichern
+  // fürs Web-UI speichern (Debug-Info)
   g_lastObdInfo = line;
 
   String compact;
@@ -525,11 +538,6 @@ void processObdLine(const String &lineIn)
   }
 
   g_currentRpm = rpm;
-  Serial.print("=> RPM: ");
-  Serial.print(rpm);
-  Serial.print("   (max: ");
-  Serial.print(g_maxSeenRpm);
-  Serial.println(")");
 
   // Zündung / Motor aktualisieren
   unsigned long nowMs = millis();
@@ -541,29 +549,36 @@ void processObdLine(const String &lineIn)
   g_ignitionOn = true;
   g_engineRunning = (rpm > ENGINE_START_RPM_THRESHOLD);
 
-  // Zündung an -> optional Logo
-  if (!ignitionBefore && g_ignitionOn && cfg.logoOnIgnitionOn)
+  // Nur eine Logo-Animation pro Zyklus
+  if (!g_logoPlayedThisCycle)
   {
-    if (nowMs - g_lastLogoMs > LOGO_COOLDOWN_MS)
+    // Zündung an
+    if (!ignitionBefore && g_ignitionOn && cfg.logoOnIgnitionOn)
     {
-      Serial.println("[MLOGO] Zündung an – Animation");
-      showMLogoAnimation();
-      g_lastLogoMs = nowMs;
+      if (nowMs - g_lastLogoMs > LOGO_COOLDOWN_MS)
+      {
+        Serial.println("[MLOGO] Zündung an – Animation");
+        g_logoPlayedThisCycle = true;
+        g_leavingPlayedThisCycle = false;
+        g_lastLogoMs = nowMs;
+        showMLogoAnimation();
+      }
+    }
+    // Motorstart
+    else if (!engineBefore && g_engineRunning && cfg.logoOnEngineStart)
+    {
+      if (nowMs - g_lastLogoMs > LOGO_COOLDOWN_MS)
+      {
+        Serial.println("[MLOGO] Motorstart – Animation");
+        g_logoPlayedThisCycle = true;
+        g_leavingPlayedThisCycle = false;
+        g_lastLogoMs = nowMs;
+        showMLogoAnimation();
+      }
     }
   }
 
-  // Motorstart -> optional Logo
-  if (!engineBefore && g_engineRunning && cfg.logoOnEngineStart)
-  {
-    if (nowMs - g_lastLogoMs > LOGO_COOLDOWN_MS)
-    {
-      Serial.println("[MLOGO] Motorstart – Animation");
-      showMLogoAnimation();
-      g_lastLogoMs = nowMs;
-    }
-  }
-
-  if (!g_testActive)
+  if (!g_testActive && !g_animationActive)
   {
     updateRpmBar(rpm);
   }
@@ -590,7 +605,11 @@ static void notifyCallback(
       }
       if (c == '>')
       {
-        Serial.println(">");
+        // OBD ist bereit -> direkt neue RPM-Anfrage
+        if (!g_testActive && g_connected && g_charWrite)
+        {
+          sendObdCommand("010C");
+        }
       }
     }
     else
@@ -620,11 +639,14 @@ class MyClientCallback : public BLEClientCallbacks
     g_engineRunning = false;
     setStatusLED(false);
 
-    if (wasIgnition && cfg.logoOnIgnitionOff)
+    if (wasIgnition && cfg.logoOnIgnitionOff && !g_leavingPlayedThisCycle)
     {
-      Serial.println("[MLOGO] Disconnect – Leaving-Animation");
+      g_leavingPlayedThisCycle = true;
       showMLogoLeavingAnimation();
     }
+
+    // Neuer Zyklus möglich
+    g_logoPlayedThisCycle = false;
   }
 };
 
@@ -647,6 +669,10 @@ bool connectToObd()
     return false;
   }
 
+  // Verbindung steht
+  g_connected = true;
+  setStatusLED(true);
+
   Serial.println("✅ Verbunden, suche Service FFF0...");
 
   BLERemoteService *pService = g_client->getService(SERVICE_UUID);
@@ -654,6 +680,8 @@ bool connectToObd()
   {
     Serial.println("❌ Service FFF0 nicht gefunden, trenne.");
     g_client->disconnect();
+    g_connected = false;
+    setStatusLED(false);
     return false;
   }
 
@@ -664,6 +692,8 @@ bool connectToObd()
   {
     Serial.println("❌ Write-/Notify-Characteristic nicht gefunden, trenne.");
     g_client->disconnect();
+    g_connected = false;
+    setStatusLED(false);
     return false;
   }
 
@@ -678,16 +708,20 @@ bool connectToObd()
     Serial.println("WARNUNG: Notify-Characteristic kann nicht notify-en.");
   }
 
-  Serial.println("🎉 BLE-Verbindung steht! Serial-Monitor kann weiterhin AT/OBD-Befehle schicken.");
+  Serial.println("🎉 BLE-Verbindung steht! Starte erste RPM-Anfrage...");
+
+  // Erste RPM-Anfrage anstoßen -> danach übernimmt notifyCallback mit '>'
+  sendObdCommand("010C");
+
   return true;
 }
 
 // ================== OBD-Befehl senden =======================
 void sendObdCommand(const String &cmd)
 {
-  if (!g_connected || !g_charWrite)
+  if (!g_charWrite)
   {
-    Serial.println("\r\n[!] Nicht verbunden, kann nicht senden.");
+    Serial.println("\r\n[!] Write-Char nicht verfügbar, kann nicht senden.");
     return;
   }
 
@@ -700,15 +734,13 @@ void sendObdCommand(const String &cmd)
   unsigned long nowMs = millis();
   bool isRpmCmd = (cmd == "010C");
 
-  // Manuelle Befehle immer loggen, RPM-Requests nur alle 2,5 s
-  if (!isRpmCmd || (nowMs - g_lastTxLogMs > TX_LOG_INTERVAL_MS))
+  // Nur manuelle / nicht-RPM-Befehle loggen (RPM würde sonst spammen)
+  if (!isRpmCmd)
   {
     String info = cmd + " @ " + String(nowMs / 1000) + "s";
     Serial.print("[TX] ");
     Serial.println(info);
-
-    g_lastTxInfo = info; // fürs Web-UI
-    g_lastTxLogMs = nowMs;
+    g_lastTxInfo = info;
   }
 
   g_charWrite->writeValue((uint8_t *)s.data(), s.size(), false);
@@ -968,10 +1000,8 @@ void handleBrightness()
     cfg.brightness = b;
     strip.setBrightness(cfg.brightness);
 
-    // Live-Preview: M-Logo in aktueller Helligkeit
     showMLogoPreview();
 
-    // merken, dass Preview aktiv ist + Zeitstempel setzen
     g_brightnessPreviewActive = true;
     g_lastBrightnessChangeMs = millis();
   }
@@ -996,11 +1026,9 @@ void setup()
   Serial.println();
   Serial.println("=== ESP32 BLE-OBD ShiftLight + WebUI ===");
 
-  // Debug-Strings initialisieren
   g_lastTxInfo = "–";
   g_lastObdInfo = "–";
 
-  // ---- WiFi AP starten ----
   WiFi.mode(WIFI_AP);
   WiFi.softAP(AP_SSID, AP_PASS);
   IPAddress ip = WiFi.softAPIP();
@@ -1009,7 +1037,6 @@ void setup()
   Serial.print("AP IP: ");
   Serial.println(ip);
 
-  // Webserver-Routen
   server.on("/", HTTP_GET, handleRoot);
   server.on("/save", HTTP_POST, handleSave);
   server.on("/test", HTTP_POST, handleTest);
@@ -1017,7 +1044,6 @@ void setup()
   server.begin();
   Serial.println("Webserver gestartet (http://192.168.4.1/)");
 
-  // ---- BLE/OBD ----
   BLEDevice::init("ESP32-OBD-BLE");
   BLEDevice::setPower(ESP_PWR_LVL_P7);
 
@@ -1041,10 +1067,14 @@ void loop()
     g_ignitionOn = false;
     g_engineRunning = false;
 
-    if (cfg.logoOnIgnitionOff)
+    if (cfg.logoOnIgnitionOff && !g_leavingPlayedThisCycle)
     {
+      g_leavingPlayedThisCycle = true;
       showMLogoLeavingAnimation();
     }
+
+    // Neuer Zyklus -> Logo wieder erlaubt
+    g_logoPlayedThisCycle = false;
   }
 
   static unsigned long lastRetry = 0;
@@ -1070,7 +1100,6 @@ void loop()
 
       if (t < 0.25f)
       {
-        // 1) Einmal schnell hoch und wieder runter (0 -> max -> 0)
         float tt = t / 0.25f;            // 0..1
         float pct = sinf(tt * 3.14159f); // 0..1..0
         if (pct < 0.0f)
@@ -1079,14 +1108,12 @@ void loop()
       }
       else if (t < 0.70f)
       {
-        // 2) Langsam hochfahren (0 -> max) mit Smoothstep
         float tt = (t - 0.25f) / 0.45f; // 0..1
         if (tt < 0.0f)
           tt = 0.0f;
         if (tt > 1.0f)
           tt = 1.0f;
 
-        // Smoothstep: 3x^2 - 2x^3
         float pct = tt * tt * (3.0f - 2.0f * tt);
         if (pct < 0.0f)
           pct = 0.0f;
@@ -1097,15 +1124,14 @@ void loop()
       }
       else
       {
-        // 3) Langsamer Abfall von max -> 0 mit leichtem Wobble
         float tt = (t - 0.70f) / 0.30f; // 0..1
         if (tt < 0.0f)
           tt = 0.0f;
         if (tt > 1.0f)
           tt = 1.0f;
 
-        float base = 1.0f - tt;                            // linear 1 -> 0
-        float wobble = 0.05f * sinf(tt * 3.14159f * 4.0f); // kleines Flackern
+        float base = 1.0f - tt;
+        float wobble = 0.05f * sinf(tt * 3.14159f * 4.0f);
         float pct = base + wobble;
 
         if (pct < 0.0f)
@@ -1118,12 +1144,6 @@ void loop()
 
       updateRpmBar(simRpm);
     }
-  }
-
-  if (!g_testActive && g_connected && g_charWrite && (now - g_lastRpmRequest > RPM_INTERVAL_MS))
-  {
-    g_lastRpmRequest = now;
-    sendObdCommand("010C");
   }
 
   while (Serial.available())
@@ -1146,5 +1166,6 @@ void loop()
     }
   }
 
-  delay(5);
+  // Kein künstliches delay nötig, aber 1ms schadet nicht
+  delay(1);
 }
