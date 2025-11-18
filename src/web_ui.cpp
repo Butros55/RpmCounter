@@ -9,6 +9,7 @@
 #include "led_bar.h"
 #include "logo_anim.h"
 #include "state.h"
+#include "display.h"
 
 namespace
 {
@@ -224,6 +225,16 @@ namespace
         }
 
         page += F("</form>");
+
+        if (g_devMode)
+        {
+            page += F("<div class='section'>");
+            page += F("<div class='section-title'>Display</div>");
+            page += F("<form method='POST' action='/dev/display-logo'>");
+            page += F("<button type='submit'>BMW Logo anzeigen</button>");
+            page += F("</form>");
+            page += F("</div>");
+        }
 
         page += F("<div class='small' style='text-align:center;margin-top:16px;'>");
         page += WiFi.softAPIP().toString();
@@ -624,6 +635,21 @@ namespace
         server.sendHeader("Location", "/settings");
         server.send(303);
     }
+
+    void handleDevDisplayLogo()
+    {
+        g_lastHttpMs = millis();
+
+        if (!g_devMode)
+        {
+            server.send(403, "text/plain", "Forbidden");
+            return;
+        }
+
+        displayShowTestLogo();
+        server.sendHeader("Location", "/");
+        server.send(303);
+    }
 }
 
 void initWifiAP()
@@ -648,6 +674,7 @@ void initWebUi()
     server.on("/status", HTTP_GET, handleStatus);
     server.on("/settings", HTTP_GET, handleSettingsGet);
     server.on("/settings", HTTP_POST, handleSettingsSave);
+    server.on("/dev/display-logo", HTTP_POST, handleDevDisplayLogo);
 
     server.begin();
     Serial.println("Webserver gestartet (http://192.168.4.1/)");
