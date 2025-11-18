@@ -867,7 +867,7 @@ namespace
         json += ",\"vehicleModel\":\"" + jsonEscape(g_vehicleModel) + "\"";
         json += ",\"vehicleDiag\":\"" + jsonEscape(g_vehicleDiagStatus) + "\"";
         json += ",\"vehicleInfoReady\":" + String(g_vehicleInfoAvailable ? "true" : "false");
-        json += "\"}";
+        json += "}";
         server.send(200, "application/json", json);
     }
 
