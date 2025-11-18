@@ -79,49 +79,39 @@ namespace
         String redHex = colorToHex(cfg.redColor);
         page += F("<!DOCTYPE html><html><head><meta charset='utf-8'>");
         page += F("<meta name='viewport' content='width=device-width,initial-scale=1'>");
-        page += F("<title>ShiftLight Setup</title>");
-        page += F("<style>"
-                  "body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#111;"
-                  "color:#eee;padding:16px;margin:0;}"
-                  "h1{font-size:20px;margin:0 0 12px 0;display:flex;"
-                  "align-items:center;justify-content:space-between;}"
-                  "h2{font-size:18px;margin:18px 0 10px 0;}"
-                  "label{display:block;margin-top:8px;}"
-                  "input,select{width:100%;padding:6px;margin-top:4px;"
-                  "border-radius:6px;border:1px solid #444;background:#222;color:#eee;}"
-                  "input[type=range]{padding:0;margin-top:4px;}"
-                  "button{margin-top:12px;width:100%;padding:10px;border:none;border-radius:6px;"
-                  "background:#0af;color:#000;font-weight:bold;font-size:14px;}"
-                  "button:disabled{background:#555;color:#888;}"
-                  ".btn-danger{background:#d33;color:#fff;}"
-                  ".row{margin-bottom:6px;}"
-                  ".small{font-size:12px;color:#aaa;}"
-                  ".section{margin-top:12px;padding:10px 12px;border-radius:8px;"
-                  "background:#181818;border:1px solid #333;}"
-                  ".section-title{font-weight:600;margin-bottom:8px;font-size:18px;letter-spacing:0.3px;}"
-                  ".section-title small{display:block;font-size:12px;font-weight:400;color:#aaa;}"
-                  ".toggle-row{display:flex;justify-content:space-between;align-items:center;margin-top:8px;}"
-                  ".toggle-label{font-size:14px;}"
-                  ".switch{position:relative;display:inline-block;width:46px;height:24px;margin-left:8px;}"
-                  ".switch input{opacity:0;width:0;height:0;}"
-                  ".slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;"
-                  "background:#555;transition:.2s;border-radius:24px;}"
-                  ".slider:before{position:absolute;content:'';height:18px;width:18px;left:3px;top:3px;"
-                  "background:#fff;transition:.2s;border-radius:50%;}"
-                  ".switch input:checked + .slider{background:#0af;}"
-                  ".switch input:checked + .slider:before{transform:translateX(22px);}" 
-                  ".status-line{font-size:12px;color:#ccc;margin-top:4px;}"
-                  ".spinner{display:inline-block;width:12px;height:12px;border-radius:50%;"
-                  "border:2px solid rgba(255,255,255,0.2);border-top-color:#0af;"
-                  "animation:spin 1s linear infinite;margin-left:6px;}"
-                  ".hidden{display:none;}"
-                  ".color-row{border:1px solid #222;border-radius:6px;padding:8px;margin-top:8px;background:#151515;}"
-                  ".color-row h3{margin:0 0 6px 0;font-size:14px;color:#bbb;}"
-                  ".color-row label{margin-top:6px;font-size:12px;color:#aaa;}"
-                  ".color-row input[type=color]{padding:0;height:40px;}")
-                  "@keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}"
-                  "</style></head><body>");
-
+        page += "<title>ShiftLight Setup</title>";
+        page += F("<style>");
+        page += F("body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#111;color:#eee;padding:16px;margin:0;}");
+        page += F("h1{font-size:20px;margin:0 0 12px 0;display:flex;align-items:center;justify-content:space-between;}");
+        page += F("h2{font-size:18px;margin:18px 0 10px 0;}");
+        page += F("label{display:block;margin-top:8px;}");
+        page += F("input,select{width:100%;padding:6px;margin-top:4px;border-radius:6px;border:1px solid #444;background:#222;color:#eee;}");
+        page += F("input[type=range]{padding:0;margin-top:4px;}");
+        page += F("button{margin-top:12px;width:100%;padding:10px;border:none;border-radius:6px;background:#0af;color:#000;font-weight:bold;font-size:14px;}");
+        page += F("button:disabled{background:#555;color:#888;}");
+        page += F(".btn-danger{background:#d33;color:#fff;}");
+        page += F(".row{margin-bottom:6px;}");
+        page += F(".small{font-size:12px;color:#aaa;}");
+        page += F(".section{margin-top:12px;padding:10px 12px;border-radius:8px;background:#181818;border:1px solid #333;}");
+        page += F(".section-title{font-weight:600;margin-bottom:8px;font-size:18px;letter-spacing:0.3px;}");
+        page += F(".section-title small{display:block;font-size:12px;font-weight:400;color:#aaa;}");
+        page += F(".toggle-row{display:flex;justify-content:space-between;align-items:center;margin-top:8px;}");
+        page += F(".toggle-label{font-size:14px;}");
+        page += F(".switch{position:relative;display:inline-block;width:46px;height:24px;margin-left:8px;}");
+        page += F(".switch input{opacity:0;width:0;height:0;}");
+        page += F(".slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#555;transition:.2s;border-radius:24px;}");
+        page += F(".slider:before{position:absolute;content:'';height:18px;width:18px;left:3px;top:3px;background:#fff;transition:.2s;border-radius:50%;}");
+        page += F(".switch input:checked + .slider{background:#0af;}");
+        page += F(".switch input:checked + .slider:before{transform:translateX(22px);}");
+        page += F(".status-line{font-size:12px;color:#ccc;margin-top:4px;}");
+        page += F(".spinner{display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid rgba(255,255,255,0.2);border-top-color:#0af;animation:spin 1s linear infinite;margin-left:6px;}");
+        page += F(".hidden{display:none;}");
+        page += F(".color-row{border:1px solid #222;border-radius:6px;padding:8px;margin-top:8px;background:#151515;}");
+        page += F(".color-row h3{margin:0 0 6px 0;font-size:14px;color:#bbb;}");
+        page += F(".color-row label{margin-top:6px;font-size:12px;color:#aaa;}");
+        page += F(".color-row input[type=color]{padding:0;height:40px;}");
+        page += F("@keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}");
+        page += F("</style></head><body>");
         page += "<h1><span>ShiftLight Setup</span>"
                 "<a href=\"/settings\" style='text-decoration:none;color:#0af;font-size:20px;'>⚙️</a>"
                 "</h1>";
@@ -130,7 +120,6 @@ namespace
 
         page += F("<div class='section'>");
         page += F("<div class='section-title'>Allgemein</div>");
-
         page += F("<label>Mode</label><select name='mode'>");
         page += "<option value='0'";
         if (cfg.mode == 0)
@@ -153,7 +142,7 @@ namespace
         page += "<div class='small'>Wert: <span id='bval'>";
         page += String(cfg.brightness);
         page += "</span></div>";
-        page += "<input type='hidden' name='brightness' id='brightness' value='"; 
+        page += "<input type='hidden' name='brightness' id='brightness' value='";
         page += String(cfg.brightness);
         page += "'>";
 
@@ -208,7 +197,7 @@ namespace
         page += "<label id='greenEndLabel' data-fallback='Green'>";
         page += greenName;
         page += " End (% von Max RPM)</label>";
-        page += "<input type='range' name='greenEndPct' min='0' max='100' value='"; 
+        page += "<input type='range' name='greenEndPct' min='0' max='100' value='";
         page += String(cfg.greenEndPct);
         page += "' id='greenEndSlider' data-display='greenEndVal'>";
         page += "<div class='small'>Wert: <span id='greenEndVal'>";
@@ -218,7 +207,7 @@ namespace
         page += "<label id='yellowEndLabel' data-fallback='Yellow'>";
         page += yellowName;
         page += " End (% von Max RPM)</label>";
-        page += "<input type='range' name='yellowEndPct' min='0' max='100' value='"; 
+        page += "<input type='range' name='yellowEndPct' min='0' max='100' value='";
         page += String(cfg.yellowEndPct);
         page += "' id='yellowEndSlider' data-display='yellowEndVal'>";
         page += "<div class='small'>Wert: <span id='yellowEndVal'>";
@@ -228,7 +217,7 @@ namespace
         page += "<label id='blinkStartLabel' data-fallback='Red'>";
         page += redName;
         page += " Start (% von Max RPM)</label>";
-        page += "<input type='range' name='blinkStartPct' min='0' max='100' value='"; 
+        page += "<input type='range' name='blinkStartPct' min='0' max='100' value='";
         page += String(cfg.blinkStartPct);
         page += "' id='blinkStartSlider' data-display='blinkStartVal'>";
         page += "<div class='small'>Wert: <span id='blinkStartVal'>";
@@ -437,7 +426,7 @@ namespace
                   " btn.disabled=true;"
                   " var form=document.getElementById('mainForm');"
                   " var data=new FormData(form);"
-                  " fetch('/test',{method:'POST',body=data})"
+                  " fetch('/test',{method:'POST',body:data})"
                   "  .then(r=>r.text())"
                   "  .finally(()=>{btn.disabled=false;});"
                   "}"
@@ -544,7 +533,7 @@ namespace
                   ".slider:before{position:absolute;content:'';height:18px;width:18px;left:3px;top:3px;"
                   "background:#fff;transition:.2s;border-radius:50%;}"
                   ".switch input:checked + .slider{background:#0af;}"
-                  ".switch input:checked + .slider:before{transform:translateX(22px);}" 
+                  ".switch input:checked + .slider:before{transform:translateX(22px);}"
                   "button{margin-top:16px;width:100%;padding:10px;border:none;border-radius:6px;"
                   "background:#0af;color:#000;font-weight:bold;font-size:14px;}"
                   "</style></head><body>");
