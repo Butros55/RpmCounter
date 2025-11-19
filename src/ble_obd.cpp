@@ -7,6 +7,7 @@
 #include "led_bar.h"
 #include "logo_anim.h"
 #include "state.h"
+#include "vehicle_info.h"
 #include "utils.h"
 
 namespace
@@ -36,6 +37,8 @@ namespace
             }
         }
         compact.toUpperCase();
+
+        handleVehicleInfoResponse(compact);
 
         int idx = compact.indexOf("410C");
         if (idx < 0)
@@ -74,34 +77,34 @@ namespace
         bool ignitionBefore = g_ignitionOn;
         bool engineBefore = g_engineRunning;
 
-        g_ignitionOn = true;
-        g_engineRunning = (rpm > ENGINE_START_RPM_THRESHOLD);
+            g_ignitionOn = true;
+            g_engineRunning = (rpm > ENGINE_START_RPM_THRESHOLD);
 
-        if (!g_logoPlayedThisCycle)
-        {
-            if (!ignitionBefore && g_ignitionOn && cfg.logoOnIgnitionOn)
+            if (!ignitionBefore && g_ignitionOn)
             {
-                if (nowMs - g_lastLogoMs > LOGO_COOLDOWN_MS)
+                g_engineStartLogoShown = false;
+                if (cfg.logoOnIgnitionOn && nowMs - g_lastLogoMs > LOGO_COOLDOWN_MS && !g_ignitionLogoShown)
                 {
                     Serial.println("[MLOGO] Zündung an – Animation");
                     g_logoPlayedThisCycle = true;
                     g_leavingPlayedThisCycle = false;
                     g_lastLogoMs = nowMs;
+                    g_ignitionLogoShown = true;
                     showMLogoAnimation();
                 }
             }
-            else if (!engineBefore && g_engineRunning && cfg.logoOnEngineStart)
+            else if (!engineBefore && g_engineRunning)
             {
-                if (nowMs - g_lastLogoMs > LOGO_COOLDOWN_MS)
+                if (cfg.logoOnEngineStart && !g_engineStartLogoShown && nowMs - g_lastLogoMs > LOGO_COOLDOWN_MS)
                 {
                     Serial.println("[MLOGO] Motorstart – Animation");
                     g_logoPlayedThisCycle = true;
                     g_leavingPlayedThisCycle = false;
                     g_lastLogoMs = nowMs;
+                    g_engineStartLogoShown = true;
                     showMLogoAnimation();
                 }
             }
-        }
 
         if (!g_testActive && !g_animationActive)
         {
@@ -152,6 +155,7 @@ namespace
             g_ignitionOn = false;
             g_engineRunning = false;
             setStatusLED(false);
+            handleVehicleDisconnect();
 
             if (wasIgnition && cfg.logoOnIgnitionOff && !g_leavingPlayedThisCycle)
             {
@@ -160,6 +164,8 @@ namespace
             }
 
             g_logoPlayedThisCycle = false;
+            g_engineStartLogoShown = false;
+            g_ignitionLogoShown = false;
         }
     };
 }
@@ -214,6 +220,7 @@ bool connectToObd()
     }
 
     Serial.println("🎉 BLE-Verbindung steht! Serial-Monitor kann weiterhin AT/OBD-Befehle schicken.");
+    requestVehicleInfo();
     return true;
 }
 
@@ -265,14 +272,24 @@ void bleObdLoop()
 {
     unsigned long now = millis();
 
-    static unsigned long lastRetry = 0;
     const unsigned long RECONNECT_INTERVAL_MS = 5000;
     const unsigned long HTTP_GRACE_MS = 5000;
 
-    if (g_autoReconnect && !g_connected && now - lastRetry > RECONNECT_INTERVAL_MS && now - g_lastHttpMs > HTTP_GRACE_MS)
+    bool graceElapsed = (now - g_lastHttpMs > HTTP_GRACE_MS) || g_forceImmediateReconnect;
+    bool intervalElapsed = (now - g_lastBleRetryMs > RECONNECT_INTERVAL_MS) || g_forceImmediateReconnect;
+    if (g_autoReconnect && !g_connected && graceElapsed && intervalElapsed)
     {
-        lastRetry = now;
-        Serial.println("🔄 Verbindung verloren – versuche Reconnect (auto)...");
+        g_lastBleRetryMs = now;
+        bool immediate = g_forceImmediateReconnect;
+        g_forceImmediateReconnect = false;
+        if (immediate)
+        {
+            Serial.println("🔄 Manueller Sofort-Reconnect nach Save.");
+        }
+        else
+        {
+            Serial.println("🔄 Verbindung verloren – versuche Reconnect (auto)...");
+        }
         connectToObd();
     }
 
