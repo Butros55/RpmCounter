@@ -49,7 +49,7 @@ namespace
                   ".slider:before{position:absolute;content:'';height:18px;width:18px;left:3px;top:3px;"
                   "background:#fff;transition:.2s;border-radius:50%;}"
                   ".switch input:checked + .slider{background:#0af;}"
-                  ".switch input:checked + .slider:before{transform:translateX(22px);}" 
+                  ".switch input:checked + .slider:before{transform:translateX(22px);}"
                   ".status-line{font-size:12px;color:#ccc;margin-top:4px;}"
                   ".spinner{display:inline-block;width:12px;height:12px;border-radius:50%;"
                   "border:2px solid rgba(255,255,255,0.2);border-top-color:#0af;"
@@ -192,6 +192,8 @@ namespace
             page += F("</span> / Max gesehen: <span id='rpmMaxVal'>");
             page += String(g_maxSeenRpm);
             page += F("</span></div>");
+            page += F("<button type='button' id='btnDisplayLogo'>BMW Logo auf Display anzeigen</button>");
+            page += F("<div class='small'>Zeigt kurz das BMW-Logo auf dem Display (nur im Entwicklermodus).</div>");
 
             page += F("</div>");
 
@@ -225,16 +227,6 @@ namespace
         }
 
         page += F("</form>");
-
-        if (g_devMode)
-        {
-            page += F("<div class='section'>");
-            page += F("<div class='section-title'>Display</div>");
-            page += F("<form method='POST' action='/dev/display-logo'>");
-            page += F("<button type='submit'>BMW Logo anzeigen</button>");
-            page += F("</form>");
-            page += F("</div>");
-        }
 
         page += F("<div class='small' style='text-align:center;margin-top:16px;'>");
         page += WiFi.softAPIP().toString();
@@ -327,6 +319,8 @@ namespace
                   " if(bc) bc.addEventListener('click',()=>postSimple('/connect'));"
                   " var bd=document.getElementById('btnDisconnect');"
                   " if(bd) bd.addEventListener('click',()=>postSimple('/disconnect'));"
+                  " var bdsp=document.getElementById('btnDisplayLogo');"
+                  " if(bdsp) bdsp.addEventListener('click',()=>postSimple('/dev/display-logo'));"
                   " fetchStatus();"
                   " setInterval(fetchStatus,1000);"
                   "}"
@@ -361,7 +355,7 @@ namespace
                   ".slider:before{position:absolute;content:'';height:18px;width:18px;left:3px;top:3px;"
                   "background:#fff;transition:.2s;border-radius:50%;}"
                   ".switch input:checked + .slider{background:#0af;}"
-                  ".switch input:checked + .slider:before{transform:translateX(22px);}" 
+                  ".switch input:checked + .slider:before{transform:translateX(22px);}"
                   "button{margin-top:16px;width:100%;padding:10px;border:none;border-radius:6px;"
                   "background:#0af;color:#000;font-weight:bold;font-size:14px;}"
                   "</style></head><body>");
@@ -635,7 +629,7 @@ namespace
         server.sendHeader("Location", "/settings");
         server.send(303);
     }
-
+    
     void handleDevDisplayLogo()
     {
         g_lastHttpMs = millis();
@@ -647,8 +641,8 @@ namespace
         }
 
         displayShowTestLogo();
-        server.sendHeader("Location", "/");
-        server.send(303);
+        // Kein Redirect mehr, einfache OK-Antwort für fetch()
+        server.send(200, "text/plain", "OK");
     }
 }
 
