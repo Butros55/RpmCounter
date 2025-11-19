@@ -12,6 +12,9 @@ namespace
     bool modelComplete = false;
     bool diagComplete = false;
 
+    // optionaler Zeitstempel, falls du später noch Timeouts nutzen willst
+    unsigned long requestStartMs = 0;
+
     String hexToAscii(const String &hex)
     {
         String out;
@@ -39,6 +42,10 @@ namespace
     }
 }
 
+// -----------------------------------------------------------------------------
+// Getter für WebUI / Settings
+// -----------------------------------------------------------------------------
+
 String readVehicleVin()
 {
     return g_vehicleVin;
@@ -53,6 +60,10 @@ String readVehicleDiagStatus()
 {
     return g_vehicleDiagStatus;
 }
+
+// -----------------------------------------------------------------------------
+// Abruf starten (bei Connect oder über Settings-Button)
+// -----------------------------------------------------------------------------
 
 void requestVehicleInfo(bool forceRestart)
 {
@@ -71,23 +82,25 @@ void requestVehicleInfo(bool forceRestart)
     g_vehicleInfoRequestRunning = true;
     g_vehicleInfoAvailable = false;
 
-    // Initiale Platzhaltertexte
+    requestStartMs = millis();
+
+    // Platzhaltertexte, damit UI sofort etwas hat
     g_vehicleVin = F("VIN wird gelesen...");
     g_vehicleModel = F("Fahrzeugdaten werden geladen...");
     g_vehicleDiagStatus = F("Diagnose wird gelesen...");
     g_vehicleInfoLastUpdate = millis();
 
-    // Mode 09 – VIN & ECU Name (falls das Steuergerät es unterstützt)
+    // Mode 09 – VIN & ECU Name (falls Steuergerät das unterstützt)
     const int RETRIES = 3;
     for (int i = 0; i < RETRIES; ++i)
     {
-        sendObdCommand("0902");
+        sendObdCommand("0902"); // VIN
         delay(30);
     }
 
     for (int i = 0; i < RETRIES; ++i)
     {
-        sendObdCommand("0904");
+        sendObdCommand("0904"); // ECU / Modellname
         delay(30);
     }
 
@@ -99,6 +112,11 @@ void requestVehicleInfo(bool forceRestart)
     }
 }
 
+// -----------------------------------------------------------------------------
+// Wird aus processObdLine() aufgerufen
+// compactLine = ohne Leerzeichen, Großbuchstaben (machst du bereits so)
+// -----------------------------------------------------------------------------
+
 void handleVehicleInfoResponse(const String &compactLine)
 {
     if (!g_vehicleInfoRequestRunning)
@@ -107,14 +125,12 @@ void handleVehicleInfoResponse(const String &compactLine)
     // VIN (Mode 09 PID 02) – Antwort 49 02 ...
     if (compactLine.startsWith("4902"))
     {
+        // alles nach "4902xx" ab Byte 6 ist Nutzlast
         String payload = compactLine.substring(6);
         vinHexBuffer += payload;
 
-        // Frame-Index im Byte 4 (heuristisch, kann je nach ECU anders sein)
-        int frameIndex = hexByte(compactLine, 4);
-
-        // Wenn genug Frames da sind -> VIN dekodieren
-        if (frameIndex >= 3)
+        // VIN hat 17 Zeichen → 17 * 2 = 34 Hexzeichen
+        if (!vinComplete && vinHexBuffer.length() >= 34)
         {
             String vin = hexToAscii(vinHexBuffer);
             if (vin.length() > 0)
@@ -136,9 +152,12 @@ void handleVehicleInfoResponse(const String &compactLine)
         String payload = compactLine.substring(6);
         modelHexBuffer += payload;
 
-        int frameIndex = hexByte(compactLine, 4);
+        // Heuristik: nach zweitem Frame ist meistens alles da,
+        // zusätzlich auf ausreichend Länge prüfen
+        static int modelFrameCount = 0;
+        modelFrameCount++;
 
-        if (frameIndex >= 2)
+        if (!modelComplete && (modelFrameCount >= 2 || modelHexBuffer.length() >= 32))
         {
             String model = hexToAscii(modelHexBuffer);
             if (model.length() > 0)
@@ -163,7 +182,6 @@ void handleVehicleInfoResponse(const String &compactLine)
             bool milOn = (statusByte & 0x80) != 0;
             int dtcCount = statusByte & 0x7F;
 
-            // mit / ohne ⚠️ Emoji
             if (milOn)
             {
                 g_vehicleDiagStatus = String("⚠️ MIL an, DTCs: ") + String(dtcCount);
@@ -181,9 +199,8 @@ void handleVehicleInfoResponse(const String &compactLine)
         diagComplete = true;
         g_vehicleInfoLastUpdate = millis();
 
-        // Falls VIN/Modell vom Steuergerät NICHT kommen:
-        // -> beim ersten erfolgreichen Diagnose-Frame auf sinnvolle Defaults setzen,
-        // damit der Status nicht ewig auf "Abruf läuft..." hängt.
+        // Fallback: falls das Steuergerät keine 09-Frames liefert,
+        // verhindern wir "hängt auf 'wird gelesen...'"
         if (!vinComplete)
         {
             if (g_vehicleVin == F("VIN wird gelesen..."))
@@ -206,18 +223,25 @@ void handleVehicleInfoResponse(const String &compactLine)
     }
 }
 
+// -----------------------------------------------------------------------------
+// Reset bei BLE-Disconnect
+// -----------------------------------------------------------------------------
+
 void handleVehicleDisconnect()
 {
     g_vehicleInfoRequestRunning = false;
     g_vehicleInfoAvailable = false;
     g_vehicleInfoLastUpdate = 0;
+
     vinHexBuffer = "";
     modelHexBuffer = "";
+
     vinComplete = false;
     modelComplete = false;
     diagComplete = false;
+    requestStartMs = 0;
 
-    // Optional: Texte zurücksetzen
+    // Texte zurücksetzen – wird in Settings & /status direkt angezeigt
     g_vehicleVin = F("Noch nicht gelesen");
     g_vehicleModel = F("Unbekannt");
     g_vehicleDiagStatus = F("Keine Daten");

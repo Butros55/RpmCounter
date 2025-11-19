@@ -103,6 +103,7 @@ namespace
     String htmlPage()
     {
         String page;
+        page.reserve(16000);
 
         // Namen der Farben – aus Config, sonst Standard
         String color1Name = (cfg.greenLabel.length() > 0) ? cfg.greenLabel : String("Farbe 1");
@@ -717,7 +718,7 @@ namespace
             " var bdsp=document.getElementById('btnDisplayLogo');"
             " if(bdsp) bdsp.addEventListener('click',()=>postSimple('/dev/display-logo'));"
             " fetchStatus();"
-            " setInterval(fetchStatus,1000);"
+            " setInterval(fetchStatus,1500);"
             " setInterval(()=>updateSpinnerVisibility(false),1000);"
             "}"
 
@@ -1366,7 +1367,9 @@ namespace
             vehicleAge = (now - g_vehicleInfoLastUpdate) / 1000;
         }
 
-        String json = "{";
+        String json;
+        json.reserve(512); // reicht locker für unser kleines JSON
+        json = "{";
         json += "\"rpm\":" + String(g_currentRpm);
         json += ",\"maxRpm\":" + String(g_maxSeenRpm);
         json += ",\"speed\":" + String(g_vehicleSpeedKmh);
