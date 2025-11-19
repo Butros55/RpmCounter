@@ -5,13 +5,17 @@
 #include <Adafruit_ST7789.h>
 #include <math.h>
 
+constexpr int TFT_MOSI = 23;
+constexpr int TFT_SCLK = 18;
+constexpr int TFT_CS = 15;
+constexpr int TFT_DC = 4;
+constexpr int TFT_RST = 16;
+
+// TFT-Objekt MUSS vor dem Namespace definiert werden!
+Adafruit_ST7789 tft(TFT_CS, TFT_DC, TFT_RST);
+
 namespace
 {
-    constexpr int TFT_MOSI = 23;
-    constexpr int TFT_SCLK = 18;
-    constexpr int TFT_CS = 15;
-    constexpr int TFT_DC = 4;
-    constexpr int TFT_RST = 16;
 
     constexpr int DIGIT_WIDTH = 150;
     constexpr int DIGIT_HEIGHT = 200;
@@ -27,16 +31,16 @@ namespace
     };
 
     constexpr SegmentPattern DIGIT_PATTERNS[10] = {
-        {{true, true, true, true, true, true, false}},  // 0
+        {{true, true, true, true, true, true, false}},     // 0
         {{false, true, true, false, false, false, false}}, // 1
-        {{true, true, false, true, true, false, true}}, // 2
-        {{true, true, true, true, false, false, true}}, // 3
-        {{false, true, true, false, false, true, true}}, // 4
-        {{true, false, true, true, false, true, true}}, // 5
-        {{true, false, true, true, true, true, true}}, // 6
-        {{true, true, true, false, false, false, false}}, // 7
-        {{true, true, true, true, true, true, true}}, // 8
-        {{true, true, true, true, false, true, true}} // 9
+        {{true, true, false, true, true, false, true}},    // 2
+        {{true, true, true, true, false, false, true}},    // 3
+        {{false, true, true, false, false, true, true}},   // 4
+        {{true, false, true, true, false, true, true}},    // 5
+        {{true, false, true, true, true, true, true}},     // 6
+        {{true, true, true, false, false, false, false}},  // 7
+        {{true, true, true, true, true, true, true}},      // 8
+        {{true, true, true, true, false, true, true}}      // 9
     };
 
     void drawSegment(bool horizontal, int x, int y, int length, int thickness, uint16_t color)
@@ -124,8 +128,6 @@ namespace
     }
 }
 
-Adafruit_ST7789 tft(TFT_CS, TFT_DC, TFT_RST);
-
 void displayInit()
 {
     SPI.begin(TFT_SCLK, -1, TFT_MOSI, TFT_CS);
@@ -210,4 +212,3 @@ void displaySetShiftBlink(bool active)
     g_displayBlink = active;
     renderGearDisplay();
 }
-

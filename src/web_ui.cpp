@@ -142,14 +142,23 @@ namespace
             ".status-line{font-size:12px;color:#ccc;margin-top:4px;}"
             ".spinner{display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid rgba(255,255,255,0.2);border-top-color:#0af;animation:spin 1s linear infinite;margin-left:6px;}"
             ".hidden{display:none;}"
-            ".color-row{border:1px solid #222;border-radius:6px;padding:8px;margin-top:8px;background:#151515;}"
-            ".color-row h3{margin:0 0 4px 0;font-size:14px;color:#bbb;}"
-            ".color-row .small{margin-top:4px;}"
-            ".color-row input[type=color]{padding:0;height:40px;border-radius:4px;border:1px solid #444;background:#111;}"
+            ".color-row{display:flex;justify-content:space-between;gap:12px;margin-top:10px;padding:10px;border-radius:8px;background:#151515;border:1px solid #222;}"
+            ".color-swatch{flex:1;text-align:center;}"
+            ".color-swatch-title{font-size:12px;color:#bbb;margin-bottom:4px;}"
+            ".color-circle{padding:0;border-radius:50%;border:2px solid #444;background:#111;width:44px;height:44px;}"
+            ".color-circle::-webkit-color-swatch{border:none;border-radius:50%;padding:0;}"
+            ".color-circle::-moz-color-swatch{border:none;border-radius:50%;padding:0;}"
+            ".color-name{margin-top:4px;font-size:11px;color:#aaa;}"
             "@keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}"
             ".range-group{margin-top:10px;padding-top:8px;border-top:1px solid #222;}"
             ".range-group:first-child{border-top:none;padding-top:0;}"
             ".disabled-field{opacity:0.5;}"
+            ".rpm-label{display:inline-block;margin-bottom:4px;font-weight:500;}"
+            ".rpm-label-title{font-size:12px;opacity:0.9;display:block;}"
+            ".rpm-label-range{font-size:12px;opacity:0.8;display:block;}"
+            ".led-preview-title{margin-top:10px;margin-bottom:4px;font-size:12px;color:#aaa;}"
+            ".led-preview{display:flex;flex-wrap:nowrap;align-items:center;justify-content:center;padding:6px 4px;border-radius:6px;background:#151515;border:1px solid #222;}"
+            ".led-dot{border-radius:50%;background:#333;flex:0 0 auto;}"
             "</style></head><body>");
 
         page += "<h1><span>ShiftLight Setup</span>"
@@ -189,45 +198,52 @@ namespace
         page += String(cfg.brightness);
         page += "'>";
 
-        // Farben – nur Color-Picker, Name wird automatisch aus der Farbe generiert
+        // Farben – Color-Picker als Kreise nebeneinander
         page += F("<div class='color-row'>");
-        page += F("<h3>Low RPM</h3>");
-        page += "<input type='color' id='greenColorInput' name='greenColor' value='";
+
+        // Low RPM
+        page += F("<div class='color-swatch'>");
+        page += F("<div class='color-swatch-title'>Low RPM</div>");
+        page += "<input type='color' class='color-circle' id='greenColorInput' name='greenColor' value='";
         page += greenHex;
         page += "'>";
-        page += "<div class='small'><span id='color1Name'>";
+        page += "<div class='color-name' id='color1Name'>";
         page += color1Name;
-        page += "</span></div>";
+        page += "</div>";
         page += "<input type='hidden' name='greenLabel' id='greenLabelHidden' value='";
         page += color1Name;
         page += "'>";
         page += F("</div>");
 
-        page += F("<div class='color-row'>");
-        page += F("<h3>Mid RPM</h3>");
-        page += "<input type='color' id='yellowColorInput' name='yellowColor' value='";
+        // Mid RPM
+        page += F("<div class='color-swatch'>");
+        page += F("<div class='color-swatch-title'>Mid RPM</div>");
+        page += "<input type='color' class='color-circle' id='yellowColorInput' name='yellowColor' value='";
         page += yellowHex;
         page += "'>";
-        page += "<div class='small'><span id='color2Name'>";
+        page += "<div class='color-name' id='color2Name'>";
         page += color2Name;
-        page += "</span></div>";
+        page += "</div>";
         page += "<input type='hidden' name='yellowLabel' id='yellowLabelHidden' value='";
         page += color2Name;
         page += "'>";
         page += F("</div>");
 
-        page += F("<div class='color-row'>");
-        page += F("<h3>Shift / Warnung</h3>");
-        page += "<input type='color' id='redColorInput' name='redColor' value='";
+        // Shift / Warnung
+        page += F("<div class='color-swatch'>");
+        page += F("<div class='color-swatch-title'>Shift / Warnung</div>");
+        page += "<input type='color' class='color-circle' id='redColorInput' name='redColor' value='";
         page += redHex;
         page += "'>";
-        page += "<div class='small'><span id='color3Name'>";
+        page += "<div class='color-name' id='color3Name'>";
         page += color3Name;
-        page += "</span></div>";
+        page += "</div>";
         page += "<input type='hidden' name='redLabel' id='redLabelHidden' value='";
         page += color3Name;
         page += "'>";
         page += F("</div>");
+
+        page += F("</div>"); // color-row
 
         page += F("</div>"); // section Allgemein
 
@@ -254,9 +270,12 @@ namespace
         page += "'>";
         page += F("</div>");
 
-        // Farbe 1
+        // Low RPM Bereich
         page += F("<div class='range-group'>");
-        page += "<label id='greenEndLabel' data-fallback='Farbe 1'>Farbe 1 End (% von Max RPM)</label>";
+        page += "<label id='greenEndLabel' class='rpm-label' data-slot='1'>";
+        page += "<span class='rpm-label-title'>Low RPM</span>";
+        page += "<span class='rpm-label-range'>End (% von Max RPM)</span>";
+        page += "</label>";
         page += "<input type='range' name='greenEndPct' min='0' max='100' value='";
         page += String(cfg.greenEndPct);
         page += "' id='greenEndSlider' data-display='greenEndVal'>";
@@ -265,9 +284,12 @@ namespace
         page += "%</span></div>";
         page += F("</div>");
 
-        // Farbe 2
+        // Mid RPM Bereich
         page += F("<div class='range-group'>");
-        page += "<label id='yellowEndLabel' data-fallback='Farbe 2'>Farbe 2 End (% von Max RPM)</label>";
+        page += "<label id='yellowEndLabel' class='rpm-label' data-slot='2'>";
+        page += "<span class='rpm-label-title'>Mid RPM</span>";
+        page += "<span class='rpm-label-range'>End (% von Max RPM)</span>";
+        page += "</label>";
         page += "<input type='range' name='yellowEndPct' min='0' max='100' value='";
         page += String(cfg.yellowEndPct);
         page += "' id='yellowEndSlider' data-display='yellowEndVal'>";
@@ -276,9 +298,12 @@ namespace
         page += "%</span></div>";
         page += F("</div>");
 
-        // Farbe 3
+        // Shift / Warnung Bereich
         page += F("<div class='range-group'>");
-        page += "<label id='blinkStartLabel' data-fallback='Farbe 3'>Farbe 3 Start (% von Max RPM)</label>";
+        page += "<label id='blinkStartLabel' class='rpm-label' data-slot='3'>";
+        page += "<span class='rpm-label-title'>Shift / Warnung</span>";
+        page += "<span class='rpm-label-range'>Start (% von Max RPM)</span>";
+        page += "</label>";
         page += "<input type='range' name='blinkStartPct' min='0' max='100' value='";
         page += String(cfg.blinkStartPct);
         page += "' id='blinkStartSlider' data-display='blinkStartVal'>";
@@ -286,6 +311,12 @@ namespace
         page += String(cfg.blinkStartPct);
         page += "%</span></div>";
         page += F("</div>");
+
+        // LED-Preview auf Basis von NUM_LEDS
+        page += F("<div class='led-preview-title small'>LED-Vorschau</div>");
+        page += "<div id='ledPreview' class='led-preview' data-led-count='";
+        page += String(NUM_LEDS);
+        page += "'></div>";
 
         page += F("</div>"); // section Drehzahl-Bereich
 
@@ -692,6 +723,160 @@ namespace
 
             "document.addEventListener('DOMContentLoaded',initUI);"
             "</script>");
+        page += F(
+            "<script>"
+            // --- Blink-Preview Steuerung ---
+            "var blinkPreviewEndTs=0;"
+            "var blinkTimerId=null;"
+            "var blinkPhase=false;"
+
+            "function triggerBlinkPreview(){"
+            "  blinkPreviewEndTs=Date.now()+2500;" // 2.5 Sekunden Blinken
+            "  if(blinkTimerId===null){"
+            "    blinkTimerId=setInterval(function(){"
+            "      blinkPhase=!blinkPhase;"
+            "      if(Date.now()>=blinkPreviewEndTs){"
+            "        clearInterval(blinkTimerId);"
+            "        blinkTimerId=null;"
+            "        blinkPhase=false;"
+            "      }"
+            "      updateLedPreview();"
+            "    },200);" // Blink-Frequenz ~5 Hz
+            "  }"
+            "}"
+
+            // --- LED-Preview zeichnen ---
+            "function updateLedPreview(){"
+            "  var cont=document.getElementById('ledPreview');"
+            "  if(!cont) return;"
+            "  var count=parseInt(cont.dataset.ledCount||'0',10);"
+            "  if(!count) return;"
+
+            "  var gSlider=document.getElementById('greenEndSlider');"
+            "  var ySlider=document.getElementById('yellowEndSlider');"
+            "  var bSlider=document.getElementById('blinkStartSlider');"
+            "  if(!gSlider||!ySlider||!bSlider) return;"
+
+            "  var gv=parseInt(gSlider.value||'0',10);" // Ende Low RPM
+            "  var yv=parseInt(ySlider.value||'0',10);" // Ende Mid RPM
+            "  var bv=parseInt(bSlider.value||'0',10);" // Start Blinken
+
+            "  var gColor=document.getElementById('greenColorInput');"
+            "  var yColor=document.getElementById('yellowColorInput');"
+            "  var rColor=document.getElementById('redColorInput');"
+            "  if(!gColor||!yColor||!rColor) return;"
+
+            "  var now=Date.now();"
+            "  var blinkActive=(blinkTimerId!==null && now<blinkPreviewEndTs);"
+
+            "  var dots=cont.querySelectorAll('.led-dot');"
+            "  for(var i=0;i<dots.length;i++){"
+            "    var frac=((i+0.5)/count)*100;" // Position in %
+            "    var col;"
+
+            "    if(frac<=gv){"
+            "      // Low RPM"
+            "      col=gColor.value;"
+            "    }else if(frac<=yv){"
+            "      // Mid RPM"
+            "      col=yColor.value;"
+            "    }else{"
+            "      // Bereich darüber: Shift / Warnung (rot)"
+            "      if(blinkActive && frac>=bv){"
+            "        // Blinker an: ab blinkStartPct blinkt rot/dunkel"
+            "        col=blinkPhase ? '#222222' : rColor.value;"
+            "      }else{"
+            "        col=rColor.value;"
+            "      }"
+            "    }"
+
+            "    dots[i].style.backgroundColor=col;"
+            "  }"
+            "}"
+
+            // --- Layout der Punkte (damit alle nebeneinander passen) ---
+            "function layoutLedDots(){"
+            "  var cont=document.getElementById('ledPreview');"
+            "  if(!cont) return;"
+            "  var dots=cont.querySelectorAll('.led-dot');"
+            "  var count=dots.length;"
+            "  if(!count) return;"
+
+            "  var width=cont.clientWidth;"
+            "  if(width<=0) return;"
+
+            "  var spacing=2;"
+            "  var maxSize=Math.floor((width-spacing*(count-1))/count);"
+            "  var size=Math.max(4,Math.min(14,maxSize));"
+
+            "  for(var i=0;i<dots.length;i++){"
+            "    dots[i].style.width=size+'px';"
+            "    dots[i].style.height=size+'px';"
+            "    dots[i].style.marginLeft=(spacing/2)+'px';"
+            "    dots[i].style.marginRight=(spacing/2)+'px';"
+            "  }"
+            "}"
+
+            "function initLedPreview(){"
+            "  var cont=document.getElementById('ledPreview');"
+            "  if(!cont) return;"
+            "  var count=parseInt(cont.dataset.ledCount||'0',10);"
+            "  cont.innerHTML='';"
+            "  for(var i=0;i<count;i++){"
+            "    var d=document.createElement('div');"
+            "    d.className='led-dot';"
+            "    cont.appendChild(d);"
+            "  }"
+            "  layoutLedDots();"
+            "  updateLedPreview();"
+            "  window.addEventListener('resize',layoutLedDots);"
+            "}"
+
+            // --- Farb-Namen + Label-Farben (überschreibt die alte updateColorUi) ---
+            "function updateColorUi(){"
+            "  var cfg=["
+            "    {key:'green',slot:1,labelId:'greenEndLabel',hiddenId:'greenLabelHidden',nameSpanId:'color1Name'},"
+            "    {key:'yellow',slot:2,labelId:'yellowEndLabel',hiddenId:'yellowLabelHidden',nameSpanId:'color2Name'},"
+            "    {key:'red',slot:3,labelId:'blinkStartLabel',hiddenId:'redLabelHidden',nameSpanId:'color3Name'}"
+            "  ];"
+            "  cfg.forEach(function(c){"
+            "    var colorInput=document.getElementById(c.key+'ColorInput');"
+            "    if(!colorInput) return;"
+            "    var rawName=classifyColor(c.slot,colorInput.value);"
+            "    var name=rawName;"
+            "    var idx=rawName.indexOf('–');"
+            "    if(idx>=0){ name=rawName.substring(idx+1).trim(); }"
+            "    var span=document.getElementById(c.nameSpanId);"
+            "    if(span) span.innerText=name;"
+            "    var hidden=document.getElementById(c.hiddenId);"
+            "    if(hidden) hidden.value=name;"
+            "    var lbl=document.getElementById(c.labelId);"
+            "    if(lbl) lbl.style.color=colorInput.value;"
+            "  });"
+            "  updateLedPreview();"
+            "}"
+
+            // --- DOM Ready: Events verdrahten ---
+            "document.addEventListener('DOMContentLoaded',function(){"
+            "  initLedPreview();"
+
+            "  var ids=['greenEndSlider','yellowEndSlider','blinkStartSlider'];"
+            "  ids.forEach(function(id){"
+            "    var el=document.getElementById(id);"
+            "    if(!el) return;"
+            "    el.addEventListener('input',function(){"
+            "      updateLedPreview();"
+            "      if(id==='blinkStartSlider'){triggerBlinkPreview();}"
+            "    });"
+            "    el.addEventListener('change',function(){"
+            "      updateLedPreview();"
+            "      if(id==='blinkStartSlider'){triggerBlinkPreview();}"
+            "    });"
+            "  });"
+
+            "  updateColorUi();"
+            "});"
+            "</script>");
 
         page += F("</body></html>");
         return page;
@@ -869,7 +1054,7 @@ namespace
             "            }else{"
             "              showError('Sync konnte nicht gestartet werden.');"
             "            }"
-            "          }
+            "          }"
             "        })"
             "        .catch(function(){"
             "          setRefreshActive(false);"
@@ -893,7 +1078,7 @@ namespace
             "      }else{"
             "        statusText='Letztes Update vor '+data.vehicleInfoAge+'s';"
             "      }"
-            "    }
+            "    }"
             "    setStatus(statusText,loading);"
             "    if(refreshActive && !data.vehicleInfoRequestRunning){"
             "      if(data.vehicleInfoReady && data.vehicleInfoAge<=2){"
@@ -904,7 +1089,7 @@ namespace
             "        setRefreshActive(false);"
             "        showError('Keine Antwort vom Fahrzeug.');"
             "      }"
-            "    }
+            "    }"
             "  }"
             "  function pollStatus(){"
             "    fetch('/status')"
