@@ -672,31 +672,34 @@ namespace
         page += F("<!DOCTYPE html><html><head><meta charset='utf-8'>");
         page += F("<meta name='viewport' content='width=device-width,initial-scale=1'>");
         page += F("<title>ShiftLight Einstellungen</title>");
-        page += F("<style>"
-                  "body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#111;color:#eee;padding:16px;margin:0;}"
-                  "h1{font-size:20px;margin:0 0 12px 0;display:flex;align-items:center;justify-content:space-between;}"
-                  "a{color:#0af;text-decoration:none;}"
-                  ".row{margin-bottom:6px;}"
-                  ".small{font-size:12px;color:#aaa;}"
-                  ".section{margin-top:12px;padding:10px 12px;border-radius:8px;background:#181818;border:1px solid #333;}"
-                  ".section-title{font-weight:600;margin-bottom:8px;font-size:18px;letter-spacing:0.3px;}"
-                  ".toggle-row{display:flex;justify-content:space-between;align-items:center;margin-top:8px;}"
-                  ".toggle-label{font-size:14px;}"
-                  ".switch{position:relative;display:inline-block;width:46px;height:24px;margin-left:8px;}"
-                  ".switch input{opacity:0;width:0;height:0;}"
-                  ".slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#555;transition:.2s;border-radius:24px;}"
-                  ".slider:before{position:absolute;content:'';height:18px;width:18px;left:3px;top:3px;background:#fff;transition:.2s;border-radius:50%;}"
-                  ".switch input:checked + .slider{background:#0af;}"
-                  ".switch input:checked + .slider:before{transform:translateX(22px);}"
-                  "button{margin-top:10px;width:100%;padding:10px;border:none;border-radius:6px;background:#0af;color:#000;font-weight:bold;font-size:14px;}"
-                  "button:disabled{background:#555;color:#888;}"
-                  "</style></head><body>");
+        page += F(
+            "<style>"
+            "body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#111;color:#eee;padding:16px;margin:0;}"
+            "h1{font-size:20px;margin:0 0 12px 0;display:flex;align-items:center;justify-content:space-between;}"
+            "a{color:#0af;text-decoration:none;}"
+            ".row{margin-bottom:6px;}"
+            ".small{font-size:12px;color:#aaa;}"
+            ".section{margin-top:12px;padding:10px 12px;border-radius:8px;background:#181818;border:1px solid #333;}"
+            ".section-title{font-weight:600;margin-bottom:8px;font-size:18px;letter-spacing:0.3px;}"
+            ".toggle-row{display:flex;justify-content:space-between;align-items:center;margin-top:8px;}"
+            ".toggle-label{font-size:14px;}"
+            ".switch{position:relative;display:inline-block;width:46px;height:24px;margin-left:8px;}"
+            ".switch input{opacity:0;width:0;height:0;}"
+            ".slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#555;transition:.2s;border-radius:24px;}"
+            ".slider:before{position:absolute;content:'';height:18px;width:18px;left:3px;top:3px;background:#fff;transition:.2s;border-radius:50%;}"
+            ".switch input:checked + .slider{background:#0af;}"
+            ".switch input:checked + .slider:before{transform:translateX(22px);}"
+            "button{margin-top:10px;width:100%;padding:10px;border:none;border-radius:6px;background:#0af;color:#000;font-weight:bold;font-size:14px;}"
+            "button:disabled{background:#555;color:#888;}"
+            "</style></head><body>");
 
         page += "<h1><a href=\"/\">‹ Zurück</a><span>Einstellungen</span></h1>";
 
         page += F("<form id='settingsForm' method='POST' action='/settings'>");
 
-        // Modus / DevMode
+        //
+        // Modus / Entwicklermodus
+        //
         page += F("<div class='section'>");
         page += F("<div class='section-title'>Modus</div>");
         page += F("<div class='toggle-row'><span class='toggle-label'>Entwicklermodus</span>"
@@ -711,12 +714,14 @@ namespace
                   "</div>");
         page += F("</div>");
 
+        //
         // Mein Fahrzeug
+        //
         page += F("<div class='section'>");
         page += F("<div class='section-title'>Mein Fahrzeug</div>");
-        page += "<div class='row small'>VIN: <strong>" + readVehicleVin() + "</strong></div>";
-        page += "<div class='row small'>Modell: <strong>" + readVehicleModel() + "</strong></div>";
-        page += "<div class='row small'>Diagnose: <strong>" + readVehicleDiagStatus() + "</strong></div>";
+        page += "<div class='row small'>VIN: <strong id='vehicleVin'>" + readVehicleVin() + "</strong></div>";
+        page += "<div class='row small'>Modell: <strong id='vehicleModel'>" + readVehicleModel() + "</strong></div>";
+        page += "<div class='row small'>Diagnose: <strong id='vehicleDiag'>" + readVehicleDiagStatus() + "</strong></div>";
 
         String vehStatus;
         if (g_vehicleInfoRequestRunning)
@@ -732,38 +737,48 @@ namespace
         {
             vehStatus = "Noch keine Daten (wartet auf OBD-Verbindung)";
         }
-        page += "<div class='row small'>Status: " + vehStatus + "</div>";
+        page += "<div class='row small'>Status: <span id='vehicleStatus'>" + vehStatus + "</span></div>";
 
         // Neuer Sync-Button
         page += F("<button type='button' id='btnVehicleRefresh'>Fahrzeugdaten neu synchronisieren</button>");
 
         page += F("</div>"); // section Mein Fahrzeug
 
+        // Speichern-Button
         page += F("<button type='submit' id='settingsSave' disabled>Speichern</button>");
         page += F("</form>");
 
-        // JS: Save-Button nur aktiv bei Änderungen + Sync-Button
+        //
+        // JS: Save-Button aktivieren bei Änderungen + manueller Sync
+        //
         page += F(
             "<script>"
-            "document.addEventListener('DOMContentLoaded',()=>{"
-            " var form=document.getElementById('settingsForm');"
-            " var btn=document.getElementById('settingsSave');"
-            " if(form && btn){"
-            "  // sicherstellen, dass er wirklich deaktiviert startet"
-            "  btn.disabled=true;"
-            "  form.querySelectorAll('input').forEach(el=>{"
-            "    el.addEventListener('change',()=>{btn.disabled=false;});"
-            "  });"
-            " }"
-            " var refresh=document.getElementById('btnVehicleRefresh');"
-            " if(refresh){"
-            "  refresh.addEventListener('click',()=>{"
-            "    refresh.disabled=true;"
-            "    fetch('/settings/vehicle-refresh',{method:'POST'})"
-            "      .then(()=>{location.reload();})"
-            "      .catch(()=>{refresh.disabled=false;});"
-            "  });"
-            " }"
+            "document.addEventListener('DOMContentLoaded',function(){"
+            "  var form=document.getElementById('settingsForm');"
+            "  var btn=document.getElementById('settingsSave');"
+            "  if(form && btn){"
+            "    btn.disabled=true;" // initial wirklich deaktiviert lassen
+            "    var inputs=form.querySelectorAll('input');"
+            "    inputs.forEach(function(el){"
+            "      el.addEventListener('change',function(){"
+            "        btn.disabled=false;"
+            "      });"
+            "    });"
+            "  }"
+            "  var refresh=document.getElementById('btnVehicleRefresh');"
+            "  if(refresh){"
+            "    refresh.addEventListener('click',function(){"
+            "      refresh.disabled=true;"
+            "      fetch('/settings/vehicle-refresh',{method:'POST'})"
+            "        .then(function(){"
+            "          // kurz warten, damit OBD antworten kann, dann Seite neu laden"
+            "          setTimeout(function(){ location.reload(); }, 800);"
+            "        })"
+            "        .catch(function(){"
+            "          refresh.disabled=false;"
+            "        });"
+            "    });"
+            "  }"
             "});"
             "</script>");
 
@@ -1070,7 +1085,7 @@ namespace
         server.send(303);
     }
 
-    // NEU: manueller Refresh der Fahrzeugdaten von der Settings-Seite
+    // Manueller Refresh der Fahrzeugdaten von der Settings-Seite
     void handleSettingsVehicleRefresh()
     {
         g_lastHttpMs = millis();
@@ -1082,7 +1097,7 @@ namespace
             return;
         }
 
-        // Startet den neuen Abruf (setzt auch die Platzhaltertexte)
+        // Startet den neuen Abruf (setzt Platzhalter und Flags)
         requestVehicleInfo();
 
         server.send(200, "text/plain", "OK");
@@ -1126,6 +1141,7 @@ void initWebUi()
     server.on("/settings", HTTP_GET, handleSettingsGet);
     server.on("/settings", HTTP_POST, handleSettingsSave);
 
+    // NEU / wichtig für den Sync-Button auf der Einstellungsseite
     server.on("/settings/vehicle-refresh", HTTP_POST, handleSettingsVehicleRefresh);
 
     server.on("/dev/display-logo", HTTP_POST, handleDevDisplayLogo);
