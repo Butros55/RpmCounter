@@ -16,6 +16,13 @@ constexpr unsigned long LOGO_COOLDOWN_MS = 2000;
 constexpr int ENGINE_START_RPM_THRESHOLD = 400;
 constexpr unsigned long TX_LOG_INTERVAL_MS = 2500;
 
+struct RgbColor
+{
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+};
+
 struct ShiftConfig
 {
     bool autoScaleMaxRpm;
@@ -28,7 +35,16 @@ struct ShiftConfig
     bool logoOnIgnitionOn;
     bool logoOnEngineStart;
     bool logoOnIgnitionOff;
+    RgbColor greenColor;
+    RgbColor yellowColor;
+    RgbColor redColor;
+    String greenLabel;
+    String yellowLabel;
+    String redLabel;
 };
+
+constexpr int MANUAL_CONNECT_RETRY_COUNT = 6;
+constexpr unsigned long MANUAL_CONNECT_RETRY_DELAY_MS = 600;
 
 extern ShiftConfig cfg;
 

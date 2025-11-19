@@ -7,6 +7,7 @@ void initLeds();
 void ledBarLoop();
 void updateRpmBar(int rpm);
 void setStatusLED(bool on);
+void rememberPreviewPixels();
 
 extern Adafruit_NeoPixel strip;
 
