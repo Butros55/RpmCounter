@@ -6,7 +6,7 @@
 String readVehicleVin();
 String readVehicleModel();
 String readVehicleDiagStatus();
-void requestVehicleInfo();
+void requestVehicleInfo(bool forceRestart = false);
 void handleVehicleInfoResponse(const String &compactLine);
 void handleVehicleDisconnect();
 

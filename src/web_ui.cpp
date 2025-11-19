@@ -69,6 +69,37 @@ namespace
         return out;
     }
 
+    String htmlEscape(const String &input)
+    {
+        String out;
+        for (size_t i = 0; i < input.length(); ++i)
+        {
+            char c = input[i];
+            switch (c)
+            {
+            case '&':
+                out += F("&amp;");
+                break;
+            case '<':
+                out += F("&lt;");
+                break;
+            case '>':
+                out += F("&gt;");
+                break;
+            case '\"':
+                out += F("&quot;");
+                break;
+            case '\'':
+                out += F("&#39;");
+                break;
+            default:
+                out += c;
+                break;
+            }
+        }
+        return out;
+    }
+
     String htmlPage()
     {
         String page;
@@ -691,6 +722,9 @@ namespace
             ".switch input:checked + .slider:before{transform:translateX(22px);}"
             "button{margin-top:10px;width:100%;padding:10px;border:none;border-radius:6px;background:#0af;color:#000;font-weight:bold;font-size:14px;}"
             "button:disabled{background:#555;color:#888;}"
+            ".status-message{font-size:12px;color:#aaa;margin-top:6px;}"
+            ".status-message .highlight{color:#0af;}"
+            ".error-text{font-size:12px;color:#ff6b6b;margin-top:6px;display:none;}"
             "</style></head><body>");
 
         page += "<h1><a href=\"/\">‹ Zurück</a><span>Einstellungen</span></h1>";
@@ -717,11 +751,15 @@ namespace
         //
         // Mein Fahrzeug
         //
+        String safeVin = htmlEscape(readVehicleVin());
+        String safeModel = htmlEscape(readVehicleModel());
+        String safeDiag = htmlEscape(readVehicleDiagStatus());
+
         page += F("<div class='section'>");
         page += F("<div class='section-title'>Mein Fahrzeug</div>");
-        page += "<div class='row small'>VIN: <strong id='vehicleVin'>" + readVehicleVin() + "</strong></div>";
-        page += "<div class='row small'>Modell: <strong id='vehicleModel'>" + readVehicleModel() + "</strong></div>";
-        page += "<div class='row small'>Diagnose: <strong id='vehicleDiag'>" + readVehicleDiagStatus() + "</strong></div>";
+        page += "<div class='row small'>VIN: <strong id='vehicleVin'>" + safeVin + "</strong></div>";
+        page += "<div class='row small'>Modell: <strong id='vehicleModel'>" + safeModel + "</strong></div>";
+        page += "<div class='row small'>Diagnose: <strong id='vehicleDiag'>" + safeDiag + "</strong></div>";
 
         String vehStatus;
         if (g_vehicleInfoRequestRunning)
@@ -737,10 +775,12 @@ namespace
         {
             vehStatus = "Noch keine Daten (wartet auf OBD-Verbindung)";
         }
-        page += "<div class='row small'>Status: <span id='vehicleStatus'>" + vehStatus + "</span></div>";
+        String safeStatus = htmlEscape(vehStatus);
+        page += "<div class='row small'>Status: <span id='vehicleStatus' data-base='" + safeStatus + "'>" + safeStatus + "</span></div>";
 
         // Neuer Sync-Button
         page += F("<button type='button' id='btnVehicleRefresh'>Fahrzeugdaten neu synchronisieren</button>");
+        page += F("<div class='error-text' id='vehicleRefreshError'></div>");
 
         page += F("</div>"); // section Mein Fahrzeug
 
@@ -755,30 +795,125 @@ namespace
             "<script>"
             "document.addEventListener('DOMContentLoaded',function(){"
             "  var form=document.getElementById('settingsForm');"
-            "  var btn=document.getElementById('settingsSave');"
-            "  if(form && btn){"
-            "    btn.disabled=true;" // initial wirklich deaktiviert lassen
-            "    var inputs=form.querySelectorAll('input');"
-            "    inputs.forEach(function(el){"
-            "      el.addEventListener('change',function(){"
-            "        btn.disabled=false;"
-            "      });"
-            "    });"
+            "  var saveBtn=document.getElementById('settingsSave');"
+            "  var dirty=false;"
+            "  function markDirty(){"
+            "    if(!saveBtn) return;"
+            "    if(!dirty){"
+            "      saveBtn.disabled=false;"
+            "      dirty=true;"
+            "    }"
             "  }"
-            "  var refresh=document.getElementById('btnVehicleRefresh');"
-            "  if(refresh){"
-            "    refresh.addEventListener('click',function(){"
-            "      refresh.disabled=true;"
+            "  if(form && saveBtn){"
+            "    form.querySelectorAll('input').forEach(function(el){"
+            "      if(el.type==='button' || el.id==='settingsSave') return;"
+            "      el.addEventListener('change',markDirty);"
+            "      el.addEventListener('input',markDirty);"
+            "    });"
+            "    form.addEventListener('submit',function(){saveBtn.disabled=true;});"
+            "  }"
+            "  var statusEl=document.getElementById('vehicleStatus');"
+            "  var errorEl=document.getElementById('vehicleRefreshError');"
+            "  var refreshBtn=document.getElementById('btnVehicleRefresh');"
+            "  var dotsTimer=null;"
+            "  var currentStatusKey='';"
+            "  var refreshActive=false;"
+            "  var refreshStart=0;"
+            "  function setStatus(text,loading){"
+            "    if(!statusEl) return;"
+            "    var key=text+'|'+(loading?'1':'0');"
+            "    if(currentStatusKey===key) return;"
+            "    currentStatusKey=key;"
+            "    statusEl.dataset.base=text;"
+            "    statusEl.innerText=text;"
+            "    if(dotsTimer){clearInterval(dotsTimer);dotsTimer=null;}"
+            "    if(loading){"
+            "      var step=0;"
+            "      dotsTimer=setInterval(function(){"
+            "        step=(step+1)%4;"
+            "        statusEl.innerText=statusEl.dataset.base + '.'.repeat(step);"
+            "      },400);"
+            "    }"
+            "  }"
+            "  function showError(msg){"
+            "    if(!errorEl) return;"
+            "    if(msg){"
+            "      errorEl.innerText=msg;"
+            "      errorEl.style.display='block';"
+            "    }else{"
+            "      errorEl.innerText='';"
+            "      errorEl.style.display='none';"
+            "    }"
+            "  }"
+            "  function setRefreshActive(active){"
+            "    refreshActive=active;"
+            "    if(refreshBtn) refreshBtn.disabled=active;"
+            "    if(active){"
+            "      refreshStart=Date.now();"
+            "      showError('');"
+            "    }"
+            "  }"
+            "  if(refreshBtn){"
+            "    refreshBtn.addEventListener('click',function(){"
+            "      if(refreshBtn.disabled) return;"
+            "      setRefreshActive(true);"
+            "      setStatus('Sync läuft',true);"
             "      fetch('/settings/vehicle-refresh',{method:'POST'})"
-            "        .then(function(){"
-            "          // kurz warten, damit OBD antworten kann, dann Seite neu laden"
-            "          setTimeout(function(){ location.reload(); }, 800);"
+            "        .then(function(res){return res.json();})"
+            "        .then(function(data){"
+            "          if(!data||data.status!=='started'){"
+            "            setRefreshActive(false);"
+            "            if(data && data.reason==='no-connection'){"
+            "              showError('Keine OBD-Verbindung vorhanden.');"
+            "              setStatus('Sync nicht möglich',false);"
+            "            }else{"
+            "              showError('Sync konnte nicht gestartet werden.');"
+            "            }"
+            "          }
             "        })"
             "        .catch(function(){"
-            "          refresh.disabled=false;"
+            "          setRefreshActive(false);"
+            "          showError('Sync fehlgeschlagen.');"
             "        });"
             "    });"
             "  }"
+            "  function updateVehicleInfo(data){"
+            "    var el;"
+            "    if((el=document.getElementById('vehicleVin'))) el.innerText=data.vehicleVin;"
+            "    if((el=document.getElementById('vehicleModel'))) el.innerText=data.vehicleModel;"
+            "    if((el=document.getElementById('vehicleDiag'))) el.innerText=data.vehicleDiag;"
+            "    var loading=false;"
+            "    var statusText='Noch keine Daten';"
+            "    if(data.vehicleInfoRequestRunning){"
+            "      statusText='Abruf läuft';"
+            "      loading=true;"
+            "    }else if(data.vehicleInfoReady){"
+            "      if(data.vehicleInfoAge<=1){"
+            "        statusText='Gerade aktualisiert (0s)';"
+            "      }else{"
+            "        statusText='Letztes Update vor '+data.vehicleInfoAge+'s';"
+            "      }"
+            "    }
+            "    setStatus(statusText,loading);"
+            "    if(refreshActive && !data.vehicleInfoRequestRunning){"
+            "      if(data.vehicleInfoReady && data.vehicleInfoAge<=2){"
+            "        setRefreshActive(false);"
+            "        setStatus('Gerade aktualisiert (0s)',false);"
+            "        showError('');"
+            "      }else if(Date.now()-refreshStart>7000){"
+            "        setRefreshActive(false);"
+            "        showError('Keine Antwort vom Fahrzeug.');"
+            "      }"
+            "    }
+            "  }"
+            "  function pollStatus(){"
+            "    fetch('/status')"
+            "      .then(function(res){return res.json();})"
+            "      .then(updateVehicleInfo)"
+            "      .catch(function(){});"
+            "  }"
+            "  pollStatus();"
+            "  setInterval(pollStatus,1500);"
             "});"
             "</script>");
 
@@ -1039,9 +1174,18 @@ namespace
     {
         g_lastHttpMs = millis();
 
+        unsigned long now = millis();
+        unsigned long vehicleAge = 0;
+        if (g_vehicleInfoAvailable && g_vehicleInfoLastUpdate > 0 && now >= g_vehicleInfoLastUpdate)
+        {
+            vehicleAge = (now - g_vehicleInfoLastUpdate) / 1000;
+        }
+
         String json = "{";
         json += "\"rpm\":" + String(g_currentRpm);
         json += ",\"maxRpm\":" + String(g_maxSeenRpm);
+        json += ",\"speed\":" + String(g_vehicleSpeedKmh);
+        json += ",\"gear\":" + String(g_estimatedGear);
         json += ",\"lastTx\":\"" + g_lastTxInfo + "\"";
         json += ",\"lastObd\":\"" + g_lastObdInfo + "\"";
         json += ",\"connected\":" + String(g_connected ? "true" : "false");
@@ -1060,7 +1204,9 @@ namespace
         json += ",\"vehicleVin\":\"" + jsonEscape(g_vehicleVin) + "\"";
         json += ",\"vehicleModel\":\"" + jsonEscape(g_vehicleModel) + "\"";
         json += ",\"vehicleDiag\":\"" + jsonEscape(g_vehicleDiagStatus) + "\"";
+        json += ",\"vehicleInfoRequestRunning\":" + String(g_vehicleInfoRequestRunning ? "true" : "false");
         json += ",\"vehicleInfoReady\":" + String(g_vehicleInfoAvailable ? "true" : "false");
+        json += ",\"vehicleInfoAge\":" + String(vehicleAge);
         json += "}";
         server.send(200, "application/json", json);
     }
@@ -1093,14 +1239,14 @@ namespace
         // Nur versuchen, wenn eine OBD-Verbindung besteht
         if (!g_connected)
         {
-            server.send(200, "text/plain", "NO-CONNECTION");
+            server.send(200, "application/json", "{\"status\":\"error\",\"reason\":\"no-connection\"}");
             return;
         }
 
         // Startet den neuen Abruf (setzt Platzhalter und Flags)
-        requestVehicleInfo();
+        requestVehicleInfo(true);
 
-        server.send(200, "text/plain", "OK");
+        server.send(200, "application/json", "{\"status\":\"started\"}");
     }
 
     void handleDevDisplayLogo()

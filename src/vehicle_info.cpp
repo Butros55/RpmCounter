@@ -54,10 +54,12 @@ String readVehicleDiagStatus()
     return g_vehicleDiagStatus;
 }
 
-void requestVehicleInfo()
+void requestVehicleInfo(bool forceRestart)
 {
-    // Nur starten, wenn wir verbunden sind und nicht schon ein Lauf aktiv ist
-    if (!g_connected || g_vehicleInfoRequestRunning)
+    if (!g_connected)
+        return;
+
+    if (g_vehicleInfoRequestRunning && !forceRestart)
         return;
 
     vinHexBuffer = "";
@@ -76,12 +78,25 @@ void requestVehicleInfo()
     g_vehicleInfoLastUpdate = millis();
 
     // Mode 09 – VIN & ECU Name (falls das Steuergerät es unterstützt)
-    sendObdCommand("0902");
-    delay(30);
-    sendObdCommand("0904");
-    delay(30);
+    const int RETRIES = 3;
+    for (int i = 0; i < RETRIES; ++i)
+    {
+        sendObdCommand("0902");
+        delay(30);
+    }
+
+    for (int i = 0; i < RETRIES; ++i)
+    {
+        sendObdCommand("0904");
+        delay(30);
+    }
+
     // Mode 01 – Diagnose-Status
-    sendObdCommand("0101");
+    for (int i = 0; i < RETRIES; ++i)
+    {
+        sendObdCommand("0101");
+        delay(30);
+    }
 }
 
 void handleVehicleInfoResponse(const String &compactLine)
@@ -194,6 +209,8 @@ void handleVehicleInfoResponse(const String &compactLine)
 void handleVehicleDisconnect()
 {
     g_vehicleInfoRequestRunning = false;
+    g_vehicleInfoAvailable = false;
+    g_vehicleInfoLastUpdate = 0;
     vinHexBuffer = "";
     modelHexBuffer = "";
     vinComplete = false;
@@ -201,7 +218,7 @@ void handleVehicleDisconnect()
     diagComplete = false;
 
     // Optional: Texte zurücksetzen
-    g_vehicleVin = "";
-    g_vehicleModel = "";
-    g_vehicleDiagStatus = "";
+    g_vehicleVin = F("Noch nicht gelesen");
+    g_vehicleModel = F("Unbekannt");
+    g_vehicleDiagStatus = F("Keine Daten");
 }

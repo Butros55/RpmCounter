@@ -2,6 +2,7 @@
 
 #include <BLEDevice.h>
 #include <BLEUtils.h>
+#include <math.h>
 
 #include "config.h"
 #include "led_bar.h"
@@ -9,9 +10,61 @@
 #include "state.h"
 #include "vehicle_info.h"
 #include "utils.h"
+#include "display.h"
 
 namespace
 {
+    constexpr float GEAR_RATIO_TABLE[] = {0.f, 95.f, 65.f, 48.f, 36.f, 28.f, 23.f, 19.f, 16.f};
+    constexpr size_t GEAR_RATIO_COUNT = sizeof(GEAR_RATIO_TABLE) / sizeof(GEAR_RATIO_TABLE[0]);
+    unsigned long lastGearDecisionMs = 0;
+
+    int pickGearFromRatio(float ratio)
+    {
+        int bestGear = 0;
+        float bestDiff = 1e9f;
+        for (size_t i = 1; i < GEAR_RATIO_COUNT; ++i)
+        {
+            float diff = fabsf(ratio - GEAR_RATIO_TABLE[i]);
+            if (diff < bestDiff)
+            {
+                bestDiff = diff;
+                bestGear = static_cast<int>(i);
+            }
+        }
+        return bestGear;
+    }
+
+    void updateGearEstimate()
+    {
+        if (g_vehicleSpeedKmh < 2 || g_currentRpm < 500)
+        {
+            if (g_estimatedGear != 0)
+            {
+                g_estimatedGear = 0;
+                displaySetGear(g_estimatedGear);
+            }
+            return;
+        }
+
+        float ratio = (float)g_currentRpm / (float)max(g_vehicleSpeedKmh, 1);
+        int candidate = pickGearFromRatio(ratio);
+        unsigned long now = millis();
+
+        if (candidate == g_estimatedGear)
+        {
+            return;
+        }
+
+        if (abs(candidate - g_estimatedGear) > 1 && (now - lastGearDecisionMs) < 300)
+        {
+            return;
+        }
+
+        g_estimatedGear = candidate;
+        lastGearDecisionMs = now;
+        displaySetGear(g_estimatedGear);
+    }
+
     void processObdLine(const String &lineIn)
     {
         if (lineIn.length() == 0)
@@ -41,75 +94,80 @@ namespace
         handleVehicleInfoResponse(compact);
 
         int idx = compact.indexOf("410C");
-        if (idx < 0)
+        if (idx >= 0 && idx + 8 <= compact.length())
         {
-            return;
-        }
-
-        if (idx + 8 > compact.length())
-        {
-            return;
-        }
-
-        int a = hexByte(compact, idx + 4);
-        int b = hexByte(compact, idx + 6);
-        if (a < 0 || b < 0)
-            return;
-
-        int raw = (a << 8) | b;
-        int rpm = raw / 4;
-
-        if (rpm > g_maxSeenRpm)
-        {
-            g_maxSeenRpm = rpm;
-        }
-
-        g_currentRpm = rpm;
-        Serial.print("=> RPM: ");
-        Serial.print(rpm);
-        Serial.print("   (max: ");
-        Serial.print(g_maxSeenRpm);
-        Serial.println(")");
-
-        unsigned long nowMs = millis();
-        g_lastObdMs = nowMs;
-
-        bool ignitionBefore = g_ignitionOn;
-        bool engineBefore = g_engineRunning;
-
-            g_ignitionOn = true;
-            g_engineRunning = (rpm > ENGINE_START_RPM_THRESHOLD);
-
-            if (!ignitionBefore && g_ignitionOn)
+            int a = hexByte(compact, idx + 4);
+            int b = hexByte(compact, idx + 6);
+            if (a >= 0 && b >= 0)
             {
-                g_engineStartLogoShown = false;
-                if (cfg.logoOnIgnitionOn && nowMs - g_lastLogoMs > LOGO_COOLDOWN_MS && !g_ignitionLogoShown)
+                int raw = (a << 8) | b;
+                int rpm = raw / 4;
+
+                if (rpm > g_maxSeenRpm)
                 {
-                    Serial.println("[MLOGO] Zündung an – Animation");
-                    g_logoPlayedThisCycle = true;
-                    g_leavingPlayedThisCycle = false;
-                    g_lastLogoMs = nowMs;
-                    g_ignitionLogoShown = true;
-                    showMLogoAnimation();
+                    g_maxSeenRpm = rpm;
+                }
+
+                g_currentRpm = rpm;
+                Serial.print("=> RPM: ");
+                Serial.print(rpm);
+                Serial.print("   (max: ");
+                Serial.print(g_maxSeenRpm);
+                Serial.println(")");
+
+                unsigned long nowMs = millis();
+                g_lastObdMs = nowMs;
+
+                bool ignitionBefore = g_ignitionOn;
+                bool engineBefore = g_engineRunning;
+
+                g_ignitionOn = true;
+                g_engineRunning = (rpm > ENGINE_START_RPM_THRESHOLD);
+
+                if (!ignitionBefore && g_ignitionOn)
+                {
+                    g_engineStartLogoShown = false;
+                    if (cfg.logoOnIgnitionOn && nowMs - g_lastLogoMs > LOGO_COOLDOWN_MS && !g_ignitionLogoShown)
+                    {
+                        Serial.println("[MLOGO] Zündung an – Animation");
+                        g_logoPlayedThisCycle = true;
+                        g_leavingPlayedThisCycle = false;
+                        g_lastLogoMs = nowMs;
+                        g_ignitionLogoShown = true;
+                        showMLogoAnimation();
+                    }
+                }
+                else if (!engineBefore && g_engineRunning)
+                {
+                    if (cfg.logoOnEngineStart && !g_engineStartLogoShown && nowMs - g_lastLogoMs > LOGO_COOLDOWN_MS)
+                    {
+                        Serial.println("[MLOGO] Motorstart – Animation");
+                        g_logoPlayedThisCycle = true;
+                        g_leavingPlayedThisCycle = false;
+                        g_lastLogoMs = nowMs;
+                        g_engineStartLogoShown = true;
+                        showMLogoAnimation();
+                    }
+                }
+
+                if (!g_testActive && !g_animationActive)
+                {
+                    updateRpmBar(rpm);
                 }
             }
-            else if (!engineBefore && g_engineRunning)
-            {
-                if (cfg.logoOnEngineStart && !g_engineStartLogoShown && nowMs - g_lastLogoMs > LOGO_COOLDOWN_MS)
-                {
-                    Serial.println("[MLOGO] Motorstart – Animation");
-                    g_logoPlayedThisCycle = true;
-                    g_leavingPlayedThisCycle = false;
-                    g_lastLogoMs = nowMs;
-                    g_engineStartLogoShown = true;
-                    showMLogoAnimation();
-                }
-            }
-
-        if (!g_testActive && !g_animationActive)
-        {
-            updateRpmBar(rpm);
         }
+
+        int speedIdx = compact.indexOf("410D");
+        if (speedIdx >= 0 && speedIdx + 6 <= compact.length())
+        {
+            int value = hexByte(compact, speedIdx + 4);
+            if (value >= 0)
+            {
+                g_vehicleSpeedKmh = value;
+            }
+        }
+
+        updateGearEstimate();
     }
 
     static void notifyCallback(BLERemoteCharacteristic * /*characteristic*/, uint8_t *pData, size_t length, bool /*isNotify*/)
@@ -154,6 +212,10 @@ namespace
             g_connected = false;
             g_ignitionOn = false;
             g_engineRunning = false;
+            g_vehicleSpeedKmh = 0;
+            g_estimatedGear = 0;
+            displaySetGear(0);
+            displaySetShiftBlink(false);
             setStatusLED(false);
             handleVehicleDisconnect();
 
@@ -295,8 +357,16 @@ void bleObdLoop()
 
     if (!g_testActive && g_connected && g_charWrite && (now - g_lastRpmRequest > RPM_INTERVAL_MS))
     {
+        static uint8_t speedDivider = 0;
         g_lastRpmRequest = now;
         sendObdCommand("010C");
+        speedDivider++;
+        if (speedDivider >= 3)
+        {
+            speedDivider = 0;
+            delay(5);
+            sendObdCommand("010D");
+        }
     }
 
     while (Serial.available())
