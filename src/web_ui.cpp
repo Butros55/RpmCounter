@@ -677,7 +677,9 @@ namespace
 void initWifiAP()
 {
     WiFi.mode(WIFI_AP);
-    WiFi.softAP("ShiftLight", "12345678");
+    WiFi.softAP(AP_SSID, AP_PASS);
+    Serial.print("AP SSID: ");
+    Serial.println(AP_SSID);
     Serial.print("AP IP address: ");
     Serial.println(WiFi.softAPIP());
 }
