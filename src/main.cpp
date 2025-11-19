@@ -5,6 +5,7 @@
 #include "web_ui.h"
 #include "led_bar.h"
 #include "logo_anim.h"
+#include "display.h"
 
 void setup() {
     initConfig();
@@ -13,6 +14,7 @@ void setup() {
     initWifiAP();
     initWebUi();
     initBle();
+    displayInit();
 }
 
 void loop() {

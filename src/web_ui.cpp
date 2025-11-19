@@ -10,6 +10,7 @@
 #include "logo_anim.h"
 #include "vehicle_info.h"
 #include "state.h"
+#include "display.h"
 
 namespace
 {
@@ -79,6 +80,44 @@ namespace
         String redHex = colorToHex(cfg.redColor);
         page += F("<!DOCTYPE html><html><head><meta charset='utf-8'>");
         page += F("<meta name='viewport' content='width=device-width,initial-scale=1'>");
+        page += F("<title>ShiftLight Setup</title>");
+        page += F("<style>"
+                  "body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#111;"
+                  "color:#eee;padding:16px;margin:0;}"
+                  "h1{font-size:20px;margin:0 0 12px 0;display:flex;"
+                  "align-items:center;justify-content:space-between;}"
+                  "h2{font-size:16px;margin:16px 0 8px 0;}"
+                  "label{display:block;margin-top:8px;}"
+                  "input,select{width:100%;padding:6px;margin-top:4px;"
+                  "border-radius:6px;border:1px solid #444;background:#222;color:#eee;}"
+                  "input[type=range]{padding:0;margin-top:4px;}"
+                  "button{margin-top:12px;width:100%;padding:10px;border:none;border-radius:6px;"
+                  "background:#0af;color:#000;font-weight:bold;font-size:14px;}"
+                  "button:disabled{background:#555;color:#888;}"
+                  ".btn-danger{background:#d33;color:#fff;}"
+                  ".row{margin-bottom:6px;}"
+                  ".small{font-size:12px;color:#aaa;}"
+                  ".section{margin-top:12px;padding:10px 12px;border-radius:8px;"
+                  "background:#181818;border:1px solid #333;}"
+                  ".section-title{font-weight:600;margin-bottom:4px;font-size:14px;}"
+                  ".toggle-row{display:flex;justify-content:space-between;align-items:center;margin-top:8px;}"
+                  ".toggle-label{font-size:14px;}"
+                  ".switch{position:relative;display:inline-block;width:46px;height:24px;margin-left:8px;}"
+                  ".switch input{opacity:0;width:0;height:0;}"
+                  ".slider{position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;"
+                  "background:#555;transition:.2s;border-radius:24px;}"
+                  ".slider:before{position:absolute;content:'';height:18px;width:18px;left:3px;top:3px;"
+                  "background:#fff;transition:.2s;border-radius:50%;}"
+                  ".switch input:checked + .slider{background:#0af;}"
+                  ".switch input:checked + .slider:before{transform:translateX(22px);}"
+                  ".status-line{font-size:12px;color:#ccc;margin-top:4px;}"
+                  ".spinner{display:inline-block;width:12px;height:12px;border-radius:50%;"
+                  "border:2px solid rgba(255,255,255,0.2);border-top-color:#0af;"
+                  "animation:spin 1s linear infinite;margin-left:6px;}"
+                  ".hidden{display:none;}"
+                  "@keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}"
+                  "</style></head><body>");
+
         page += "<title>ShiftLight Setup</title>";
         page += F("<style>");
         page += F("body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#111;color:#eee;padding:16px;margin:0;}");
@@ -281,6 +320,8 @@ namespace
             page += F("</span> / Max gesehen: <span id='rpmMaxVal'>");
             page += String(g_maxSeenRpm);
             page += F("</span></div>");
+            page += F("<button type='button' id='btnDisplayLogo'>BMW Logo auf Display anzeigen</button>");
+            page += F("<div class='small'>Zeigt kurz das BMW-Logo auf dem Display (nur im Entwicklermodus).</div>");
 
             page += F("</div>");
 
@@ -498,6 +539,8 @@ namespace
                   " if(bc) bc.addEventListener('click',()=>postSimple('/connect'));"
                   " var bd=document.getElementById('btnDisconnect');"
                   " if(bd) bd.addEventListener('click',()=>postSimple('/disconnect'));"
+                  " var bdsp=document.getElementById('btnDisplayLogo');"
+                  " if(bdsp) bdsp.addEventListener('click',()=>postSimple('/dev/display-logo'));"
                   " fetchStatus();"
                   " setInterval(fetchStatus,1000);"
                   " setInterval(()=>updateSpinnerVisibility(false),1000);"
@@ -890,6 +933,21 @@ namespace
         server.sendHeader("Location", "/settings");
         server.send(303);
     }
+    
+    void handleDevDisplayLogo()
+    {
+        g_lastHttpMs = millis();
+
+        if (!g_devMode)
+        {
+            server.send(403, "text/plain", "Forbidden");
+            return;
+        }
+
+        displayShowTestLogo();
+        // Kein Redirect mehr, einfache OK-Antwort für fetch()
+        server.send(200, "text/plain", "OK");
+    }
 }
 
 void initWifiAP()
@@ -914,6 +972,7 @@ void initWebUi()
     server.on("/status", HTTP_GET, handleStatus);
     server.on("/settings", HTTP_GET, handleSettingsGet);
     server.on("/settings", HTTP_POST, handleSettingsSave);
+    server.on("/dev/display-logo", HTTP_POST, handleDevDisplayLogo);
 
     server.begin();
     Serial.println("Webserver gestartet (http://192.168.4.1/)");
