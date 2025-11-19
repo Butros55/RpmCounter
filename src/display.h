@@ -5,3 +5,5 @@
 void displayInit();
 void displayClear();
 void displayShowTestLogo();
+void displaySetGear(int gear);
+void displaySetShiftBlink(bool active);

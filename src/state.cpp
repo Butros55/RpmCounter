@@ -11,6 +11,8 @@ String g_obdLine;
 
 int g_currentRpm = 0;
 int g_maxSeenRpm = 0;
+int g_vehicleSpeedKmh = 0;
+int g_estimatedGear = 0;
 
 unsigned long g_lastRpmRequest = 0;
 
@@ -67,6 +69,8 @@ void initGlobalState()
 
     g_currentRpm = 0;
     g_maxSeenRpm = 0;
+    g_vehicleSpeedKmh = 0;
+    g_estimatedGear = 0;
 
     g_lastRpmRequest = 0;
 

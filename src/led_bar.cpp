@@ -5,6 +5,7 @@
 
 #include "config.h"
 #include "state.h"
+#include "display.h"
 
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
@@ -171,9 +172,12 @@ void updateRpmBar(int rpm)
         blinkState = !blinkState;
     }
 
+    bool displayBlink = false;
+
     if (cfg.mode == 2 && fraction >= blinkStart)
     {
         ledsOn = NUM_LEDS;
+        displayBlink = blinkState;
     }
 
     strip.clear();
@@ -205,6 +209,7 @@ void updateRpmBar(int rpm)
                     if (cfg.mode == 1 && shiftBlink)
                     {
                         color = blinkState ? toStripColor(cfg.redColor) : strip.Color(0, 0, 0);
+                        displayBlink = blinkState;
                     }
                     else
                     {
@@ -218,6 +223,7 @@ void updateRpmBar(int rpm)
     }
 
     strip.show();
+    displaySetShiftBlink(displayBlink);
 
     Serial.print("[LED] rpm=");
     Serial.print(rpm);
