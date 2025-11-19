@@ -23,6 +23,8 @@ int g_testMaxRpm = 4000;
 
 bool g_brightnessPreviewActive = false;
 unsigned long g_lastBrightnessChangeMs = 0;
+bool g_brightnessPreviewFading = false;
+unsigned long g_brightnessPreviewFadeStartMs = 0;
 
 bool g_ignitionOn = false;
 bool g_engineRunning = false;
@@ -38,6 +40,17 @@ String g_lastObdInfo;
 unsigned long g_lastTxLogMs = 0;
 
 unsigned long g_lastHttpMs = 0;
+
+bool g_connectLoopActive = false;
+bool g_manualConnectLoop = false;
+int g_connectLoopRemaining = 0;
+int g_connectLoopTotal = 0;
+
+String g_vehicleVin;
+String g_vehicleModel;
+String g_vehicleBrand;
+bool g_vehicleDiagOk = false;
+bool g_vehicleInfoLoaded = false;
 
 void initGlobalState()
 {
@@ -69,6 +82,8 @@ void initGlobalState()
 
     g_brightnessPreviewActive = false;
     g_lastBrightnessChangeMs = 0;
+    g_brightnessPreviewFading = false;
+    g_brightnessPreviewFadeStartMs = 0;
 
     g_ignitionOn = false;
     g_engineRunning = false;
@@ -84,4 +99,15 @@ void initGlobalState()
     g_lastTxLogMs = 0;
 
     g_lastHttpMs = 0;
+
+    g_connectLoopActive = false;
+    g_manualConnectLoop = false;
+    g_connectLoopRemaining = 0;
+    g_connectLoopTotal = 0;
+
+    g_vehicleVin = "–";
+    g_vehicleModel = "–";
+    g_vehicleBrand = "–";
+    g_vehicleDiagOk = false;
+    g_vehicleInfoLoaded = false;
 }

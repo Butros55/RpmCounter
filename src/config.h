@@ -28,6 +28,10 @@ struct ShiftConfig
     bool logoOnIgnitionOn;
     bool logoOnEngineStart;
     bool logoOnIgnitionOff;
+    int manualConnectAttempts;
+    uint32_t color1;
+    uint32_t color2;
+    uint32_t color3;
 };
 
 extern ShiftConfig cfg;

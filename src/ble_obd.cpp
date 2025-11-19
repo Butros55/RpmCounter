@@ -8,9 +8,12 @@
 #include "logo_anim.h"
 #include "state.h"
 #include "utils.h"
+#include "vehicle_info.h"
 
 namespace
 {
+    unsigned long s_nextConnectAttemptMs = 0;
+
     void processObdLine(const String &lineIn)
     {
         if (lineIn.length() == 0)
@@ -134,6 +137,74 @@ namespace
         }
     }
 
+    void stopConnectLoop()
+    {
+        g_connectLoopActive = false;
+        g_manualConnectLoop = false;
+        g_connectLoopRemaining = 0;
+        g_connectLoopTotal = 0;
+        s_nextConnectAttemptMs = 0;
+    }
+
+    void handleConnectLoop()
+    {
+        if (!g_connectLoopActive)
+        {
+            return;
+        }
+
+        if (g_connected)
+        {
+            stopConnectLoop();
+            return;
+        }
+
+        unsigned long now = millis();
+        if (s_nextConnectAttemptMs != 0 && now < s_nextConnectAttemptMs)
+        {
+            return;
+        }
+
+        int attemptIdx = g_connectLoopTotal - g_connectLoopRemaining + 1;
+        if (attemptIdx < 1)
+            attemptIdx = 1;
+
+        Serial.print(g_manualConnectLoop ? "[BLE] Manueller Versuch " : "[BLE] Auto-Versuch ");
+        Serial.print(attemptIdx);
+        Serial.print("/");
+        Serial.print(g_connectLoopTotal);
+        Serial.println("...");
+
+        bool ok = connectToObd();
+        if (ok)
+        {
+            stopConnectLoop();
+            return;
+        }
+
+        if (g_connectLoopRemaining > 0)
+        {
+            g_connectLoopRemaining--;
+        }
+
+        if (g_connectLoopRemaining <= 0)
+        {
+            if (g_manualConnectLoop)
+            {
+                Serial.println("❌ Alle manuellen Verbindungsversuche ausgeschöpft.");
+            }
+            else
+            {
+                Serial.println("❌ Auto-Reconnect-Schleife beendet.");
+            }
+            stopConnectLoop();
+        }
+        else
+        {
+            s_nextConnectAttemptMs = now + 1500;
+        }
+    }
+
     class MyClientCallback : public BLEClientCallbacks
     {
         void onConnect(BLEClient * /*pclient*/) override
@@ -151,6 +222,9 @@ namespace
             g_connected = false;
             g_ignitionOn = false;
             g_engineRunning = false;
+            g_lastObdMs = 0;
+            g_vehicleDiagOk = false;
+            g_vehicleInfoLoaded = false;
             setStatusLED(false);
 
             if (wasIgnition && cfg.logoOnIgnitionOff && !g_leavingPlayedThisCycle)
@@ -214,7 +288,24 @@ bool connectToObd()
     }
 
     Serial.println("🎉 BLE-Verbindung steht! Serial-Monitor kann weiterhin AT/OBD-Befehle schicken.");
+    requestVehicleInfo();
     return true;
+}
+
+void cancelConnectLoop()
+{
+    stopConnectLoop();
+}
+
+void scheduleConnectLoop(int attempts, bool manual)
+{
+    attempts = clampInt(attempts, 5, 10);
+
+    g_connectLoopActive = true;
+    g_manualConnectLoop = manual;
+    g_connectLoopTotal = attempts;
+    g_connectLoopRemaining = attempts;
+    s_nextConnectAttemptMs = 0;
 }
 
 void sendObdCommand(const String &cmd)
@@ -254,10 +345,7 @@ void initBle()
 
     if (g_autoReconnect)
     {
-        if (!connectToObd())
-        {
-            Serial.println("❌ Initiale OBD-Verbindung fehlgeschlagen.");
-        }
+        scheduleConnectLoop(cfg.manualConnectAttempts, false);
     }
 }
 
@@ -265,15 +353,17 @@ void bleObdLoop()
 {
     unsigned long now = millis();
 
-    static unsigned long lastRetry = 0;
+    handleConnectLoop();
+
+    static unsigned long lastAutoSchedule = 0;
     const unsigned long RECONNECT_INTERVAL_MS = 5000;
     const unsigned long HTTP_GRACE_MS = 5000;
 
-    if (g_autoReconnect && !g_connected && now - lastRetry > RECONNECT_INTERVAL_MS && now - g_lastHttpMs > HTTP_GRACE_MS)
+    if (g_autoReconnect && !g_connected && !g_connectLoopActive && now - lastAutoSchedule > RECONNECT_INTERVAL_MS && now - g_lastHttpMs > HTTP_GRACE_MS)
     {
-        lastRetry = now;
-        Serial.println("🔄 Verbindung verloren – versuche Reconnect (auto)...");
-        connectToObd();
+        lastAutoSchedule = now;
+        Serial.println("🔄 Verbindung verloren – starte Auto-Reconnect-Schleife...");
+        scheduleConnectLoop(cfg.manualConnectAttempts, false);
     }
 
     if (!g_testActive && g_connected && g_charWrite && (now - g_lastRpmRequest > RPM_INTERVAL_MS))

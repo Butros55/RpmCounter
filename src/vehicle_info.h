@@ -5,6 +5,8 @@
 
 String readVehicleVin();
 String readVehicleModel();
+String readVehicleBrand();
+bool readVehicleDiagOk();
 void requestVehicleInfo();
 
 #endif // VEHICLE_INFO_H

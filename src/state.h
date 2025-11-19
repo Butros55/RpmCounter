@@ -27,6 +27,8 @@ extern int g_testMaxRpm;
 
 extern bool g_brightnessPreviewActive;
 extern unsigned long g_lastBrightnessChangeMs;
+extern bool g_brightnessPreviewFading;
+extern unsigned long g_brightnessPreviewFadeStartMs;
 
 extern bool g_ignitionOn;
 extern bool g_engineRunning;
@@ -42,6 +44,17 @@ extern String g_lastObdInfo;
 extern unsigned long g_lastTxLogMs;
 
 extern unsigned long g_lastHttpMs;
+
+extern bool g_connectLoopActive;
+extern bool g_manualConnectLoop;
+extern int g_connectLoopRemaining;
+extern int g_connectLoopTotal;
+
+extern String g_vehicleVin;
+extern String g_vehicleModel;
+extern String g_vehicleBrand;
+extern bool g_vehicleDiagOk;
+extern bool g_vehicleInfoLoaded;
 
 void initGlobalState();
 

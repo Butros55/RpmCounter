@@ -22,4 +22,8 @@ void initConfig()
     cfg.logoOnIgnitionOn = true;
     cfg.logoOnEngineStart = true;
     cfg.logoOnIgnitionOff = true;
+    cfg.manualConnectAttempts = 6;
+    cfg.color1 = 0x007bff;
+    cfg.color2 = 0xffb300;
+    cfg.color3 = 0xff0033;
 }
