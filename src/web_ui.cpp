@@ -441,7 +441,7 @@ namespace
         page += F("</div>");
 
         //
-        // JavaScript
+        // JavaScript – Teil 1
         //
         page += F(
             "<script>"
@@ -450,6 +450,9 @@ namespace
             "let pendingSpinner=0;"
             "let lastSpinnerTs=0;"
             "let dotCounter=0;"
+            "let vehicleDotsTimer=null;"
+            "let vehicleDotsActive=false;"
+            "let vehicleDotsStep=0;"
 
             "function animateDots(text){"
             " dotCounter=(dotCounter+1)%4;"
@@ -651,19 +654,44 @@ namespace
             "    if((e=document.getElementById('lastObd'))) e.innerText=s.lastObd;"
             "    if((e=document.getElementById('bleStatus'))) e.innerText=s.bleText;"
             "    if((e=document.getElementById('vehicleModel'))){"
-            "      let txt=s.vehicleModel;"
-            "      if(!s.vehicleInfoReady && txt.indexOf('wird')!==-1){txt=animateDots(txt);}"
-            "      e.innerText=txt;"
+            "      e.dataset.base=s.vehicleModel;"
+            "      if(!s.vehicleInfoRequestRunning) e.innerText=s.vehicleModel;"
             "    }"
             "    if((e=document.getElementById('vehicleVin'))){"
-            "      let txt=s.vehicleVin;"
-            "      if(!s.vehicleInfoReady && txt.indexOf('wird')!==-1){txt=animateDots(txt);}"
-            "      e.innerText=txt;"
+            "      e.dataset.base=s.vehicleVin;"
+            "      if(!s.vehicleInfoRequestRunning) e.innerText=s.vehicleVin;"
             "    }"
             "    if((e=document.getElementById('vehicleDiag'))){"
-            "      let txt=s.vehicleDiag;"
-            "      if(!s.vehicleInfoReady && txt.indexOf('wird')!==-1){txt=animateDots(txt);}"
-            "      e.innerText=txt;"
+            "      e.dataset.base=s.vehicleDiag;"
+            "      if(!s.vehicleInfoRequestRunning) e.innerText=s.vehicleDiag;"
+            "    }"
+            "    // Punkt-Animation für Fahrzeugdaten (VIN/Modell/Diagnose)"
+            "    if(s.vehicleInfoRequestRunning){"
+            "      if(!vehicleDotsActive){"
+            "        vehicleDotsActive=true;"
+            "        vehicleDotsStep=0;"
+            "        if(vehicleDotsTimer){clearInterval(vehicleDotsTimer);vehicleDotsTimer=null;}"
+            "        vehicleDotsTimer=setInterval(function(){"
+            "          vehicleDotsStep=(vehicleDotsStep+1)%4;"
+            "          ['vehicleModel','vehicleVin','vehicleDiag'].forEach(function(id){"
+            "            var el=document.getElementById(id);"
+            "            if(el && el.dataset && el.dataset.base!==undefined){"
+            "              el.innerText=el.dataset.base + '.'.repeat(vehicleDotsStep);"
+            "            }"
+            "          });"
+            "        },400);"
+            "      }"
+            "    }else{"
+            "      if(vehicleDotsActive){"
+            "        vehicleDotsActive=false;"
+            "        if(vehicleDotsTimer){clearInterval(vehicleDotsTimer);vehicleDotsTimer=null;}"
+            "        ['vehicleModel','vehicleVin','vehicleDiag'].forEach(function(id){"
+            "          var el=document.getElementById(id);"
+            "          if(el && el.dataset && el.dataset.base!==undefined){"
+            "            el.innerText=el.dataset.base;"
+            "          }"
+            "        });"
+            "      }"
             "    }"
             "    var btnC=document.getElementById('btnConnect');"
             "    var btnD=document.getElementById('btnDisconnect');"
@@ -724,15 +752,18 @@ namespace
 
             "document.addEventListener('DOMContentLoaded',initUI);"
             "</script>");
+
+        //
+        // JavaScript – Teil 2: LED-Preview & Farblabels
+        //
         page += F(
             "<script>"
-            // --- Blink-Preview Steuerung ---
             "var blinkPreviewEndTs=0;"
             "var blinkTimerId=null;"
             "var blinkPhase=false;"
 
             "function triggerBlinkPreview(){"
-            "  blinkPreviewEndTs=Date.now()+2500;" // 2.5 Sekunden Blinken
+            "  blinkPreviewEndTs=Date.now()+2500;"
             "  if(blinkTimerId===null){"
             "    blinkTimerId=setInterval(function(){"
             "      blinkPhase=!blinkPhase;"
@@ -742,11 +773,10 @@ namespace
             "        blinkPhase=false;"
             "      }"
             "      updateLedPreview();"
-            "    },200);" // Blink-Frequenz ~5 Hz
+            "    },200);"
             "  }"
             "}"
 
-            // --- LED-Preview zeichnen ---
             "function updateLedPreview(){"
             "  var cont=document.getElementById('ledPreview');"
             "  if(!cont) return;"
@@ -758,9 +788,9 @@ namespace
             "  var bSlider=document.getElementById('blinkStartSlider');"
             "  if(!gSlider||!ySlider||!bSlider) return;"
 
-            "  var gv=parseInt(gSlider.value||'0',10);" // Ende Low RPM
-            "  var yv=parseInt(ySlider.value||'0',10);" // Ende Mid RPM
-            "  var bv=parseInt(bSlider.value||'0',10);" // Start Blinken
+            "  var gv=parseInt(gSlider.value||'0',10);"
+            "  var yv=parseInt(ySlider.value||'0',10);"
+            "  var bv=parseInt(bSlider.value||'0',10);"
 
             "  var gColor=document.getElementById('greenColorInput');"
             "  var yColor=document.getElementById('yellowColorInput');"
@@ -772,19 +802,15 @@ namespace
 
             "  var dots=cont.querySelectorAll('.led-dot');"
             "  for(var i=0;i<dots.length;i++){"
-            "    var frac=((i+0.5)/count)*100;" // Position in %
+            "    var frac=((i+0.5)/count)*100;"
             "    var col;"
 
             "    if(frac<=gv){"
-            "      // Low RPM"
             "      col=gColor.value;"
             "    }else if(frac<=yv){"
-            "      // Mid RPM"
             "      col=yColor.value;"
             "    }else{"
-            "      // Bereich darüber: Shift / Warnung (rot)"
             "      if(blinkActive && frac>=bv){"
-            "        // Blinker an: ab blinkStartPct blinkt rot/dunkel"
             "        col=blinkPhase ? '#222222' : rColor.value;"
             "      }else{"
             "        col=rColor.value;"
@@ -795,7 +821,6 @@ namespace
             "  }"
             "}"
 
-            // --- Layout der Punkte (damit alle nebeneinander passen) ---
             "function layoutLedDots(){"
             "  var cont=document.getElementById('ledPreview');"
             "  if(!cont) return;"
@@ -833,7 +858,6 @@ namespace
             "  window.addEventListener('resize',layoutLedDots);"
             "}"
 
-            // --- Farb-Namen + Label-Farben (überschreibt die alte updateColorUi) ---
             "function updateColorUi(){"
             "  var cfg=["
             "    {key:'green',slot:1,labelId:'greenEndLabel',hiddenId:'greenLabelHidden',nameSpanId:'color1Name'},"
@@ -857,10 +881,8 @@ namespace
             "  updateLedPreview();"
             "}"
 
-            // --- DOM Ready: Events verdrahten ---
             "document.addEventListener('DOMContentLoaded',function(){"
             "  initLedPreview();"
-
             "  var ids=['greenEndSlider','yellowEndSlider','blinkStartSlider'];"
             "  ids.forEach(function(id){"
             "    var el=document.getElementById(id);"
@@ -874,7 +896,6 @@ namespace
             "      if(id==='blinkStartSlider'){triggerBlinkPreview();}"
             "    });"
             "  });"
-
             "  updateColorUi();"
             "});"
             "</script>");
@@ -964,18 +985,16 @@ namespace
         String safeStatus = htmlEscape(vehStatus);
         page += "<div class='row small'>Status: <span id='vehicleStatus' data-base='" + safeStatus + "'>" + safeStatus + "</span></div>";
 
-        // Neuer Sync-Button
         page += F("<button type='button' id='btnVehicleRefresh'>Fahrzeugdaten neu synchronisieren</button>");
         page += F("<div class='error-text' id='vehicleRefreshError'></div>");
 
         page += F("</div>"); // section Mein Fahrzeug
 
-        // Speichern-Button
         page += F("<button type='submit' id='settingsSave' disabled>Speichern</button>");
         page += F("</form>");
 
         //
-        // JS: Save-Button aktivieren bei Änderungen + manueller Sync
+        // JS Settings
         //
         page += F(
             "<script>"
@@ -1018,7 +1037,20 @@ namespace
             "      dotsTimer=setInterval(function(){"
             "        step=(step+1)%4;"
             "        statusEl.innerText=statusEl.dataset.base + '.'.repeat(step);"
+            "        ['vehicleVin','vehicleModel','vehicleDiag'].forEach(function(id){"
+            "          var el=document.getElementById(id);"
+            "          if(el && el.dataset && el.dataset.base!==undefined){"
+            "            el.innerText=el.dataset.base + '.'.repeat(step);"
+            "          }"
+            "        });"
             "      },400);"
+            "    }else{"
+            "      ['vehicleVin','vehicleModel','vehicleDiag'].forEach(function(id){"
+            "        var el=document.getElementById(id);"
+            "        if(el && el.dataset && el.dataset.base!==undefined){"
+            "          el.innerText=el.dataset.base;"
+            "        }"
+            "      });"
             "    }"
             "  }"
             "  function showError(msg){"
@@ -1065,9 +1097,18 @@ namespace
             "  }"
             "  function updateVehicleInfo(data){"
             "    var el;"
-            "    if((el=document.getElementById('vehicleVin'))) el.innerText=data.vehicleVin;"
-            "    if((el=document.getElementById('vehicleModel'))) el.innerText=data.vehicleModel;"
-            "    if((el=document.getElementById('vehicleDiag'))) el.innerText=data.vehicleDiag;"
+            "    if((el=document.getElementById('vehicleVin'))){"
+            "      el.dataset.base=data.vehicleVin;"
+            "      if(!data.vehicleInfoRequestRunning) el.innerText=data.vehicleVin;"
+            "    }"
+            "    if((el=document.getElementById('vehicleModel'))){"
+            "      el.dataset.base=data.vehicleModel;"
+            "      if(!data.vehicleInfoRequestRunning) el.innerText=data.vehicleModel;"
+            "    }"
+            "    if((el=document.getElementById('vehicleDiag'))){"
+            "      el.dataset.base=data.vehicleDiag;"
+            "      if(!data.vehicleInfoRequestRunning) el.innerText=data.vehicleDiag;"
+            "    }"
             "    var loading=false;"
             "    var statusText='Noch keine Daten';"
             "    if(data.vehicleInfoRequestRunning){"
@@ -1195,7 +1236,6 @@ namespace
             cfg.redColor = parseHexColor(server.arg("redColor"), cfg.redColor);
         }
 
-        // Labels kommen aus den Hidden-Inputs – Defaults sind Farbe 1/2/3
         if (server.hasArg("greenLabel"))
         {
             cfg.greenLabel = safeLabel(server.arg("greenLabel"), "Farbe 1");
@@ -1219,7 +1259,6 @@ namespace
             g_autoReconnect = true;
         }
 
-        // Wenn Auto-Reconnect neu aktiviert wurde -> sofortigen Verbindungsversuch triggern
         if (!previousAutoReconnect && g_autoReconnect)
         {
             g_forceImmediateReconnect = true;
@@ -1368,7 +1407,7 @@ namespace
         }
 
         String json;
-        json.reserve(512); // reicht locker für unser kleines JSON
+        json.reserve(512);
         json = "{";
         json += "\"rpm\":" + String(g_currentRpm);
         json += ",\"maxRpm\":" + String(g_maxSeenRpm);
@@ -1419,19 +1458,16 @@ namespace
         server.send(303);
     }
 
-    // Manueller Refresh der Fahrzeugdaten von der Settings-Seite
     void handleSettingsVehicleRefresh()
     {
         g_lastHttpMs = millis();
 
-        // Nur versuchen, wenn eine OBD-Verbindung besteht
         if (!g_connected)
         {
             server.send(200, "application/json", "{\"status\":\"error\",\"reason\":\"no-connection\"}");
             return;
         }
 
-        // Startet den neuen Abruf (setzt Platzhalter und Flags)
         requestVehicleInfo(true);
 
         server.send(200, "application/json", "{\"status\":\"started\"}");
@@ -1474,10 +1510,7 @@ void initWebUi()
     server.on("/status", HTTP_GET, handleStatus);
     server.on("/settings", HTTP_GET, handleSettingsGet);
     server.on("/settings", HTTP_POST, handleSettingsSave);
-
-    // NEU / wichtig für den Sync-Button auf der Einstellungsseite
     server.on("/settings/vehicle-refresh", HTTP_POST, handleSettingsVehicleRefresh);
-
     server.on("/dev/display-logo", HTTP_POST, handleDevDisplayLogo);
 
     server.begin();
