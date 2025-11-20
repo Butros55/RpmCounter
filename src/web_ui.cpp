@@ -213,6 +213,7 @@ namespace
 
         page += F("<form id='mainForm' method='POST' action='/save'>");
 
+        // --- Allgemein ---
         page += F("<div class='section'>");
         page += F("<div class='section-title'>Allgemein</div>");
         page += F("<label for='modeSelect'>Mode</label><select name='mode' id='modeSelect'>");
@@ -255,6 +256,7 @@ namespace
         page += F("</div></div>");
         page += F("</div>");
 
+        // --- Drehzahl-Bereich ---
         page += F("<div class='section'>");
         page += F("<div class='section-title'>Drehzahl-Bereich</div>");
         page += F("<div class='toggle-row'><span class='toggle-label'>Auto-Scale Max RPM (benutze max gesehene Drehzahl)</span><label class='switch'>");
@@ -285,8 +287,11 @@ namespace
 
         page += F("<div class='led-preview-title small'>LED-Vorschau</div>");
         page += "<div id='ledPreview' class='led-preview' data-led-count='" + String(NUM_LEDS) + "'></div>";
+        // Test-Button jetzt im Block Drehzahl-Bereich
+        page += F("<button type='button' id='btnTest'>Testlauf: RPM-Sweep</button>");
         page += F("</div>");
 
+        // --- Coming-Home / Leaving ---
         page += F("<div class='section'>");
         page += F("<div class='section-title'>Coming-Home / Leaving</div>");
         page += F("<div class='toggle-row'><span class='toggle-label'>M-Logo bei Zündung an</span><label class='switch'>");
@@ -308,6 +313,7 @@ namespace
         page += "><span class='slider'></span></label></div>";
         page += F("</div>");
 
+        // --- Mein Fahrzeug ---
         page += F("<div class='section'>");
         page += F("<div class='section-title'>Mein Fahrzeug</div>");
         page += "<div class='row small'>Fahrzeug: <strong id='vehicleModel' data-base='" + htmlEscape(g_vehicleModel) + "'>" + htmlEscape(g_vehicleModel) + "</strong></div>";
@@ -317,6 +323,7 @@ namespace
 
         if (g_devMode)
         {
+            // --- OBD / Verbindung ---
             page += F("<div class='section'>");
             page += F("<div class='section-title'>OBD / Verbindung</div>");
             page += F("<div class='toggle-row'><span class='toggle-label'>OBD automatisch verbinden (Reconnect)</span><label class='switch'>");
@@ -328,29 +335,8 @@ namespace
             page += g_connected ? "Verbunden" : "Getrennt";
             page += g_autoReconnect ? " (Auto-Reconnect AN)" : " (Auto-Reconnect AUS)";
             page += F("</span></div>");
-            page += F("<div class='status-line'>Aktuelle RPM: <span id='rpmVal'>");
-            page += String(g_currentRpm);
-            page += F("</span> / Max gesehen: <span id='rpmMaxVal'>");
-            page += String(g_maxSeenRpm);
-            page += F("</span></div></div>");
 
-            page += F("<div class='section'><div class='section-title'>Display</div>");
-            page += F("<button type='button' id='btnDisplayLogo'>BMW Logo auf Display anzeigen</button>");
-            page += F("<div class='small'>Zeigt kurz das BMW-Logo auf dem Display (nur im Entwicklermodus).</div></div>");
-
-            page += F("<div class='section'><div class='section-title'>Debug<span id='debugSpinner' class='spinner hidden'></span></div>");
-            page += F("<div class='row small'>Letzter TX: <span id='lastTx'>");
-            page += htmlEscape(g_lastTxInfo);
-            page += F("</span></div>");
-            page += F("<div class='row small'>Letzte OBD-Zeile: <span id='lastObd'>");
-            page += htmlEscape(g_lastObdInfo);
-            page += F("</span></div></div>");
-        }
-
-        page += F("<button type='button' id='btnSave' disabled>Speichern</button>");
-        page += F("<button type='button' id='btnTest'>Testlauf: RPM-Sweep</button>");
-        if (g_devMode)
-        {
+            // Buttons jetzt in diesem Block:
             page += "<button type='button' id='btnConnect'";
             if (g_connected)
                 page += " style='display:none'";
@@ -359,21 +345,55 @@ namespace
             if (!g_connected)
                 page += " style='display:none'";
             page += ">OBD trennen</button>";
+
+            page += F("</div>");
+
+            // --- Display ---
+            page += F("<div class='section'><div class='section-title'>Display</div>");
+            page += F("<button type='button' id='btnDisplayLogo'>BMW Logo auf Display anzeigen</button>");
+            page += F("<div class='small'>Zeigt kurz das BMW-Logo auf dem Display (nur im Entwicklermodus).</div></div>");
+
+            // --- Debug ---
+            page += F("<div class='section'><div class='section-title'>Debug<span id='debugSpinner' class='spinner hidden'></span></div>");
+            page += F("<div class='row small'>Letzter TX: <span id='lastTx'>");
+            page += htmlEscape(g_lastTxInfo);
+            page += F("</span></div>");
+            page += F("<div class='row small'>Letzte OBD-Zeile: <span id='lastObd'>");
+            page += htmlEscape(g_lastObdInfo);
+            page += F("</span></div>");
+            // RPM/Max jetzt hier unter Debug
+            page += F("<div class='row small'>Aktuelle RPM: <span id='rpmVal'>");
+            page += String(g_currentRpm);
+            page += F("</span> / Max gesehen: <span id='rpmMaxVal'>");
+            page += String(g_maxSeenRpm);
+            page += F("</span></div></div>");
         }
+
+        // Save + Reset unten
+        page += F("<button type='button' id='btnSave' disabled>Speichern</button>");
         page += F("<button type='button' class='btn-danger' id='btnReset' style='display:none'>Zurücksetzen</button>");
         page += F("</form>");
 
         page += "<div class='small' style='text-align:center;margin-top:16px;'>" + WiFi.softAPIP().toString() + "</div>";
 
-        page += F("<script>"
-                  "let saveDirty=false;"
+        // --- Script ---
+        page += F(
+            "<script>");
+        page += "const TEST_SWEEP_DURATION = " + String(TEST_SWEEP_DURATION) + ";";
+        page += F("let saveDirty=false;"
+                  "let initialMainState=null;"
                   "let pendingSpinner=0;"
                   "let lastSpinnerTs=0;"
                   "let statusTimer=null;"
-                  "let blinkTimerId=null;"
-                  "let blinkPreviewEnd=0;"
-                  "let blinkPhase=false;"
                   "let dotIntervals={};"
+                  "let ledBlinkState=false;"
+                  "let lastLedBlinkTs=0;"
+                  "let blinkPreviewActive=false;"
+                  "let blinkPreviewEnd=0;"
+                  "let testSweepActive=false;"
+                  "let testSweepStart=0;"
+                  "let previewTimerId=null;"
+
                   "function setAnimatedDots(el,loading){"
                   " if(!el) return;"
                   " const key=el.id;"
@@ -389,34 +409,493 @@ namespace
                   "  el.innerText=el.dataset.base||'';"
                   " }"
                   "}"
-                  "function updateResetVisibility(){const r=document.getElementById('btnReset');if(r) r.style.display=saveDirty?'block':'none';}"
-                  "function markDirty(){saveDirty=true;const b=document.getElementById('btnSave');if(b) b.disabled=false;updateResetVisibility();}"
-                  "function onBrightnessChange(v){document.getElementById('bval').innerText=v;document.getElementById('brightness').value=v;markDirty();fetch('/brightness?val='+v).catch(()=>{});}"
-                  "function updateSliderDisplay(el){const target=el.dataset.display;const span=document.getElementById(target);if(span) span.innerText=el.value+'%';}"
-                  "function enforceSliderOrder(changedId){const g=document.getElementById('greenEndSlider');const y=document.getElementById('yellowEndSlider');const b=document.getElementById('blinkStartSlider');if(!g||!y||!b) return;let gv=parseInt(g.value||'0');let yv=parseInt(y.value||'0');let bv=parseInt(b.value||'0');const sync=(el,val)=>{if(parseInt(el.value)!=val){el.value=val;updateSliderDisplay(el);}};if(changedId==='greenEndSlider'){if(yv<gv){yv=gv;sync(y,yv);}if(bv<yv){bv=yv;sync(b,bv);}}else if(changedId==='yellowEndSlider'){if(yv<gv){gv=yv;sync(g,gv);}if(bv<yv){bv=yv;sync(b,bv);}}else if(changedId==='blinkStartSlider'){if(bv<yv){yv=bv;sync(y,yv);}if(yv<gv){gv=yv;sync(g,gv);}}updateLedPreview();}"
-                  "function updateAutoscaleUi(){const chk=document.getElementById('autoscaleToggle');const cont=document.getElementById('fixedMaxContainer');const inp=document.getElementById('fixedMaxRpmInput');if(!chk||!cont||!inp) return;const on=chk.checked;inp.disabled=on;cont.classList.toggle('disabled-field',on);}"
-                  "function beginRequest(){pendingSpinner++;lastSpinnerTs=Date.now();updateSpinnerVisibility();return ()=>{pendingSpinner=Math.max(0,pendingSpinner-1);updateSpinnerVisibility();};}"
-                  "function updateSpinnerVisibility(){const sp=document.getElementById('debugSpinner');if(!sp) return;const idle=(Date.now()-lastSpinnerTs)>3000;if(pendingSpinner<=0||idle){sp.classList.add('hidden');}else{sp.classList.remove('hidden');}}"
-                  "function postSimple(url){const done=beginRequest();fetch(url,{method:'POST'}).finally(done);}"
-                  "function handleSliderChange(ev){enforceSliderOrder(ev.target.id);updateSliderDisplay(ev.target);if(ev.target.id==='blinkStartSlider'){triggerBlinkPreview();}markDirty();}"
-                  "function triggerBlinkPreview(){const mode=document.getElementById('modeSelect');if(mode && mode.value==='0') return;blinkPreviewEnd=Date.now()+2500;if(!blinkTimerId){blinkTimerId=setInterval(()=>{blinkPhase=!blinkPhase;if(Date.now()>=blinkPreviewEnd){clearInterval(blinkTimerId);blinkTimerId=null;blinkPhase=false;}updateLedPreview();},200);}updateLedPreview();}"
-                  "function layoutLedDots(){const cont=document.getElementById('ledPreview');if(!cont) return;const dots=cont.querySelectorAll('.led-dot');if(!dots.length) return;const w=cont.clientWidth;const spacing=2;const maxSize=Math.floor((w-spacing*(dots.length-1))/dots.length);const size=Math.max(4,Math.min(14,maxSize));dots.forEach(d=>{d.style.width=size+'px';d.style.height=size+'px';d.style.marginLeft=(spacing/2)+'px';d.style.marginRight=(spacing/2)+'px';});}"
-                  "function initLedPreview(){const cont=document.getElementById('ledPreview');if(!cont) return;const count=parseInt(cont.dataset.ledCount||'0');cont.innerHTML='';for(let i=0;i<count;i++){const d=document.createElement('div');d.className='led-dot';cont.appendChild(d);}layoutLedDots();updateLedPreview();window.addEventListener('resize',layoutLedDots);}"
-                  "function updateLedPreview(){const cont=document.getElementById('ledPreview');if(!cont) return;const dots=cont.querySelectorAll('.led-dot');const count=dots.length;if(!count) return;const gv=parseInt(document.getElementById('greenEndSlider').value||'0');const yv=parseInt(document.getElementById('yellowEndSlider').value||'0');const bv=parseInt(document.getElementById('blinkStartSlider').value||'0');const gCol=document.getElementById('greenColorInput').value;const yCol=document.getElementById('yellowColorInput').value;const rCol=document.getElementById('redColorInput').value;const mode=document.getElementById('modeSelect').value;const blinkActive=(blinkTimerId!==null && Date.now()<blinkPreviewEnd);dots.forEach((d,i)=>{const frac=((i+0.5)/count)*100;let col=rCol;if(frac<=gv){col=gCol;}else if(frac<=yv){col=yCol;}else{if(mode!=='0' && blinkActive){if(mode==='1'){if(frac>=bv){col=blinkPhase?'#222':rCol;}}else if(mode==='2'){col=blinkPhase?'#222':rCol;}}}"
-                  "d.style.backgroundColor=col;});const blinkContainer=document.getElementById('blinkStartContainer');if(mode==='0'){blinkContainer.style.display='none';}else{blinkContainer.style.display='block';}}"
-                  "function classifyColor(slot,value){if(slot===1) return 'Farbe 1 – Grün';if(slot===2) return 'Farbe 2 – Gelb';return 'Farbe 3 – Rot';}"
-                  "function updateColorUi(){const cfg=[{k:'green',slot:1,labelId:'greenEndLabel',hiddenId:'greenLabelHidden',nameId:'color1Name'},{k:'yellow',slot:2,labelId:'yellowEndLabel',hiddenId:'yellowLabelHidden',nameId:'color2Name'},{k:'red',slot:3,labelId:'blinkStartLabel',hiddenId:'redLabelHidden',nameId:'color3Name'}];cfg.forEach(c=>{const inp=document.getElementById(c.k+'ColorInput');if(!inp) return;const name=classifyColor(c.slot,inp.value);const label=name.split('–')[1].trim();const span=document.getElementById(c.nameId);if(span) span.innerText=label;const hid=document.getElementById(c.hiddenId);if(hid) hid.value=label;const lbl=document.getElementById(c.labelId);if(lbl) lbl.style.color=inp.value;});updateLedPreview();}"
-                  "function updateVehicleDots(loading){['vehicleModel','vehicleVin','vehicleDiag'].forEach(id=>{setAnimatedDots(document.getElementById(id),loading);});}"
-                  "function fetchStatus(){const done=beginRequest();fetch('/status').then(r=>r.json()).then(s=>{const rpm=document.getElementById('rpmVal');if(rpm&&s.rpm!==undefined) rpm.innerText=s.rpm;const rpmMax=document.getElementById('rpmMaxVal');if(rpmMax&&s.maxRpm!==undefined) rpmMax.innerText=s.maxRpm;const lastTx=document.getElementById('lastTx');if(lastTx&&s.lastTx!==undefined){lastTx.dataset.base=s.lastTx;lastTx.innerText=s.lastTx;}const lastObd=document.getElementById('lastObd');if(lastObd&&s.lastObd!==undefined){lastObd.dataset.base=s.lastObd;lastObd.innerText=s.lastObd;}const ble=document.getElementById('bleStatus');if(ble&&s.bleText) ble.innerText=s.bleText;const vm=document.getElementById('vehicleModel');if(vm&&s.vehicleModel!==undefined){vm.dataset.base=s.vehicleModel;vm.innerText=s.vehicleModel;}const vv=document.getElementById('vehicleVin');if(vv&&s.vehicleVin!==undefined){vv.dataset.base=s.vehicleVin;vv.innerText=s.vehicleVin;}const vd=document.getElementById('vehicleDiag');if(vd&&s.vehicleDiag!==undefined){vd.dataset.base=s.vehicleDiag;vd.innerText=s.vehicleDiag;}updateVehicleDots(s.vehicleInfoRequestRunning);const btnC=document.getElementById('btnConnect');const btnD=document.getElementById('btnDisconnect');if(btnC&&btnD){if(s.connected){btnC.style.display='none';btnD.style.display='block';}else{btnC.style.display='block';btnD.style.display='none';}}}).catch(()=>{}).finally(done);}"
-                  "function onSaveClicked(){const done=beginRequest();const fd=new FormData(document.getElementById('mainForm'));fetch('/save',{method:'POST',body:fd}).then(()=>{saveDirty=false;const b=document.getElementById('btnSave');if(b) b.disabled=true;updateResetVisibility();}).finally(done);}"
-                  "function onTestClicked(){const done=beginRequest();const fd=new FormData(document.getElementById('mainForm'));fetch('/test',{method:'POST',body:fd}).finally(done);}"
-                  "function initUI(){const form=document.getElementById('mainForm');if(form){form.querySelectorAll('input,select').forEach(el=>{if(el.id==='brightness_slider') return;if(el.type==='range'){el.addEventListener('input',handleSliderChange);el.addEventListener('change',handleSliderChange);}else{el.addEventListener('change',markDirty);el.addEventListener('input',markDirty);}});}const auto=document.getElementById('autoscaleToggle');if(auto) auto.addEventListener('change',()=>{markDirty();updateAutoscaleUi();});updateAutoscaleUi();['green','yellow','red'].forEach(n=>{const c=document.getElementById(n+'ColorInput');if(c){c.addEventListener('input',()=>{updateColorUi();markDirty();});c.addEventListener('change',()=>{updateColorUi();markDirty();});}});['greenEndSlider','yellowEndSlider','blinkStartSlider'].forEach(id=>{const el=document.getElementById(id);if(el){updateSliderDisplay(el);el.addEventListener('input',handleSliderChange);el.addEventListener('change',handleSliderChange);}});const b=document.getElementById('brightness_slider');if(b){b.addEventListener('input',e=>onBrightnessChange(e.target.value));b.addEventListener('change',e=>onBrightnessChange(e.target.value));}const ms=document.getElementById('modeSelect');if(ms){ms.addEventListener('change',()=>{markDirty();updateLedPreview();});}const sb=document.getElementById('btnSave');if(sb) sb.addEventListener('click',onSaveClicked);const tb=document.getElementById('btnTest');if(tb) tb.addEventListener('click',onTestClicked);const bc=document.getElementById('btnConnect');if(bc) bc.addEventListener('click',()=>postSimple('/connect'));const bd=document.getElementById('btnDisconnect');if(bd) bd.addEventListener('click',()=>postSimple('/disconnect'));const br=document.getElementById('btnReset');if(br) br.addEventListener('click',()=>window.location.reload());const bdsp=document.getElementById('btnDisplayLogo');if(bdsp) bdsp.addEventListener('click',()=>postSimple('/dev/display-logo'));initLedPreview();updateColorUi();fetchStatus();statusTimer=setInterval(fetchStatus,1500);setInterval(updateSpinnerVisibility,1000);updateResetVisibility();}"
+
+                  "function updateResetVisibility(){"
+                  " const r=document.getElementById('btnReset');"
+                  " if(r) r.style.display=saveDirty?'block':'none';"
+                  "}"
+
+                  "function captureInitialMainState(){"
+                  " const form=document.getElementById('mainForm');"
+                  " if(!form) return;"
+                  " initialMainState={};"
+                  " const elements=form.querySelectorAll('input,select,textarea');"
+                  " elements.forEach(el=>{"
+                  "   if(!el.name) return;"
+                  "   let val;"
+                  "   if(el.type==='checkbox'){"
+                  "     val=el.checked?'on':'';"
+                  "   }else{"
+                  "     val=el.value;"
+                  "   }"
+                  "   initialMainState[el.name]=val;"
+                  " });"
+                  "}"
+
+                  "function recomputeMainDirty(){"
+                  " const form=document.getElementById('mainForm');"
+                  " if(!form){saveDirty=false;return;}"
+                  " if(!initialMainState) captureInitialMainState();"
+                  " let changed=false;"
+                  " const current={};"
+                  " const elements=form.querySelectorAll('input,select,textarea');"
+                  " elements.forEach(el=>{"
+                  "   if(!el.name) return;"
+                  "   let val;"
+                  "   if(el.type==='checkbox'){"
+                  "     val=el.checked?'on':'';"
+                  "   }else{"
+                  "     val=el.value;"
+                  "   }"
+                  "   current[el.name]=val;"
+                  " });"
+                  " for(const k in initialMainState){"
+                  "   if(initialMainState[k]!==current[k]){"
+                  "     changed=true;"
+                  "     break;"
+                  "   }"
+                  " }"
+                  " saveDirty=changed;"
+                  " const b=document.getElementById('btnSave');"
+                  " if(b) b.disabled=!changed;"
+                  " updateResetVisibility();"
+                  "}"
+
+                  "function markDirty(){"
+                  " recomputeMainDirty();"
+                  "}"
+
+                  "function onBrightnessChange(v){"
+                  " document.getElementById('bval').innerText=v;"
+                  " document.getElementById('brightness').value=v;"
+                  " markDirty();"
+                  " fetch('/brightness?val='+v).catch(()=>{});"
+                  "}"
+
+                  "function updateSliderDisplay(el){"
+                  " const target=el.dataset.display;"
+                  " const span=document.getElementById(target);"
+                  " if(span) span.innerText=el.value+'%';"
+                  "}"
+
+                  "function enforceSliderOrder(changedId){"
+                  " const g=document.getElementById('greenEndSlider');"
+                  " const y=document.getElementById('yellowEndSlider');"
+                  " const b=document.getElementById('blinkStartSlider');"
+                  " if(!g||!y||!b) return;"
+                  " let gv=parseInt(g.value||'0');"
+                  " let yv=parseInt(y.value||'0');"
+                  " let bv=parseInt(b.value||'0');"
+                  " const sync=(el,val)=>{"
+                  "   if(parseInt(el.value)!=val){"
+                  "     el.value=val;"
+                  "     updateSliderDisplay(el);"
+                  "   }"
+                  " };"
+                  " if(changedId==='greenEndSlider'){"
+                  "   if(yv<gv){yv=gv;sync(y,yv);}"
+                  "   if(bv<yv){bv=yv;sync(b,bv);}"
+                  " }else if(changedId==='yellowEndSlider'){"
+                  "   if(yv<gv){gv=yv;sync(g,gv);}"
+                  "   if(bv<yv){bv=yv;sync(b,bv);}"
+                  " }else if(changedId==='blinkStartSlider'){"
+                  "   if(bv<yv){yv=bv;sync(y,yv);}"
+                  "   if(yv<gv){gv=yv;sync(g,gv);}"
+                  " }"
+                  "}"
+
+                  "function updateAutoscaleUi(){"
+                  " const chk=document.getElementById('autoscaleToggle');"
+                  " const cont=document.getElementById('fixedMaxContainer');"
+                  " const inp=document.getElementById('fixedMaxRpmInput');"
+                  " if(!chk||!cont||!inp) return;"
+                  " const on=chk.checked;"
+                  " inp.disabled=on;"
+                  " cont.classList.toggle('disabled-field',on);"
+                  "}"
+
+                  "function beginRequest(){"
+                  " pendingSpinner++;"
+                  " lastSpinnerTs=Date.now();"
+                  " updateSpinnerVisibility();"
+                  " return ()=>{"
+                  "   pendingSpinner=Math.max(0,pendingSpinner-1);"
+                  "   updateSpinnerVisibility();"
+                  " };"
+                  "}"
+
+                  "function updateSpinnerVisibility(){"
+                  " const sp=document.getElementById('debugSpinner');"
+                  " if(!sp) return;"
+                  " const idle=(Date.now()-lastSpinnerTs)>3000;"
+                  " if(pendingSpinner<=0||idle){"
+                  "   sp.classList.add('hidden');"
+                  " }else{"
+                  "   sp.classList.remove('hidden');"
+                  " }"
+                  "}"
+
+                  "function postSimple(url){"
+                  " const done=beginRequest();"
+                  " fetch(url,{method:'POST'}).finally(done);"
+                  "}"
+
+                  "function getThresholds(){"
+                  " const gv=parseInt(document.getElementById('greenEndSlider').value||'0');"
+                  " const yv=parseInt(document.getElementById('yellowEndSlider').value||'0');"
+                  " const bv=parseInt(document.getElementById('blinkStartSlider').value||'0');"
+                  " let greenEnd=gv/100.0;"
+                  " let yellowEnd=yv/100.0;"
+                  " let blinkStart=bv/100.0;"
+                  " if(greenEnd<0) greenEnd=0;"
+                  " if(greenEnd>1) greenEnd=1;"
+                  " if(yellowEnd<greenEnd) yellowEnd=greenEnd;"
+                  " if(yellowEnd>1) yellowEnd=1;"
+                  " if(blinkStart<yellowEnd) blinkStart=yellowEnd;"
+                  " if(blinkStart>1) blinkStart=1;"
+                  " return {greenEnd,yellowEnd,blinkStart};"
+                  "}"
+
+                  "function computeSimFraction(t){"
+                  " if(t<0) t=0;"
+                  " if(t>1) t=1;"
+                  " let pct=0;"
+                  " if(t<0.25){"
+                  "   let tt=t/0.25;"
+                  "   pct=Math.sin(tt*Math.PI);"
+                  " }else if(t<0.70){"
+                  "   let tt=(t-0.25)/0.45;"
+                  "   if(tt<0) tt=0;"
+                  "   if(tt>1) tt=1;"
+                  "   pct=tt*tt*(3-2*tt);"
+                  " }else{"
+                  "   let tt=(t-0.70)/0.30;"
+                  "   if(tt<0) tt=0;"
+                  "   if(tt>1) tt=1;"
+                  "   let base=1-tt;"
+                  "   let wobble=0.05*Math.sin(tt*Math.PI*4.0);"
+                  "   pct=base+wobble;"
+                  " }"
+                  " if(pct<0) pct=0;"
+                  " if(pct>1) pct=1;"
+                  " return pct;"
+                  "}"
+
+                  "function layoutLedDots(){"
+                  " const cont=document.getElementById('ledPreview');"
+                  " if(!cont) return;"
+                  " const dots=cont.querySelectorAll('.led-dot');"
+                  " if(!dots.length) return;"
+                  " const w=cont.clientWidth;"
+                  " const spacing=2;"
+                  " const maxSize=Math.floor((w-spacing*(dots.length-1))/dots.length);"
+                  " const size=Math.max(4,Math.min(14,maxSize));"
+                  " dots.forEach(d=>{"
+                  "   d.style.width=size+'px';"
+                  "   d.style.height=size+'px';"
+                  "   d.style.marginLeft=(spacing/2)+'px';"
+                  "   d.style.marginRight=(spacing/2)+'px';"
+                  " });"
+                  "}"
+
+                  "function initLedPreview(){"
+                  " const cont=document.getElementById('ledPreview');"
+                  " if(!cont) return;"
+                  " const count=parseInt(cont.dataset.ledCount||'0');"
+                  " cont.innerHTML='';"
+                  " for(let i=0;i<count;i++){"
+                  "   const d=document.createElement('div');"
+                  "   d.className='led-dot';"
+                  "   cont.appendChild(d);"
+                  " }"
+                  " layoutLedDots();"
+                  " updateLedPreview();"
+                  " window.addEventListener('resize',layoutLedDots);"
+                  "}"
+
+                  "function renderLedBarFraction(fraction,useBlink){"
+                  " const cont=document.getElementById('ledPreview');"
+                  " if(!cont) return;"
+                  " const dots=cont.querySelectorAll('.led-dot');"
+                  " const count=dots.length;"
+                  " if(!count) return;"
+                  " if(fraction<0) fraction=0;"
+                  " if(fraction>1) fraction=1;"
+                  " const modeVal=document.getElementById('modeSelect').value;"
+                  " const mode=parseInt(modeVal||'0');"
+                  " const thr=getThresholds();"
+                  " const greenEnd=thr.greenEnd;"
+                  " const yellowEnd=thr.yellowEnd;"
+                  " const blinkStart=thr.blinkStart;"
+                  " let ledsOn=Math.round(fraction*count);"
+                  " if(ledsOn<0) ledsOn=0;"
+                  " if(ledsOn>count) ledsOn=count;"
+                  " let shiftBlink=false;"
+                  " if(useBlink && (mode===1||mode===2) && fraction>=blinkStart){"
+                  "   const now=Date.now();"
+                  "   if(now-lastLedBlinkTs>100){"
+                  "     lastLedBlinkTs=now;"
+                  "     ledBlinkState=!ledBlinkState;"
+                  "   }"
+                  "   shiftBlink=true;"
+                  " }else{"
+                  "   ledBlinkState=false;"
+                  " }"
+                  " const mode2FullBlink=useBlink && mode===2 && fraction>=blinkStart;"
+                  " const gCol=document.getElementById('greenColorInput').value;"
+                  " const yCol=document.getElementById('yellowColorInput').value;"
+                  " const rCol=document.getElementById('redColorInput').value;"
+                  " for(let i=0;i<count;i++){"
+                  "   let col='#000000';"
+                  "   if(i<ledsOn){"
+                  "     let pos=count>1 ? (i/(count-1)) : 0;"
+                  "     if(mode2FullBlink){"
+                  "       col=ledBlinkState?rCol:'#000000';"
+                  "     }else{"
+                  "       if(pos<greenEnd){"
+                  "         col=gCol;"
+                  "       }else if(pos<yellowEnd){"
+                  "         col=yCol;"
+                  "       }else{"
+                  "         if(useBlink && mode===1 && shiftBlink){"
+                  "           col=ledBlinkState?rCol:'#000000';"
+                  "         }else{"
+                  "           col=rCol;"
+                  "         }"
+                  "       }"
+                  "     }"
+                  "   }"
+                  "   dots[i].style.backgroundColor=col;"
+                  " }"
+                  " const blinkContainer=document.getElementById('blinkStartContainer');"
+                  " if(mode===0){"
+                  "   blinkContainer.style.display='none';"
+                  " }else{"
+                  "   blinkContainer.style.display='block';"
+                  " }"
+                  "}"
+
+                  "function updateLedPreview(){"
+                  " if(testSweepActive){"
+                  "   const elapsed=Date.now()-testSweepStart;"
+                  "   let t=elapsed/TEST_SWEEP_DURATION;"
+                  "   if(t>=1){"
+                  "     t=1;"
+                  "     testSweepActive=false;"
+                  "   }"
+                  "   const frac=computeSimFraction(t);"
+                  "   renderLedBarFraction(frac,true);"
+                  " }else if(blinkPreviewActive){"
+                  "   const now=Date.now();"
+                  "   if(now>=blinkPreviewEnd){"
+                  "     blinkPreviewActive=false;"
+                  "     renderLedBarFraction(1.0,false);"
+                  "   }else{"
+                  "     renderLedBarFraction(1.0,true);"
+                  "   }"
+                  " }else{"
+                  "   renderLedBarFraction(1.0,false);"
+                  " }"
+                  "}"
+
+                  "function ensurePreviewTimer(){"
+                  " if(!previewTimerId){"
+                  "   previewTimerId=setInterval(updateLedPreview,30);"
+                  " }"
+                  "}"
+
+                  "function handleSliderChange(ev){"
+                  " enforceSliderOrder(ev.target.id);"
+                  " updateSliderDisplay(ev.target);"
+                  " if(ev.target.id==='blinkStartSlider'){"
+                  "   triggerBlinkPreview();"
+                  " }else{"
+                  "   updateLedPreview();"
+                  " }"
+                  " markDirty();"
+                  "}"
+
+                  "function triggerBlinkPreview(){"
+                  " const modeVal=document.getElementById('modeSelect').value;"
+                  " const mode=parseInt(modeVal||'0');"
+                  " if(mode===0) return;"
+                  " blinkPreviewActive=true;"
+                  " blinkPreviewEnd=Date.now()+2500;"
+                  " testSweepActive=false;"
+                  " ensurePreviewTimer();"
+                  " updateLedPreview();"
+                  "}"
+
+                  "function classifyColor(slot,value){"
+                  " if(slot===1) return 'Farbe 1 – Grün';"
+                  " if(slot===2) return 'Farbe 2 – Gelb';"
+                  " return 'Farbe 3 – Rot';"
+                  "}"
+
+                  "function updateColorUi(){"
+                  " const cfg=["
+                  "   {k:'green',slot:1,labelId:'greenEndLabel',hiddenId:'greenLabelHidden',nameId:'color1Name'},"
+                  "   {k:'yellow',slot:2,labelId:'yellowEndLabel',hiddenId:'yellowLabelHidden',nameId:'color2Name'},"
+                  "   {k:'red',slot:3,labelId:'blinkStartLabel',hiddenId:'redLabelHidden',nameId:'color3Name'}"
+                  " ];"
+                  " cfg.forEach(c=>{"
+                  "   const inp=document.getElementById(c.k+'ColorInput');"
+                  "   if(!inp) return;"
+                  "   const name=classifyColor(c.slot,inp.value);"
+                  "   const label=name.split('–')[1].trim();"
+                  "   const span=document.getElementById(c.nameId);"
+                  "   if(span) span.innerText=label;"
+                  "   const hid=document.getElementById(c.hiddenId);"
+                  "   if(hid) hid.value=label;"
+                  "   const lbl=document.getElementById(c.labelId);"
+                  "   if(lbl) lbl.style.color=inp.value;"
+                  " });"
+                  " updateLedPreview();"
+                  "}"
+
+                  "function updateVehicleDots(loading){"
+                  " ['vehicleModel','vehicleVin','vehicleDiag'].forEach(id=>{"
+                  "   setAnimatedDots(document.getElementById(id),loading);"
+                  " });"
+                  "}"
+
+                  "function fetchStatus(){"
+                  " const done=beginRequest();"
+                  " fetch('/status').then(r=>r.json()).then(s=>{"
+                  "   const rpm=document.getElementById('rpmVal');"
+                  "   if(rpm&&s.rpm!==undefined) rpm.innerText=s.rpm;"
+                  "   const rpmMax=document.getElementById('rpmMaxVal');"
+                  "   if(rpmMax&&s.maxRpm!==undefined) rpmMax.innerText=s.maxRpm;"
+                  "   const lastTx=document.getElementById('lastTx');"
+                  "   if(lastTx&&s.lastTx!==undefined){"
+                  "     lastTx.dataset.base=s.lastTx;"
+                  "     lastTx.innerText=s.lastTx;"
+                  "   }"
+                  "   const lastObd=document.getElementById('lastObd');"
+                  "   if(lastObd&&s.lastObd!==undefined){"
+                  "     lastObd.dataset.base=s.lastObd;"
+                  "     lastObd.innerText=s.lastObd;"
+                  "   }"
+                  "   const ble=document.getElementById('bleStatus');"
+                  "   if(ble&&s.bleText) ble.innerText=s.bleText;"
+                  "   const vm=document.getElementById('vehicleModel');"
+                  "   if(vm&&s.vehicleModel!==undefined){"
+                  "     vm.dataset.base=s.vehicleModel;"
+                  "     vm.innerText=s.vehicleModel;"
+                  "   }"
+                  "   const vv=document.getElementById('vehicleVin');"
+                  "   if(vv&&s.vehicleVin!==undefined){"
+                  "     vv.dataset.base=s.vehicleVin;"
+                  "     vv.innerText=s.vehicleVin;"
+                  "   }"
+                  "   const vd=document.getElementById('vehicleDiag');"
+                  "   if(vd&&s.vehicleDiag!==undefined){"
+                  "     vd.dataset.base=s.vehicleDiag;"
+                  "     vd.innerText=s.vehicleDiag;"
+                  "   }"
+                  "   updateVehicleDots(s.vehicleInfoRequestRunning);"
+                  "   const btnC=document.getElementById('btnConnect');"
+                  "   const btnD=document.getElementById('btnDisconnect');"
+                  "   if(btnC&&btnD){"
+                  "     if(s.connected){"
+                  "       btnC.style.display='none';"
+                  "       btnD.style.display='block';"
+                  "     }else{"
+                  "       btnC.style.display='block';"
+                  "       btnD.style.display='none';"
+                  "     }"
+                  "   }"
+                  " }).catch(()=>{}).finally(done);"
+                  "}"
+
+                  "function onSaveClicked(){"
+                  " const done=beginRequest();"
+                  " const fd=new FormData(document.getElementById('mainForm'));"
+                  " fetch('/save',{method:'POST',body:fd}).then(()=>{"
+                  "   captureInitialMainState();"
+                  "   recomputeMainDirty();"
+                  " }).finally(done);"
+                  "}"
+
+                  "function onTestClicked(){"
+                  " const done=beginRequest();"
+                  " const fd=new FormData(document.getElementById('mainForm'));"
+                  " fetch('/test',{method:'POST',body:fd}).finally(done);"
+                  " testSweepActive=true;"
+                  " testSweepStart=Date.now();"
+                  " blinkPreviewActive=false;"
+                  " ensurePreviewTimer();"
+                  " updateLedPreview();"
+                  "}"
+
+                  "function initUI(){"
+                  " const form=document.getElementById('mainForm');"
+                  " if(form){"
+                  "   form.querySelectorAll('input,select').forEach(el=>{"
+                  "     if(el.id==='brightness_slider') return;"
+                  "     if(el.type==='range'){"
+                  "       el.addEventListener('input',handleSliderChange);"
+                  "       el.addEventListener('change',handleSliderChange);"
+                  "     }else{"
+                  "       el.addEventListener('change',markDirty);"
+                  "       el.addEventListener('input',markDirty);"
+                  "     }"
+                  "   });"
+                  " }"
+                  " const auto=document.getElementById('autoscaleToggle');"
+                  " if(auto) auto.addEventListener('change',()=>{markDirty();updateAutoscaleUi();});"
+                  " updateAutoscaleUi();"
+                  " ['green','yellow','red'].forEach(n=>{"
+                  "   const c=document.getElementById(n+'ColorInput');"
+                  "   if(c){"
+                  "     c.addEventListener('input',()=>{updateColorUi();markDirty();});"
+                  "     c.addEventListener('change',()=>{updateColorUi();markDirty();});"
+                  "   }"
+                  " });"
+                  " ['greenEndSlider','yellowEndSlider','blinkStartSlider'].forEach(id=>{"
+                  "   const el=document.getElementById(id);"
+                  "   if(el){"
+                  "     updateSliderDisplay(el);"
+                  "     el.addEventListener('input',handleSliderChange);"
+                  "     el.addEventListener('change',handleSliderChange);"
+                  "   }"
+                  " });"
+                  " const b=document.getElementById('brightness_slider');"
+                  " if(b){"
+                  "   b.addEventListener('input',e=>onBrightnessChange(e.target.value));"
+                  "   b.addEventListener('change',e=>onBrightnessChange(e.target.value));"
+                  " }"
+                  " const ms=document.getElementById('modeSelect');"
+                  " if(ms){"
+                  "   ms.addEventListener('change',()=>{markDirty();updateLedPreview();});"
+                  " }"
+                  " const sb=document.getElementById('btnSave');"
+                  " if(sb) sb.addEventListener('click',onSaveClicked);"
+                  " const tb=document.getElementById('btnTest');"
+                  " if(tb) tb.addEventListener('click',onTestClicked);"
+                  " const bc=document.getElementById('btnConnect');"
+                  " if(bc) bc.addEventListener('click',()=>postSimple('/connect'));"
+                  " const bd=document.getElementById('btnDisconnect');"
+                  " if(bd) bd.addEventListener('click',()=>postSimple('/disconnect'));"
+                  " const br=document.getElementById('btnReset');"
+                  " if(br) br.addEventListener('click',()=>window.location.reload());"
+                  " const bdsp=document.getElementById('btnDisplayLogo');"
+                  " if(bdsp) bdsp.addEventListener('click',()=>postSimple('/dev/display-logo'));"
+                  " initLedPreview();"
+                  " updateColorUi();"
+                  " fetchStatus();"
+                  " statusTimer=setInterval(fetchStatus,1500);"
+                  " setInterval(updateSpinnerVisibility,1000);"
+                  " captureInitialMainState();"
+                  " recomputeMainDirty();"
+                  "}"
                   "document.addEventListener('DOMContentLoaded',initUI);"
                   "</script>");
 
         page += F("</body></html>");
         return page;
     }
+
     String settingsPage()
     {
         String vin = readVehicleVin();
@@ -425,10 +904,14 @@ namespace
 
         String page;
         page.reserve(9000);
-        page += F("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>ShiftLight Einstellungen</title>");
+
         page += F(
+            "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+            "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+            "<title>ShiftLight Einstellungen</title>"
             "<style>"
-            "body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#111;color:#eee;padding:16px;margin:0;}"
+            "body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;"
+            "background:#111;color:#eee;padding:16px;margin:0;}"
             "h1{font-size:20px;margin:0 0 12px 0;display:flex;align-items:center;justify-content:space-between;}"
             "a{color:#0af;text-decoration:none;}"
             ".row{margin-bottom:6px;}"
@@ -447,20 +930,64 @@ namespace
             ".btn-danger{background:#d33;color:#fff;}"
             ".btn:disabled{background:#555;color:#888;}"
             ".error{color:#f77;font-size:12px;margin-top:4px;}"
-            ".spinner{display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid rgba(255,255,255,0.2);border-top-color:#0af;animation:spin 1s linear infinite;margin-left:6px;}"
+            ".spinner{display:inline-block;width:12px;height:12px;border-radius:50%;"
+            "border:2px solid rgba(255,255,255,0.2);border-top-color:#0af;"
+            "animation:spin 1s linear infinite;margin-left:6px;}"
             "@keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}"
-            /* OBD-Konsole Style */
-            ".console-box{background:#000;border-radius:6px;border:1px solid #333;padding:6px;"
-            "font-family:SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.3;"
-            "max-height:160px;overflow-y:auto;white-space:pre-wrap;}"
+            ".console-box{background:#000;border-radius:6px;border:1px solid #333;"
+            "padding:6px;font-family:SFMono-Regular,Menlo,monospace;font-size:11px;"
+            "line-height:1.3;max-height:160px;overflow-y:auto;white-space:pre-wrap;}"
             ".console-input{flex:1;padding:6px;border-radius:6px;border:1px solid #444;"
             "background:#111;color:#eee;font-family:inherit;}"
+            ".console-row{display:flex;gap:8px;margin-top:8px;}"
+            ".console-footer{display:flex;justify-content:space-between;align-items:center;margin-top:8px;}"
+            ".console-footer-left{display:flex;align-items:center;gap:6px;font-size:11px;color:#aaa;}"
+            ".dev-section{"
+            "  overflow:hidden;"
+            "  transition:max-height 0.25s ease,opacity 0.25s ease,"
+            "             margin-top 0.25s ease,padding-top 0.25s ease,"
+            "             padding-bottom 0.25s ease,border-width 0.25s ease;"
+            "}"
+            ".dev-collapsed{"
+            "  max-height:0;"
+            "  opacity:0;"
+            "  margin-top:0;"
+            "  padding-top:0;"
+            "  padding-bottom:0;"
+            "  border-top-width:0;"
+            "  border-bottom-width:0;"
+            "}"
+            ".dev-expanded{"
+            "  max-height:500px;"
+            "  opacity:1;"
+            "}"
+            ".console-box{"
+            "  background:#000;"
+            "  border-radius:6px;"
+            "  border:1px solid #333;"
+            "  padding:6px;"
+            "  font-family:SFMono-Regular,Menlo,monospace;"
+            "  font-size:11px;"
+            "  line-height:1.3;"
+            "  max-height:160px;"
+            "  overflow-y:auto;"
+            "  white-space:pre-wrap;"
+            "}"
+            ".console-input{"
+            "  flex:1;"
+            "  padding:6px;"
+            "  border-radius:6px;"
+            "  border:1px solid #444;"
+            "  background:#111;"
+            "  color:#eee;"
+            "  font-family:inherit;"
+            "}"
             "</style></head><body>");
 
         page += "<h1><a href='/'>&larr; Zurück</a><span>Einstellungen</span></h1>";
         page += F("<form id='settingsForm' method='POST' action='/settings'>");
 
-        // Modus
+        // --- Modus / Dev-Mode ---
         page += F("<div class='section'><div class='section-title'>Modus</div>");
         page += F("<div class='toggle-row'><span class='toggle-label'>Entwicklermodus</span><label class='switch'>");
         page += "<input type='checkbox' name='devMode' id='devModeToggle'";
@@ -469,36 +996,50 @@ namespace
         page += "><span class='slider'></span></label></div>";
         page += F("<div class='small'>Schaltet zusätzliche Debug- und OBD-Einstellungen frei.</div></div>");
 
-        // Fahrzeugdaten
+        // --- Mein Fahrzeug ---
         page += F("<div class='section'><div class='section-title'>Mein Fahrzeug</div>");
         page += "<div class='row small'>Fahrzeug: <strong id='vehicleModel' data-base='" + htmlEscape(model) + "'>" + htmlEscape(model) + "</strong></div>";
         page += "<div class='row small'>VIN: <strong id='vehicleVin' data-base='" + htmlEscape(vin) + "'>" + htmlEscape(vin) + "</strong></div>";
         page += "<div class='row small'>Diagnose: <strong id='vehicleDiag' data-base='" + htmlEscape(diag) + "'>" + htmlEscape(diag) + "</strong></div>";
-        page += "<div class='row small'>Status: <span id='vehicleStatus' data-base='Noch keine Daten'>Noch keine Daten</span><span id='statusSpinner' class='spinner hidden'></span></div>";
+        page += "<div class='row small'>Status: <span id='vehicleStatus' data-base='Noch keine Daten'>Noch keine Daten</span></div>";
         page += F("<button type='button' class='btn' id='btnVehicleRefresh'>Fahrzeugdaten neu synchronisieren</button>");
         page += F("<div id='settingsError' class='error'></div></div>");
 
-        // OBD-Konsole nur im Dev-Mode
+        // --- Dev-OBD-Konsole: ausblendbar über Entwicklermodus ---
+        page += "<div id='devObdSection' class='section dev-section ";
         if (g_devMode)
-        {
-            page += F("<div class='section'><div class='section-title'>OBD-Konsole</div>");
-            page += F("<div class='small'>"
-                      "Direkte AT-/OBD-Befehle senden (z.&nbsp;B. <code>010C</code>, <code>010D</code>, <code>ATZ</code>). "
-                      "Antworten erscheinen unten."
-                      "</div>");
-            page += F("<div id='obdConsole' class='console-box'></div>");
-            page += F("<div style='display:flex;gap:8px;margin-top:8px;'>");
-            page += F("<input type='text' id='obdCmdInput' class='console-input' placeholder='Befehl, z.B. 010C'>");
-            page += F("<button type='button' class='btn' id='obdSendBtn'>Senden</button>");
-            page += F("</div></div>");
-        }
+            page += "dev-expanded";
+        else
+            page += "dev-collapsed";
+        page += "'>";
 
-        // Buttons
+        page += F("<div class='section-title'>OBD-Konsole</div>");
+        page += F("<div class='small'>"
+                  "Direkte AT-/OBD-Befehle senden (z.&nbsp;B. <code>010C</code>, <code>010D</code>, <code>ATZ</code>). "
+                  "Antworten erscheinen unten."
+                  "</div>");
+        page += F("<div id='obdConsole' class='console-box'></div>");
+        page += F("<div class='console-row'>");
+        page += F("<input type='text' id='obdCmdInput' class='console-input' placeholder='Befehl, z.B. 010C'>");
+        page += F("<button type='button' class='btn' id='obdSendBtn'>Senden</button>");
+        page += F("</div>");
+        page += F("<div class='console-footer'>");
+        page += F("<div class='console-footer-left'>");
+        page += F("<label style='display:flex;align-items:center;gap:4px;'>");
+        // Auto-Log: kein "checked" mehr, wir machen das per localStorage im JS
+        page += F("<input type='checkbox' id='obdAutoLog'> Auto-Log");
+        page += F("</label>");
+        page += F("</div>");
+        page += F("<button type='button' class='btn btn-danger' id='obdClearBtn' style='width:auto;padding:6px 10px;'>Clear</button>");
+        page += F("</div>");
+        page += F("</div>");
+
+        // --- Buttons ---
         page += F("<button type='submit' class='btn' id='settingsSave' disabled>Speichern</button>");
         page += F("<button type='button' class='btn btn-danger' id='settingsReset' style='display:none'>Zurücksetzen</button>");
         page += F("</form>");
 
-        // Script
+        // --- Script ---
         page += F(
             "<script>"
             "let settingsDirty=false;"
@@ -507,6 +1048,7 @@ namespace
             "let dotIntervals={};"
             "let consoleLastTx='';"
             "let consoleLastObd='';"
+            "let initialSettingsState=null;"
 
             "function setAnimatedDots(el,loading){"
             "  if(!el) return;"
@@ -526,30 +1068,89 @@ namespace
 
             "function appendConsole(line){"
             "  const box=document.getElementById('obdConsole');"
-            "  if(!box||!line) return;"
-            "  box.textContent+=(box.textContent?'\\n':'')+line;"
-            "  box.scrollTop=box.scrollHeight;"
+            "  if(!box || !line) return;"
+            "  box.textContent += (box.textContent ? '\\n' : '') + line;"
+            "  box.scrollTop = box.scrollHeight;"
+            "}"
+
+            "function formatObdLine(lastTx, resp){"
+            "  if(!resp) return null;"
+            "  const cleanResp=resp.trim();"
+            "  const parts=cleanResp.split(/\\s+/);"
+            "  if(parts.length<2) return null;"
+            "  const mode=parts[0].toUpperCase();"
+            "  const pid=parts[1].toUpperCase();"
+            "  if(mode!=='41') return null;"
+            "  if(pid==='0C' && parts.length>=4){"
+            "    const A=parseInt(parts[2],16);"
+            "    const B=parseInt(parts[3],16);"
+            "    if(isNaN(A)||isNaN(B)) return null;"
+            "    const rpm=((A*256)+B)/4;"
+            "    return '< '+cleanResp+'   (RPM ≈ '+rpm+')';"
+            "  }"
+            "  if(pid==='0D' && parts.length>=3){"
+            "    const A=parseInt(parts[2],16);"
+            "    if(isNaN(A)) return null;"
+            "    return '< '+cleanResp+'   (Speed ≈ '+A+' km/h)';"
+            "  }"
+            "  return '< '+cleanResp;"
+            "}"
+
+            "function captureInitialSettingsState(){"
+            "  const form=document.getElementById('settingsForm');"
+            "  if(!form) return;"
+            "  initialSettingsState={};"
+            "  const elements=form.querySelectorAll('input,select,textarea');"
+            "  elements.forEach(el=>{"
+            "    if(!el.name) return;"
+            "    let val;"
+            "    if(el.type==='checkbox'){"
+            "      val=el.checked?'on':'';"
+            "    }else{"
+            "      val=el.value;"
+            "    }"
+            "    initialSettingsState[el.name]=val;"
+            "  });"
+            "}"
+
+            "function recomputeSettingsDirty(){"
+            "  const form=document.getElementById('settingsForm');"
+            "  if(!form || !initialSettingsState) return;"
+            "  let changed=false;"
+            "  const elements=form.querySelectorAll('input,select,textarea');"
+            "  const current={};"
+            "  elements.forEach(el=>{"
+            "    if(!el.name) return;"
+            "    let val;"
+            "    if(el.type==='checkbox'){"
+            "      val=el.checked?'on':'';"
+            "    }else{"
+            "      val=el.value;"
+            "    }"
+            "    current[el.name]=val;"
+            "  });"
+            "  for(const k in initialSettingsState){"
+            "    if(initialSettingsState[k]!==current[k]){"
+            "      changed=true;"
+            "      break;"
+            "    }"
+            "  }"
+            "  settingsDirty=changed;"
+            "  const s=document.getElementById('settingsSave');"
+            "  const r=document.getElementById('settingsReset');"
+            "  if(s) s.disabled=!changed;"
+            "  if(r) r.style.display=changed?'block':'none';"
             "}"
 
             "function markSettingsDirty(){"
-            "  settingsDirty=true;"
-            "  const btn=document.getElementById('settingsSave');"
-            "  if(btn) btn.disabled=false;"
-            "  const reset=document.getElementById('settingsReset');"
-            "  if(reset) reset.style.display='block';"
+            "  recomputeSettingsDirty();"
             "}"
 
             "function setStatus(text,loading){"
             "  const el=document.getElementById('vehicleStatus');"
-            "  if(el){"
-            "    el.dataset.base=text;"
-            "    setAnimatedDots(el,loading);"
-            "  }"
+            "  if(el){el.dataset.base=text;setAnimatedDots(el,loading);}"
             "  const sp=document.getElementById('statusSpinner');"
-            "  if(sp){"
-            "    if(loading) sp.classList.remove('hidden');"
-            "    else sp.classList.add('hidden');"
-            "  }"
+            "  if(sp){if(loading) sp.classList.remove('hidden'); else sp.classList.add('hidden');}"
             "}"
 
             "function setRefreshActive(on){"
@@ -564,38 +1165,6 @@ namespace
             "  const err=document.getElementById('settingsError');"
             "  if(err) err.innerText=msg;"
             "}"
-
-            "document.getElementById('settingsForm').addEventListener('change',markSettingsDirty);"
-            "document.getElementById('settingsReset').addEventListener('click',()=>window.location.reload());"
-
-            "document.getElementById('btnVehicleRefresh').addEventListener('click',()=>{"
-            "  setRefreshActive(true);"
-            "  refreshStart=Date.now();"
-            "  setStatus('Abruf läuft',true);"
-            "  fetch('/settings/vehicle-refresh',{method:'POST'})"
-            "    .then(r=>r.json())"
-            "    .then(d=>{"
-            "      if(!d||d.status!=='started'){"
-            "        setRefreshActive(false);"
-            "        if(d&&d.reason==='no-connection'){"
-            "          showError('Keine OBD-Verbindung vorhanden.');"
-            "          setStatus('Sync nicht möglich',false);"
-            "        }else{"
-            "          showError('Sync konnte nicht gestartet werden.');"
-            "        }"
-            "      }"
-            "    })"
-            "    .catch(()=>{"
-            "      setRefreshActive(false);"
-            "      showError('Sync fehlgeschlagen.');"
-            "    });"
-            "});"
-
-            "document.getElementById('settingsForm').addEventListener('submit',function(ev){"
-            "  ev.preventDefault();"
-            "  const fd=new FormData(this);"
-            "  fetch('/settings',{method:'POST',body:fd}).then(()=>window.location.href='/settings');"
-            "});"
 
             "function updateVehicleInfo(data){"
             "  ['vehicleModel','vehicleVin','vehicleDiag'].forEach(id=>{"
@@ -629,13 +1198,16 @@ namespace
             "      showError('Keine Antwort vom Fahrzeug.');"
             "    }"
             "  }"
-            "  if(data.lastTx!==undefined && data.lastTx!==consoleLastTx){"
+            "  const autoLog=document.getElementById('obdAutoLog');"
+            "  const allowLog=!autoLog || autoLog.checked;"
+            "  if(allowLog && data.lastTx!==undefined && data.lastTx!==consoleLastTx){"
             "    consoleLastTx=data.lastTx;"
             "    appendConsole('> '+data.lastTx);"
             "  }"
-            "  if(data.lastObd!==undefined && data.lastObd!==consoleLastObd){"
+            "  if(allowLog && data.lastObd!==undefined && data.lastObd!==consoleLastObd){"
             "    consoleLastObd=data.lastObd;"
-            "    appendConsole(data.lastObd);"
+            "    const pretty=formatObdLine(consoleLastTx,data.lastObd);"
+            "    appendConsole(pretty || ('< '+data.lastObd));"
             "  }"
             "}"
 
@@ -645,13 +1217,94 @@ namespace
             "    .then(updateVehicleInfo)"
             "    .catch(()=>{});"
             "}"
+
+            "function initObdAutoLog(){"
+            "  const chk=document.getElementById('obdAutoLog');"
+            "  if(!chk) return;"
+            "  const stored=localStorage.getItem('obdAutoLog');"
+            "  if(stored===null){"
+            "    chk.checked=true;"
+            "  }else{"
+            "    chk.checked=(stored==='1');"
+            "  }"
+            "  chk.addEventListener('change',()=>{"
+            "    localStorage.setItem('obdAutoLog',chk.checked?'1':'0');"
+            "  });"
+            "}"
+
+            "document.getElementById('settingsForm').addEventListener('change',markSettingsDirty);"
+            "document.getElementById('settingsReset').addEventListener('click',()=>window.location.reload());"
+
+            "document.getElementById('btnVehicleRefresh').addEventListener('click',()=>{"
+            "  setRefreshActive(true);"
+            "  refreshStart=Date.now();"
+            "  setStatus('Abruf läuft',true);"
+            "  fetch('/settings/vehicle-refresh',{method:'POST'})"
+            "    .then(r=>r.json())"
+            "    .then(d=>{"
+            "      if(!d || d.status!=='started'){"
+            "        setRefreshActive(false);"
+            "        if(d && d.reason==='no-connection'){"
+            "          showError('Keine OBD-Verbindung vorhanden.');"
+            "          setStatus('Sync nicht möglich',false);"
+            "        }else{"
+            "          showError('Sync konnte nicht gestartet werden.');"
+            "        }"
+            "      }"
+            "    })"
+            "    .catch(()=>{setRefreshActive(false);showError('Sync fehlgeschlagen.');});"
+            "});"
+
+            "document.getElementById('settingsForm').addEventListener('submit',function(ev){"
+            "  ev.preventDefault();"
+            "  const fd=new FormData(this);"
+            "  const params=new URLSearchParams();"
+            "  fd.forEach((v,k)=>{params.append(k,v);});"
+            "  fetch('/settings',{"
+            "    method:'POST',"
+            "    headers:{'Content-Type':'application/x-www-form-urlencoded'},"
+            "    body:params.toString()"
+            "  }).then(()=>{"
+            "    captureInitialSettingsState();"
+            "    recomputeSettingsDirty();"
+            "  }).catch(()=>{});"
+            "});"
+
             "poll();"
             "setInterval(poll,1500);"
+            "initObdAutoLog();"
+            "captureInitialSettingsState();"
+            "recomputeSettingsDirty();"
 
-            "document.getElementById('devModeToggle').addEventListener('change',markSettingsDirty);"
+            "const devToggle=document.getElementById('devModeToggle');"
+            "const devSection=document.getElementById('devObdSection');"
+            "function updateDevSection(){"
+            "  if(!devSection) return;"
+            "  if(devToggle && devToggle.checked){"
+            "    devSection.classList.remove('dev-collapsed');"
+            "    devSection.classList.add('dev-expanded');"
+            "  }else{"
+            "    devSection.classList.remove('dev-expanded');"
+            "    devSection.classList.add('dev-collapsed');"
+            "  }"
+            "}"
+            "if(devToggle){"
+            "  devToggle.addEventListener('change',()=>{"
+            "    markSettingsDirty();"
+            "    updateDevSection();"
+            "  });"
+            "  updateDevSection();"
+            "}"
 
             "const obdBtn=document.getElementById('obdSendBtn');"
             "const obdInput=document.getElementById('obdCmdInput');"
+            "const obdClear=document.getElementById('obdClearBtn');"
+            "if(obdClear){"
+            "  obdClear.addEventListener('click',()=>{"
+            "    const box=document.getElementById('obdConsole');"
+            "    if(box) box.textContent='';"
+            "  });"
+            "}"
             "if(obdBtn && obdInput){"
             "  obdBtn.addEventListener('click',()=>{"
             "    const cmd=obdInput.value.trim();"
@@ -664,15 +1317,12 @@ namespace
             "    }).catch(()=>appendConsole('! Fehler beim Senden'));"
             "  });"
             "  obdInput.addEventListener('keydown',e=>{"
-            "    if(e.key==='Enter'){"
-            "      e.preventDefault();"
-            "      obdBtn.click();"
-            "    }"
+            "    if(e.key==='Enter'){e.preventDefault();obdBtn.click();}"
             "  });"
             "}"
-            "</script>");
+            "</script>"
+            "</body></html>");
 
-        page += F("</body></html>");
         return page;
     }
 
