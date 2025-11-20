@@ -2,9 +2,9 @@
 
 #include <Arduino.h>
 
-#include "config.h"
+#include "core/config.h"
 #include "led_bar.h"
-#include "state.h"
+#include "core/state.h"
 
 namespace
 {

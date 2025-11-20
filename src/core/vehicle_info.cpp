@@ -1,6 +1,6 @@
 #include "vehicle_info.h"
 
-#include "ble_obd.h"
+#include "bluetooth/ble_obd.h"
 #include "state.h"
 #include "utils.h"
 
