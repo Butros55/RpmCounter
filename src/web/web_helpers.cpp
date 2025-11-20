@@ -1,4 +1,5 @@
 #include "web_helpers.h"
+#include <core/utils.h>
 
 String colorToHex(const RgbColor &color)
 {
@@ -84,15 +85,6 @@ String safeLabel(const String &value, const String &fallback)
     if (trimmed.isEmpty())
         return fallback;
     return trimmed;
-}
-
-int clampInt(int v, int lo, int hi)
-{
-    if (v < lo)
-        return lo;
-    if (v > hi)
-        return hi;
-    return v;
 }
 
 void enforceOrder(int &g, int &y, int &b)

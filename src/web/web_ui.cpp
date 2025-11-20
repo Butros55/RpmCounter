@@ -11,6 +11,7 @@
 #include "core/vehicle_info.h"
 #include "core/state.h"
 #include "hardware/display.h"
+#include <core/utils.h>
 
 namespace
 {
@@ -153,16 +154,7 @@ namespace
         }
         return out;
     }
-
-    int clampInt(int v, int lo, int hi)
-    {
-        if (v < lo)
-            return lo;
-        if (v > hi)
-            return hi;
-        return v;
-    }
-
+    
     void enforceOrder(int &g, int &y, int &b)
     {
         g = clampInt(g, 0, 100);

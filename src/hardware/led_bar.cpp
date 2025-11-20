@@ -7,7 +7,7 @@
 #include "core/state.h"
 #include "hardware/display.h"
 
-Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_RGB + NEO_KHZ800);
 
 namespace
 {
@@ -283,13 +283,6 @@ void updateRpmBar(int rpm)
 
     strip.show();
     displaySetShiftBlink(displayBlink);
-
-    Serial.print("[LED] rpm=");
-    Serial.print(rpm);
-    Serial.print(" fraction=");
-    Serial.print(fraction, 2);
-    Serial.print(" ledsOn=");
-    Serial.println(ledsOn);
 }
 
 void ledBarLoop()

@@ -4,6 +4,7 @@
 #include <Arduino.h>
 
 #include "core/state.h"
+#include "core/config.h"
 
 bool connectToObd();
 bool connectToObd(const String &address, const String &name = "");
