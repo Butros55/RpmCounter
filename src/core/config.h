@@ -45,6 +45,9 @@ struct ShiftConfig
 
 constexpr int MANUAL_CONNECT_RETRY_COUNT = 6;
 constexpr unsigned long MANUAL_CONNECT_RETRY_DELAY_MS = 600;
+constexpr unsigned long AUTO_RECONNECT_FAST_INTERVAL_MS = 5000;
+constexpr unsigned long AUTO_RECONNECT_SLOW_INTERVAL_MS = 12000;
+constexpr int AUTO_RECONNECT_FAST_ATTEMPTS = 3;
 
 extern ShiftConfig cfg;
 
