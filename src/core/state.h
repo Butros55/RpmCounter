@@ -4,6 +4,13 @@
 #include <Arduino.h>
 #include <BLEClient.h>
 #include <BLERemoteCharacteristic.h>
+#include <vector>
+
+struct BleDeviceInfo
+{
+    String name;
+    String address;
+};
 
 extern BLEClient *g_client;
 extern BLERemoteCharacteristic *g_charWrite;
@@ -38,6 +45,19 @@ extern unsigned long g_lastObdMs;
 extern unsigned long g_lastLogoMs;
 extern bool g_engineStartLogoShown;
 extern bool g_ignitionLogoShown;
+
+extern String g_currentTargetAddr;
+extern String g_currentTargetName;
+extern bool g_manualConnectRequested;
+extern int g_manualConnectAttempts;
+extern bool g_manualConnectActive;
+extern bool g_manualConnectFailed;
+extern unsigned long g_manualConnectStartMs;
+
+extern bool g_bleScanRunning;
+extern unsigned long g_bleScanStartMs;
+extern unsigned long g_bleScanFinishedMs;
+extern std::vector<BleDeviceInfo> g_bleScanResults;
 
 extern bool g_animationActive;
 extern bool g_logoPlayedThisCycle;

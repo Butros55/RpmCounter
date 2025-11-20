@@ -1,11 +1,11 @@
 #include <Arduino.h>
-#include "config.h"
-#include "state.h"
-#include "ble_obd.h"
-#include "web_ui.h"
-#include "led_bar.h"
-#include "logo_anim.h"
-#include "display.h"
+#include "core/config.h"
+#include "core/state.h"
+#include "bluetooth/ble_obd.h"
+#include "web/web_ui.h"
+#include "hardware/led_bar.h"
+#include "hardware/logo_anim.h"
+#include "hardware/display.h"
 
 void setup() {
     initConfig();

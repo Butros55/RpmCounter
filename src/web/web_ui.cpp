@@ -4,13 +4,13 @@
 #include <WebServer.h>
 #include <WiFi.h>
 
-#include "ble_obd.h"
-#include "config.h"
-#include "led_bar.h"
-#include "logo_anim.h"
-#include "vehicle_info.h"
-#include "state.h"
-#include "display.h"
+#include "bluetooth/ble_obd.h"
+#include "core/config.h"
+#include "hardware/led_bar.h"
+#include "hardware/logo_anim.h"
+#include "core/vehicle_info.h"
+#include "core/state.h"
+#include "hardware/display.h"
 
 namespace
 {

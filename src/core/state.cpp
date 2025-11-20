@@ -51,6 +51,19 @@ String g_vehicleVin;
 String g_vehicleModel;
 String g_vehicleDiagStatus;
 
+String g_currentTargetAddr;
+String g_currentTargetName;
+bool g_manualConnectRequested = false;
+int g_manualConnectAttempts = 0;
+bool g_manualConnectActive = false;
+bool g_manualConnectFailed = false;
+unsigned long g_manualConnectStartMs = 0;
+
+bool g_bleScanRunning = false;
+unsigned long g_bleScanStartMs = 0;
+unsigned long g_bleScanFinishedMs = 0;
+std::vector<BleDeviceInfo> g_bleScanResults;
+
 void initGlobalState()
 {
     Serial.begin(115200);
@@ -108,4 +121,17 @@ void initGlobalState()
     g_vehicleVin = F("Noch nicht gelesen");
     g_vehicleModel = F("Unbekannt");
     g_vehicleDiagStatus = F("Keine Daten");
+
+    g_currentTargetAddr = TARGET_ADDR;
+    g_currentTargetName = F("OBD-II Dongle");
+    g_manualConnectRequested = false;
+    g_manualConnectAttempts = 0;
+    g_manualConnectActive = false;
+    g_manualConnectFailed = false;
+    g_manualConnectStartMs = 0;
+
+    g_bleScanRunning = false;
+    g_bleScanStartMs = 0;
+    g_bleScanFinishedMs = 0;
+    g_bleScanResults.clear();
 }

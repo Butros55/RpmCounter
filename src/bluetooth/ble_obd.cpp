@@ -2,15 +2,17 @@
 
 #include <BLEDevice.h>
 #include <BLEUtils.h>
+#include <BLEScan.h>
+#include <BLEAdvertisedDevice.h>
 #include <math.h>
 
-#include "config.h"
-#include "led_bar.h"
-#include "logo_anim.h"
-#include "state.h"
-#include "vehicle_info.h"
-#include "utils.h"
-#include "display.h"
+#include "core/config.h"
+#include "hardware/led_bar.h"
+#include "hardware/logo_anim.h"
+#include "core/state.h"
+#include "core/vehicle_info.h"
+#include "core/utils.h"
+#include "hardware/display.h"
 
 namespace
 {
@@ -197,17 +199,20 @@ namespace
 
     class MyClientCallback : public BLEClientCallbacks
     {
-        void onConnect(BLEClient * /*pclient*/) override
-        {
-            Serial.println("BLE-Client: onConnect()");
-            g_connected = true;
-            setStatusLED(true);
-        }
+    void onConnect(BLEClient * /*pclient*/) override
+    {
+        Serial.println("BLE-Client: onConnect()");
+        g_connected = true;
+        setStatusLED(true);
+        g_manualConnectActive = false;
+        g_manualConnectRequested = false;
+        g_manualConnectFailed = false;
+    }
 
-        void onDisconnect(BLEClient * /*pclient*/) override
-        {
-            Serial.println("BLE-Client: onDisconnect()");
-            bool wasIgnition = g_ignitionOn;
+    void onDisconnect(BLEClient * /*pclient*/) override
+    {
+        Serial.println("BLE-Client: onDisconnect()");
+        bool wasIgnition = g_ignitionOn;
 
             g_connected = false;
             g_ignitionOn = false;
@@ -228,16 +233,27 @@ namespace
             g_logoPlayedThisCycle = false;
             g_engineStartLogoShown = false;
             g_ignitionLogoShown = false;
+
+            if (g_manualConnectActive)
+            {
+                g_manualConnectFailed = true;
+                g_manualConnectActive = false;
+            }
         }
     };
 }
 
-bool connectToObd()
+bool connectToObd(const String &address, const String &name)
 {
-    Serial.print("Versuche Verbindung zu OBDII bei ");
-    Serial.println(TARGET_ADDR);
+    String targetAddr = address.length() > 0 ? address : String(TARGET_ADDR);
+    if (name.length() > 0)
+        g_currentTargetName = name;
+    g_currentTargetAddr = targetAddr;
 
-    BLEAddress obdAddress(TARGET_ADDR);
+    Serial.print("Versuche Verbindung zu OBDII bei ");
+    Serial.println(targetAddr);
+
+    BLEAddress obdAddress(targetAddr.c_str());
 
     g_client = BLEDevice::createClient();
     g_client->setClientCallbacks(new MyClientCallback());
@@ -286,6 +302,11 @@ bool connectToObd()
     return true;
 }
 
+bool connectToObd()
+{
+    return connectToObd(g_currentTargetAddr, g_currentTargetName);
+}
+
 void sendObdCommand(const String &cmd)
 {
     if (!g_connected || !g_charWrite)
@@ -316,6 +337,71 @@ void sendObdCommand(const String &cmd)
     g_charWrite->writeValue((uint8_t *)s.data(), s.size(), false);
 }
 
+void requestManualConnect(const String &address, const String &name, int attempts)
+{
+    g_currentTargetAddr = address.length() > 0 ? address : String(TARGET_ADDR);
+    g_currentTargetName = name;
+    g_manualConnectAttempts = (attempts > 0) ? attempts : MANUAL_CONNECT_RETRY_COUNT;
+    g_manualConnectRequested = true;
+    g_manualConnectFailed = false;
+    g_forceImmediateReconnect = true;
+}
+
+bool startBleScan(uint32_t durationSeconds)
+{
+    if (g_bleScanRunning)
+    {
+        return false;
+    }
+
+    g_bleScanRunning = true;
+    g_bleScanStartMs = millis();
+    g_bleScanResults.clear();
+
+    auto task = [](void *param) {
+        uint32_t duration = (uint32_t)(uintptr_t)param;
+        BLEScan *pScan = BLEDevice::getScan();
+        pScan->setActiveScan(true);
+        pScan->setInterval(100);
+        pScan->setWindow(80);
+
+        BLEScanResults results = pScan->start(duration, false);
+        g_bleScanResults.clear();
+        int count = results.getCount();
+        for (int i = 0; i < count; i++)
+        {
+            BLEAdvertisedDevice dev = results.getDevice(i);
+            BleDeviceInfo info;
+            info.address = String(dev.getAddress().toString().c_str());
+            std::string name = dev.getName();
+            info.name = name.empty() ? String("(unbekannt)") : String(name.c_str());
+            g_bleScanResults.push_back(info);
+        }
+
+        g_bleScanFinishedMs = millis();
+        g_bleScanRunning = false;
+        vTaskDelete(nullptr);
+    };
+
+    xTaskCreate(task, "bleScanTask", 4096, (void *)(uintptr_t)durationSeconds, 1, nullptr);
+    return true;
+}
+
+bool isBleScanRunning()
+{
+    return g_bleScanRunning;
+}
+
+unsigned long lastBleScanFinished()
+{
+    return g_bleScanFinishedMs;
+}
+
+const std::vector<BleDeviceInfo> &getBleScanResults()
+{
+    return g_bleScanResults;
+}
+
 void initBle()
 {
     BLEDevice::init("ESP32-OBD-BLE");
@@ -339,7 +425,39 @@ void bleObdLoop()
 
     bool graceElapsed = (now - g_lastHttpMs > HTTP_GRACE_MS) || g_forceImmediateReconnect;
     bool intervalElapsed = (now - g_lastBleRetryMs > RECONNECT_INTERVAL_MS) || g_forceImmediateReconnect;
-    if (g_autoReconnect && !g_connected && graceElapsed && intervalElapsed)
+
+    if (g_manualConnectRequested && !g_manualConnectActive)
+    {
+        g_manualConnectActive = true;
+        g_manualConnectFailed = false;
+        g_manualConnectStartMs = now;
+        g_forceImmediateReconnect = true;
+        g_lastBleRetryMs = 0;
+        g_manualConnectRequested = false;
+    }
+
+    if (g_manualConnectActive && !g_connected && g_manualConnectAttempts > 0 && (now - g_lastBleRetryMs > MANUAL_CONNECT_RETRY_DELAY_MS))
+    {
+        g_lastBleRetryMs = now;
+        Serial.println("[BLE] Manueller Verbindungsversuch...");
+        if (connectToObd(g_currentTargetAddr, g_currentTargetName))
+        {
+            g_manualConnectActive = false;
+            g_manualConnectFailed = false;
+            g_manualConnectAttempts = 0;
+        }
+        else
+        {
+            g_manualConnectAttempts--;
+            if (g_manualConnectAttempts <= 0)
+            {
+                g_manualConnectActive = false;
+                g_manualConnectFailed = true;
+            }
+        }
+    }
+
+    if (!g_manualConnectActive && g_autoReconnect && !g_connected && graceElapsed && intervalElapsed)
     {
         g_lastBleRetryMs = now;
         bool immediate = g_forceImmediateReconnect;
