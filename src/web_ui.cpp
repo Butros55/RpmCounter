@@ -34,6 +34,35 @@ namespace
         return c;
     }
 
+    void handleDevObdSend()
+    {
+        g_lastHttpMs = millis();
+
+        if (!g_connected)
+        {
+            server.send(400, "text/plain", "Nicht mit OBD verbunden.");
+            return;
+        }
+
+        if (!server.hasArg("cmd"))
+        {
+            server.send(400, "text/plain", "Parameter 'cmd' fehlt.");
+            return;
+        }
+
+        String cmd = server.arg("cmd");
+        cmd.trim();
+        if (cmd.length() == 0)
+        {
+            server.send(400, "text/plain", "Befehl ist leer.");
+            return;
+        }
+
+        // Command ohne CR senden – sendObdCommand hängt CR dran
+        sendObdCommand(cmd);
+        server.send(200, "text/plain", "OK");
+    }
+
     String safeLabel(const String &value, const String &fallback)
     {
         String trimmed = value;
@@ -388,7 +417,6 @@ namespace
         page += F("</body></html>");
         return page;
     }
-
     String settingsPage()
     {
         String vin = readVehicleVin();
@@ -396,7 +424,7 @@ namespace
         String diag = readVehicleDiagStatus();
 
         String page;
-        page.reserve(8000);
+        page.reserve(9000);
         page += F("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>ShiftLight Einstellungen</title>");
         page += F(
             "<style>"
@@ -421,11 +449,18 @@ namespace
             ".error{color:#f77;font-size:12px;margin-top:4px;}"
             ".spinner{display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid rgba(255,255,255,0.2);border-top-color:#0af;animation:spin 1s linear infinite;margin-left:6px;}"
             "@keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}"
+            /* OBD-Konsole Style */
+            ".console-box{background:#000;border-radius:6px;border:1px solid #333;padding:6px;"
+            "font-family:SFMono-Regular,Menlo,monospace;font-size:11px;line-height:1.3;"
+            "max-height:160px;overflow-y:auto;white-space:pre-wrap;}"
+            ".console-input{flex:1;padding:6px;border-radius:6px;border:1px solid #444;"
+            "background:#111;color:#eee;font-family:inherit;}"
             "</style></head><body>");
 
         page += "<h1><a href='/'>&larr; Zurück</a><span>Einstellungen</span></h1>";
         page += F("<form id='settingsForm' method='POST' action='/settings'>");
 
+        // Modus
         page += F("<div class='section'><div class='section-title'>Modus</div>");
         page += F("<div class='toggle-row'><span class='toggle-label'>Entwicklermodus</span><label class='switch'>");
         page += "<input type='checkbox' name='devMode' id='devModeToggle'";
@@ -434,6 +469,7 @@ namespace
         page += "><span class='slider'></span></label></div>";
         page += F("<div class='small'>Schaltet zusätzliche Debug- und OBD-Einstellungen frei.</div></div>");
 
+        // Fahrzeugdaten
         page += F("<div class='section'><div class='section-title'>Mein Fahrzeug</div>");
         page += "<div class='row small'>Fahrzeug: <strong id='vehicleModel' data-base='" + htmlEscape(model) + "'>" + htmlEscape(model) + "</strong></div>";
         page += "<div class='row small'>VIN: <strong id='vehicleVin' data-base='" + htmlEscape(vin) + "'>" + htmlEscape(vin) + "</strong></div>";
@@ -442,23 +478,199 @@ namespace
         page += F("<button type='button' class='btn' id='btnVehicleRefresh'>Fahrzeugdaten neu synchronisieren</button>");
         page += F("<div id='settingsError' class='error'></div></div>");
 
+        // OBD-Konsole nur im Dev-Mode
+        if (g_devMode)
+        {
+            page += F("<div class='section'><div class='section-title'>OBD-Konsole</div>");
+            page += F("<div class='small'>"
+                      "Direkte AT-/OBD-Befehle senden (z.&nbsp;B. <code>010C</code>, <code>010D</code>, <code>ATZ</code>). "
+                      "Antworten erscheinen unten."
+                      "</div>");
+            page += F("<div id='obdConsole' class='console-box'></div>");
+            page += F("<div style='display:flex;gap:8px;margin-top:8px;'>");
+            page += F("<input type='text' id='obdCmdInput' class='console-input' placeholder='Befehl, z.B. 010C'>");
+            page += F("<button type='button' class='btn' id='obdSendBtn'>Senden</button>");
+            page += F("</div></div>");
+        }
+
+        // Buttons
         page += F("<button type='submit' class='btn' id='settingsSave' disabled>Speichern</button>");
         page += F("<button type='button' class='btn btn-danger' id='settingsReset' style='display:none'>Zurücksetzen</button>");
         page += F("</form>");
 
-        page += F("<script>"
-                  "let settingsDirty=false;let refreshActive=false;let refreshStart=0;let dotIntervals={};"
-                  "function setAnimatedDots(el,loading){if(!el) return;const key=el.id; if(loading){if(dotIntervals[key]) return;let step=0;dotIntervals[key]=setInterval(()=>{step=(step+1)%4;el.innerText=(el.dataset.base||'')+'.'.repeat(step);},400);}else{if(dotIntervals[key]){clearInterval(dotIntervals[key]);dotIntervals[key]=null;}el.innerText=el.dataset.base||'';}}"
-                  "function markSettingsDirty(){settingsDirty=true;document.getElementById('settingsSave').disabled=false;document.getElementById('settingsReset').style.display='block';}"
-                  "function setStatus(text,loading){const el=document.getElementById('vehicleStatus');if(el){el.dataset.base=text;setAnimatedDots(el,loading);}const sp=document.getElementById('statusSpinner');if(sp){if(loading) sp.classList.remove('hidden'); else sp.classList.add('hidden');}}"
-                  "function setRefreshActive(on){refreshActive=on;const btn=document.getElementById('btnVehicleRefresh');if(btn) btn.disabled=on;const err=document.getElementById('settingsError');if(err&&!on) err.innerText='';}"
-                  "function showError(msg){const err=document.getElementById('settingsError');if(err) err.innerText=msg;}"
-                  "document.getElementById('settingsForm').addEventListener('change',markSettingsDirty);document.getElementById('settingsReset').addEventListener('click',()=>window.location.reload());"
-                  "document.getElementById('btnVehicleRefresh').addEventListener('click',()=>{setRefreshActive(true);refreshStart=Date.now();setStatus('Abruf läuft',true);fetch('/settings/vehicle-refresh',{method:'POST'}).then(r=>r.json()).then(d=>{if(!d||d.status!=='started'){setRefreshActive(false);if(d&&d.reason==='no-connection'){showError('Keine OBD-Verbindung vorhanden.');setStatus('Sync nicht möglich',false);}else{showError('Sync konnte nicht gestartet werden.');}}}).catch(()=>{setRefreshActive(false);showError('Sync fehlgeschlagen.');});});"
-                  "document.getElementById('settingsForm').addEventListener('submit',function(ev){ev.preventDefault();const fd=new FormData(this);fetch('/settings',{method:'POST',body:fd}).then(()=>window.location.href='/settings');});"
-                  "function updateVehicleInfo(data){['vehicleModel','vehicleVin','vehicleDiag'].forEach(id=>{const el=document.getElementById(id);if(el&&data[id]!==undefined){el.dataset.base=data[id];if(!data.vehicleInfoRequestRunning) el.innerText=data[id];}});let statusText= 'Noch keine Daten';let loading=false;if(data.vehicleInfoRequestRunning){statusText='Abruf läuft';loading=true;}else if(data.vehicleInfoReady){statusText=data.vehicleInfoAge<=1?'Gerade aktualisiert (0s)':'Letztes Update vor '+data.vehicleInfoAge+'s';}setStatus(statusText,loading);setAnimatedDots(document.getElementById('vehicleModel'),loading);setAnimatedDots(document.getElementById('vehicleVin'),loading);setAnimatedDots(document.getElementById('vehicleDiag'),loading);if(refreshActive && !data.vehicleInfoRequestRunning){if(data.vehicleInfoReady && data.vehicleInfoAge<=2){setRefreshActive(false);setStatus('Gerade aktualisiert (0s)',false);showError('');}else if(Date.now()-refreshStart>7000){setRefreshActive(false);showError('Keine Antwort vom Fahrzeug.');}}}"
-                  "function poll(){fetch('/status').then(r=>r.json()).then(updateVehicleInfo).catch(()=>{});}poll();setInterval(poll,1500);document.getElementById('devModeToggle').addEventListener('change',markSettingsDirty);"
-                  "</script>");
+        // Script
+        page += F(
+            "<script>"
+            "let settingsDirty=false;"
+            "let refreshActive=false;"
+            "let refreshStart=0;"
+            "let dotIntervals={};"
+            "let consoleLastTx='';"
+            "let consoleLastObd='';"
+
+            "function setAnimatedDots(el,loading){"
+            "  if(!el) return;"
+            "  const key=el.id;"
+            "  if(loading){"
+            "    if(dotIntervals[key]) return;"
+            "    let step=0;"
+            "    dotIntervals[key]=setInterval(()=>{"
+            "      step=(step+1)%4;"
+            "      el.innerText=(el.dataset.base||'')+'.'.repeat(step);"
+            "    },400);"
+            "  }else{"
+            "    if(dotIntervals[key]){clearInterval(dotIntervals[key]);dotIntervals[key]=null;}"
+            "    el.innerText=el.dataset.base||'';"
+            "  }"
+            "}"
+
+            "function appendConsole(line){"
+            "  const box=document.getElementById('obdConsole');"
+            "  if(!box||!line) return;"
+            "  box.textContent+=(box.textContent?'\\n':'')+line;"
+            "  box.scrollTop=box.scrollHeight;"
+            "}"
+
+            "function markSettingsDirty(){"
+            "  settingsDirty=true;"
+            "  const btn=document.getElementById('settingsSave');"
+            "  if(btn) btn.disabled=false;"
+            "  const reset=document.getElementById('settingsReset');"
+            "  if(reset) reset.style.display='block';"
+            "}"
+
+            "function setStatus(text,loading){"
+            "  const el=document.getElementById('vehicleStatus');"
+            "  if(el){"
+            "    el.dataset.base=text;"
+            "    setAnimatedDots(el,loading);"
+            "  }"
+            "  const sp=document.getElementById('statusSpinner');"
+            "  if(sp){"
+            "    if(loading) sp.classList.remove('hidden');"
+            "    else sp.classList.add('hidden');"
+            "  }"
+            "}"
+
+            "function setRefreshActive(on){"
+            "  refreshActive=on;"
+            "  const btn=document.getElementById('btnVehicleRefresh');"
+            "  if(btn) btn.disabled=on;"
+            "  const err=document.getElementById('settingsError');"
+            "  if(err && !on) err.innerText='';"
+            "}"
+
+            "function showError(msg){"
+            "  const err=document.getElementById('settingsError');"
+            "  if(err) err.innerText=msg;"
+            "}"
+
+            "document.getElementById('settingsForm').addEventListener('change',markSettingsDirty);"
+            "document.getElementById('settingsReset').addEventListener('click',()=>window.location.reload());"
+
+            "document.getElementById('btnVehicleRefresh').addEventListener('click',()=>{"
+            "  setRefreshActive(true);"
+            "  refreshStart=Date.now();"
+            "  setStatus('Abruf läuft',true);"
+            "  fetch('/settings/vehicle-refresh',{method:'POST'})"
+            "    .then(r=>r.json())"
+            "    .then(d=>{"
+            "      if(!d||d.status!=='started'){"
+            "        setRefreshActive(false);"
+            "        if(d&&d.reason==='no-connection'){"
+            "          showError('Keine OBD-Verbindung vorhanden.');"
+            "          setStatus('Sync nicht möglich',false);"
+            "        }else{"
+            "          showError('Sync konnte nicht gestartet werden.');"
+            "        }"
+            "      }"
+            "    })"
+            "    .catch(()=>{"
+            "      setRefreshActive(false);"
+            "      showError('Sync fehlgeschlagen.');"
+            "    });"
+            "});"
+
+            "document.getElementById('settingsForm').addEventListener('submit',function(ev){"
+            "  ev.preventDefault();"
+            "  const fd=new FormData(this);"
+            "  fetch('/settings',{method:'POST',body:fd}).then(()=>window.location.href='/settings');"
+            "});"
+
+            "function updateVehicleInfo(data){"
+            "  ['vehicleModel','vehicleVin','vehicleDiag'].forEach(id=>{"
+            "    const el=document.getElementById(id);"
+            "    if(el && data[id]!==undefined){"
+            "      el.dataset.base=data[id];"
+            "      if(!data.vehicleInfoRequestRunning) el.innerText=data[id];"
+            "    }"
+            "  });"
+            "  let statusText='Noch keine Daten';"
+            "  let loading=false;"
+            "  if(data.vehicleInfoRequestRunning){"
+            "    statusText='Abruf läuft';"
+            "    loading=true;"
+            "  }else if(data.vehicleInfoReady){"
+            "    statusText=data.vehicleInfoAge<=1"
+            "      ?'Gerade aktualisiert (0s)'"
+            "      :'Letztes Update vor '+data.vehicleInfoAge+'s';"
+            "  }"
+            "  setStatus(statusText,loading);"
+            "  setAnimatedDots(document.getElementById('vehicleModel'),loading);"
+            "  setAnimatedDots(document.getElementById('vehicleVin'),loading);"
+            "  setAnimatedDots(document.getElementById('vehicleDiag'),loading);"
+            "  if(refreshActive && !data.vehicleInfoRequestRunning){"
+            "    if(data.vehicleInfoReady && data.vehicleInfoAge<=2){"
+            "      setRefreshActive(false);"
+            "      setStatus('Gerade aktualisiert (0s)',false);"
+            "      showError('');"
+            "    }else if(Date.now()-refreshStart>7000){"
+            "      setRefreshActive(false);"
+            "      showError('Keine Antwort vom Fahrzeug.');"
+            "    }"
+            "  }"
+            "  if(data.lastTx!==undefined && data.lastTx!==consoleLastTx){"
+            "    consoleLastTx=data.lastTx;"
+            "    appendConsole('> '+data.lastTx);"
+            "  }"
+            "  if(data.lastObd!==undefined && data.lastObd!==consoleLastObd){"
+            "    consoleLastObd=data.lastObd;"
+            "    appendConsole(data.lastObd);"
+            "  }"
+            "}"
+
+            "function poll(){"
+            "  fetch('/status')"
+            "    .then(r=>r.json())"
+            "    .then(updateVehicleInfo)"
+            "    .catch(()=>{});"
+            "}"
+            "poll();"
+            "setInterval(poll,1500);"
+
+            "document.getElementById('devModeToggle').addEventListener('change',markSettingsDirty);"
+
+            "const obdBtn=document.getElementById('obdSendBtn');"
+            "const obdInput=document.getElementById('obdCmdInput');"
+            "if(obdBtn && obdInput){"
+            "  obdBtn.addEventListener('click',()=>{"
+            "    const cmd=obdInput.value.trim();"
+            "    if(!cmd) return;"
+            "    appendConsole('> '+cmd);"
+            "    fetch('/dev/obd-send',{"
+            "      method:'POST',"
+            "      headers:{'Content-Type':'application/x-www-form-urlencoded'},"
+            "      body:'cmd='+encodeURIComponent(cmd)"
+            "    }).catch(()=>appendConsole('! Fehler beim Senden'));"
+            "  });"
+            "  obdInput.addEventListener('keydown',e=>{"
+            "    if(e.key==='Enter'){"
+            "      e.preventDefault();"
+            "      obdBtn.click();"
+            "    }"
+            "  });"
+            "}"
+            "</script>");
 
         page += F("</body></html>");
         return page;
@@ -697,6 +909,8 @@ void initWebUi()
     server.on("/settings", HTTP_POST, handleSettingsSave);
     server.on("/settings/vehicle-refresh", HTTP_POST, handleSettingsVehicleRefresh);
     server.on("/dev/display-logo", HTTP_POST, handleDevDisplayLogo);
+    server.on("/dev/obd-send", HTTP_POST, handleDevObdSend);
+
     server.begin();
 }
 
