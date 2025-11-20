@@ -3,9 +3,9 @@
 #include <Arduino.h>
 #include <math.h>
 
-#include "config.h"
-#include "state.h"
-#include "display.h"
+#include "core/config.h"
+#include "core/state.h"
+#include "hardware/display.h"
 
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 
