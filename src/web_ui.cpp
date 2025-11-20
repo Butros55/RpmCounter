@@ -34,44 +34,6 @@ namespace
         return c;
     }
 
-    void handleDevObdSend()
-    {
-        g_lastHttpMs = millis();
-
-        if (!g_connected)
-        {
-            server.send(400, "text/plain", "Nicht mit OBD verbunden.");
-            return;
-        }
-
-        if (!server.hasArg("cmd"))
-        {
-            server.send(400, "text/plain", "Parameter 'cmd' fehlt.");
-            return;
-        }
-
-        String cmd = server.arg("cmd");
-        cmd.trim();
-        if (cmd.length() == 0)
-        {
-            server.send(400, "text/plain", "Befehl ist leer.");
-            return;
-        }
-
-        // Command ohne CR senden – sendObdCommand hängt CR dran
-        sendObdCommand(cmd);
-        server.send(200, "text/plain", "OK");
-    }
-
-    String safeLabel(const String &value, const String &fallback)
-    {
-        String trimmed = value;
-        trimmed.trim();
-        if (trimmed.isEmpty())
-            return fallback;
-        return trimmed;
-    }
-
     String jsonEscape(const String &input)
     {
         String out;
@@ -97,6 +59,67 @@ namespace
             }
         }
         return out;
+    }
+
+    void handleDevObdSend()
+    {
+        g_lastHttpMs = millis();
+
+        if (!g_connected)
+        {
+            server.send(400, "text/plain", "Nicht mit OBD verbunden.");
+            return;
+        }
+
+        if (!server.hasArg("cmd"))
+        {
+            server.send(400, "text/plain", "Parameter 'cmd' fehlt.");
+            return;
+        }
+
+        String cmd = server.arg("cmd");
+        cmd.trim();
+        if (cmd.length() == 0)
+        {
+            server.send(400, "text/plain", "Befehl ist leer.");
+            return;
+        }
+
+        // Vorherigen Stand merken, damit wir sehen können, ob eine neue Zeile kommt
+        String prevObd = g_lastObdInfo;
+        unsigned long start = millis();
+        const unsigned long timeoutMs = 800;
+
+        // Befehl ohne CR senden – sendObdCommand hängt CR dran
+        sendObdCommand(cmd);
+
+        // Kurz auf eine neue Antwort warten (nicht ewig blocken)
+        while (millis() - start < timeoutMs)
+        {
+            if (g_lastObdInfo != prevObd)
+            {
+                break;
+            }
+            delay(10);
+        }
+
+        // Kleine JSON-Antwort mit letztem TX/OBD zurückgeben
+        String json = "{";
+        json += "\"status\":\"ok\"";
+        json += ",\"lastTx\":\"" + jsonEscape(g_lastTxInfo) + "\"";
+        json += ",\"lastObd\":\"" + jsonEscape(g_lastObdInfo) + "\"";
+        json += "}";
+
+        server.send(200, "application/json", json);
+    }
+
+    String safeLabel(const String &value, const String &fallback)
+    {
+        String trimmed = value;
+        trimmed.trim();
+        if (trimmed.isEmpty())
+            return fallback;
+        return trimmed;
     }
 
     String htmlEscape(const String &input)
@@ -560,24 +583,31 @@ namespace
                   " if(t<0) t=0;"
                   " if(t>1) t=1;"
                   " let pct=0;"
-                  " if(t<0.25){"
-                  "   let tt=t/0.25;"
-                  "   pct=Math.sin(tt*Math.PI);"
-                  " }else if(t<0.70){"
-                  "   let tt=(t-0.25)/0.45;"
-                  "   if(tt<0) tt=0;"
-                  "   if(tt>1) tt=1;"
+                  " if(t<0.30){"
+                  "   let tt=t/0.30;"
                   "   pct=tt*tt*(3-2*tt);"
-                  " }else{"
-                  "   let tt=(t-0.70)/0.30;"
-                  "   if(tt<0) tt=0;"
-                  "   if(tt>1) tt=1;"
-                  "   let base=1-tt;"
-                  "   let wobble=0.05*Math.sin(tt*Math.PI*4.0);"
+                  " }else if(t<0.60){"
+                  "   let tt=(t-0.30)/0.30;"
+                  "   let base=1.0-0.6*tt;"
+                  "   let wobble=0.10*Math.sin(tt*Math.PI*4.0);"
                   "   pct=base+wobble;"
+                  "   if(pct<0.4) pct=0.4;"
+                  "   if(pct>1.0) pct=1.0;"
+                  " }else if(t<0.85){"
+                  "   let tt=(t-0.60)/0.25;"
+                  "   let base=0.4+0.6*(tt*tt*(3-2*tt));"
+                  "   let wobble=0.05*Math.sin(tt*Math.PI*2.0);"
+                  "   pct=base+wobble;"
+                  "   if(pct<0.4) pct=0.4;"
+                  "   if(pct>1.0) pct=1.0;"
+                  " }else{"
+                  "   let tt=(t-0.85)/0.15;"
+                  "   let base=1.0-tt;"
+                  "   let wobble=0.05*Math.sin(tt*Math.PI*2.0);"
+                  "   pct=base+wobble;"
+                  "   if(pct<0.0) pct=0.0;"
+                  "   if(pct>1.0) pct=1.0;"
                   " }"
-                  " if(pct<0) pct=0;"
-                  " if(pct>1) pct=1;"
                   " return pct;"
                   "}"
 
@@ -942,6 +972,10 @@ namespace
             ".console-row{display:flex;gap:8px;margin-top:8px;}"
             ".console-footer{display:flex;justify-content:space-between;align-items:center;margin-top:8px;}"
             ".console-footer-left{display:flex;align-items:center;gap:6px;font-size:11px;color:#aaa;}"
+            ".console-line{margin:1px 0;}"
+            ".console-line-tx{color:#8cf;}"  // gesendete Befehle
+            ".console-line-rx{color:#9f9;}"  // normale Antworten
+            ".console-line-err{color:#f77;}" // Fehler
             ".dev-section{"
             "  overflow:hidden;"
             "  transition:max-height 0.25s ease,opacity 0.25s ease,"
@@ -1025,11 +1059,12 @@ namespace
         page += F("</div>");
         page += F("<div class='console-footer'>");
         page += F("<div class='console-footer-left'>");
-        page += F("<label style='display:flex;align-items:center;gap:4px;'>");
-        // Auto-Log: kein "checked" mehr, wir machen das per localStorage im JS
-        page += F("<input type='checkbox' id='obdAutoLog'> Auto-Log");
+        page += F("<span class='toggle-label'>Auto-Log</span>");
+        page += F("<label class='switch'>");
+        page += F("<input type='checkbox' id='obdAutoLog'><span class='slider'></span>");
         page += F("</label>");
         page += F("</div>");
+
         page += F("<button type='button' class='btn btn-danger' id='obdClearBtn' style='width:auto;padding:6px 10px;'>Clear</button>");
         page += F("</div>");
         page += F("</div>");
@@ -1049,7 +1084,6 @@ namespace
             "let consoleLastTx='';"
             "let consoleLastObd='';"
             "let initialSettingsState=null;"
-
             "function setAnimatedDots(el,loading){"
             "  if(!el) return;"
             "  const key=el.id;"
@@ -1065,15 +1099,13 @@ namespace
             "    el.innerText=el.dataset.base||'';"
             "  }"
             "}"
-
-            "function appendConsole(line){"
+            "function appendConsole(line){" // alte, einfache Version – wird später überschrieben"
             "  const box=document.getElementById('obdConsole');"
             "  if(!box || !line) return;"
             "  box.textContent += (box.textContent ? '\\n' : '') + line;"
             "  box.scrollTop = box.scrollHeight;"
             "}"
-
-            "function formatObdLine(lastTx, resp){"
+            "function formatObdLine(lastTx, resp){" // bleibt, wird im neuen Script wiederverwendet"
             "  if(!resp) return null;"
             "  const cleanResp=resp.trim();"
             "  const parts=cleanResp.split(/\\s+/);"
@@ -1320,6 +1352,104 @@ namespace
             "    if(e.key==='Enter'){e.preventDefault();obdBtn.click();}"
             "  });"
             "}"
+            "</script>");
+
+        page += F(
+            "<script>"
+            "(function(){"
+            "  function overrideAppendConsole(){"
+            "    window.appendConsole=function(line){"
+            "      var box=document.getElementById('obdConsole');"
+            "      if(!box||!line) return;"
+            "      var div=document.createElement('div');"
+            "      var txt=String(line).trim();"
+            "      var cls='console-line';"
+            "      if(txt.charAt(0)==='>'){"
+            "        cls+=' console-line-tx';"
+            "      }else if(txt.charAt(0)==='!'){"
+            "        cls+=' console-line-err';"
+            "      }else if(/NO DATA|ERROR|UNABLE TO CONNECT|STOPPED|BUS INIT/i.test(txt)){"
+            "        cls+=' console-line-err';"
+            "      }else{"
+            "        cls+=' console-line-rx';"
+            "      }"
+            "      div.className=cls;"
+            "      div.textContent=txt;"
+            "      box.appendChild(div);"
+            "      box.scrollTop=box.scrollHeight;"
+            "    };"
+            "  }"
+            "  function enhancedObdConsoleInit(){"
+            "    var box=document.getElementById('obdConsole');"
+            "    var btn=document.getElementById('obdSendBtn');"
+            "    var input=document.getElementById('obdCmdInput');"
+            "    if(!box||!btn||!input) return;"
+            "    // alten Button + Input klonen, um alte Event-Listener loszuwerden"
+            "    var newBtn=btn.cloneNode(true);"
+            "    btn.parentNode.replaceChild(newBtn,btn);"
+            "    var newInput=input.cloneNode(true);"
+            "    input.parentNode.replaceChild(newInput,input);"
+            "    var sending=false;"
+            "    function setSending(on){"
+            "      sending=on;"
+            "      newBtn.disabled=on;"
+            "      newInput.disabled=on;"
+            "      if(on){"
+            "        if(!newBtn.dataset.label){newBtn.dataset.label=newBtn.textContent;}"
+            "        newBtn.innerHTML='<span class=\"spinner\"></span>';"
+            "      }else{"
+            "        newBtn.textContent=newBtn.dataset.label||'Senden';"
+            "      }"
+            "    }"
+            "    function doSend(){"
+            "      var cmd=newInput.value.trim();"
+            "      if(!cmd||sending) return;"
+            "      setSending(true);"
+            "      if(window.appendConsole){appendConsole('> '+cmd);}"
+            "      fetch('/dev/obd-send',{"
+            "        method:'POST',"
+            "        headers:{'Content-Type':'application/x-www-form-urlencoded'},"
+            "        body:'cmd='+encodeURIComponent(cmd)"
+            "      }).then(function(resp){"
+            "        if(!resp.ok){"
+            "          return resp.text().then(function(t){"
+            "            if(window.appendConsole){appendConsole('! '+(t||'Fehler beim Senden'));}"
+            "          });"
+            "        }"
+            "        return resp.json().then(function(data){"
+            "          if(data&&data.lastObd){"
+            "            var txt;"
+            "            if(typeof formatObdLine==='function'){"
+            "              txt=formatObdLine(data.lastTx||'',data.lastObd)||('< '+data.lastObd);"
+            "            }else{"
+            "              txt='< '+data.lastObd;"
+            "            }"
+            "            if(window.appendConsole){appendConsole(txt);}"
+            "            if(typeof consoleLastTx!=='undefined' && data.lastTx!==undefined){consoleLastTx=data.lastTx;}"
+            "            if(typeof consoleLastObd!=='undefined' && data.lastObd!==undefined){consoleLastObd=data.lastObd;}"
+            "          }"
+            "        });"
+            "      }).catch(function(){"
+            "        if(window.appendConsole){appendConsole('! Fehler beim Senden');}"
+            "      }).finally(function(){"
+            "        setSending(false);"
+            "      });"
+            "    }"
+            "    newBtn.addEventListener('click',doSend);"
+            "    newInput.addEventListener('keydown',function(e){"
+            "      if(e.key==='Enter'){e.preventDefault();doSend();}"
+            "    });"
+            "  }"
+            "  function init(){"
+            "    overrideAppendConsole();"
+            "    enhancedObdConsoleInit();"
+            "  }"
+            "  if(document.readyState==='loading'){"
+            "    document.addEventListener('DOMContentLoaded',init);"
+            "  }else{"
+            "    init();"
+            "  }"
+            "})();"
             "</script>"
             "</body></html>");
 

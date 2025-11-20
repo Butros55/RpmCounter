@@ -23,6 +23,65 @@ namespace
         return strip.Color(c.r, c.g, c.b);
     }
 
+    // Gleiche Kurve wie computeSimFraction() im HTML
+    float computeTestSweepPct(float t)
+    {
+        if (t < 0.0f)
+            t = 0.0f;
+        if (t > 1.0f)
+            t = 1.0f;
+
+        float pct = 0.0f;
+
+        if (t < 0.30f)
+        {
+            // 0 → 100% (smoothstep)
+            float tt = t / 0.30f;
+            pct = tt * tt * (3.0f - 2.0f * tt);
+        }
+        else if (t < 0.60f)
+        {
+            // 100% → 40% mit Gasstößen
+            float tt = (t - 0.30f) / 0.30f;                    // 0..1
+            float base = 1.0f - 0.6f * tt;                     // 1.0 -> 0.4
+            float wobble = 0.10f * sinf(tt * 3.14159f * 4.0f); // Wackler
+            pct = base + wobble;
+
+            if (pct < 0.4f)
+                pct = 0.4f;
+            if (pct > 1.0f)
+                pct = 1.0f;
+        }
+        else if (t < 0.85f)
+        {
+            // 40% → 100% (zweiter Gasstoß)
+            float tt = (t - 0.60f) / 0.25f;                            // 0..1
+            float base = 0.4f + 0.6f * (tt * tt * (3.0f - 2.0f * tt)); // 0.4 -> 1.0
+            float wobble = 0.05f * sinf(tt * 3.14159f * 2.0f);
+            pct = base + wobble;
+
+            if (pct < 0.4f)
+                pct = 0.4f;
+            if (pct > 1.0f)
+                pct = 1.0f;
+        }
+        else
+        {
+            // zum Schluss von 100% wieder runter
+            float tt = (t - 0.85f) / 0.15f; // 0..1
+            float base = 1.0f - tt;         // 1.0 -> 0.0
+            float wobble = 0.05f * sinf(tt * 3.14159f * 2.0f);
+            pct = base + wobble;
+
+            if (pct < 0.0f)
+                pct = 0.0f;
+            if (pct > 1.0f)
+                pct = 1.0f;
+        }
+
+        return pct;
+    }
+
     void renderPreviewFade()
     {
         if (!g_brightnessPreviewActive)
@@ -252,53 +311,9 @@ void ledBarLoop()
         }
         else
         {
-            float t = (float)elapsed / (float)TEST_SWEEP_DURATION;
-            int simRpm = 0;
-
-            if (t < 0.25f)
-            {
-                float tt = t / 0.25f;
-                float pct = sinf(tt * 3.14159f);
-                if (pct < 0.0f)
-                    pct = 0.0f;
-                simRpm = (int)(pct * g_testMaxRpm);
-            }
-            else if (t < 0.70f)
-            {
-                float tt = (t - 0.25f) / 0.45f;
-                if (tt < 0.0f)
-                    tt = 0.0f;
-                if (tt > 1.0f)
-                    tt = 1.0f;
-
-                float pct = tt * tt * (3.0f - 2.0f * tt);
-                if (pct < 0.0f)
-                    pct = 0.0f;
-                if (pct > 1.0f)
-                    pct = 1.0f;
-
-                simRpm = (int)(pct * g_testMaxRpm);
-            }
-            else
-            {
-                float tt = (t - 0.70f) / 0.30f;
-                if (tt < 0.0f)
-                    tt = 0.0f;
-                if (tt > 1.0f)
-                    tt = 1.0f;
-
-                float base = 1.0f - tt;
-                float wobble = 0.05f * sinf(tt * 3.14159f * 4.0f);
-                float pct = base + wobble;
-
-                if (pct < 0.0f)
-                    pct = 0.0f;
-                if (pct > 1.0f)
-                    pct = 1.0f;
-
-                simRpm = (int)(pct * g_testMaxRpm);
-            }
-
+            float t = (float)elapsed / (float)TEST_SWEEP_DURATION; // 0..1
+            float pct = computeTestSweepPct(t);
+            int simRpm = (int)(pct * g_testMaxRpm);
             updateRpmBar(simRpm);
         }
     }
