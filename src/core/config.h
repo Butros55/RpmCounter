@@ -5,7 +5,7 @@
 #include <BLEDevice.h>
 
 constexpr int LED_PIN = 5;
-constexpr int NUM_LEDS = 30;
+constexpr int NUM_LEDS = 8;
 constexpr int DEFAULT_BRIGHTNESS = 80;
 constexpr int STATUS_LED_PIN = 2;
 
@@ -43,7 +43,7 @@ struct ShiftConfig
     String redLabel;
 };
 
-constexpr int MANUAL_CONNECT_RETRY_COUNT = 6;
+constexpr int MANUAL_CONNECT_RETRY_COUNT = 1;
 constexpr unsigned long MANUAL_CONNECT_RETRY_DELAY_MS = 600;
 constexpr unsigned long AUTO_RECONNECT_FAST_INTERVAL_MS = 5000;
 constexpr unsigned long AUTO_RECONNECT_SLOW_INTERVAL_MS = 12000;
