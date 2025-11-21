@@ -4,13 +4,14 @@
 #include <WebServer.h>
 #include <WiFi.h>
 
-#include "ble_obd.h"
-#include "config.h"
-#include "led_bar.h"
-#include "logo_anim.h"
-#include "vehicle_info.h"
-#include "state.h"
-#include "display.h"
+#include "bluetooth/ble_obd.h"
+#include "core/config.h"
+#include "hardware/led_bar.h"
+#include "hardware/logo_anim.h"
+#include "core/vehicle_info.h"
+#include "core/state.h"
+#include "hardware/display.h"
+#include <core/utils.h>
 
 namespace
 {
@@ -152,15 +153,6 @@ namespace
             }
         }
         return out;
-    }
-
-    int clampInt(int v, int lo, int hi)
-    {
-        if (v < lo)
-            return lo;
-        if (v > hi)
-            return hi;
-        return v;
     }
 
     void enforceOrder(int &g, int &y, int &b)
@@ -1016,6 +1008,21 @@ namespace
             "  color:#eee;"
             "  font-family:inherit;"
             "}"
+            ".status-pill{display:flex;align-items:center;gap:8px;font-size:13px;margin:6px 0;}"
+            ".status-dot{width:12px;height:12px;border-radius:50%;display:inline-block;background:#d33;box-shadow:0 0 0 2px rgba(255,255,255,0.05);}"
+            ".status-dot.ok{background:#4cd964;}"
+            ".status-dot.warn{background:#f5a524;}"
+            ".ble-actions{display:flex;align-items:center;gap:10px;margin-top:6px;}"
+            ".ble-inline{font-size:12px;color:#aaa;}"
+            ".device-list{overflow:hidden;transition:max-height .25s ease,opacity .25s ease,margin-top .25s ease;border-top:1px solid #222;margin-top:10px;padding-top:6px;}"
+            ".device-list.collapsed{max-height:0;opacity:0;margin-top:0;padding-top:0;border-top-width:0;}"
+            ".device-item{width:100%;margin-top:8px;padding:10px;border-radius:8px;border:1px solid #333;background:#141414;color:#eee;text-align:left;display:flex;justify-content:space-between;align-items:center;}"
+            ".device-meta{display:flex;flex-direction:column;gap:2px;}"
+            ".device-name{font-weight:600;font-size:14px;}"
+            ".device-addr{font-size:11px;color:#aaa;}"
+            ".pill{padding:4px 8px;border-radius:999px;font-size:11px;font-weight:600;background:#222;border:1px solid #333;}"
+            ".pill.bad{background:#331111;border-color:#442222;color:#f77;}"
+            ".pill.ok{background:#113311;border-color:#224422;color:#8f8;}"
             "</style></head><body>");
 
         page += "<h1><a href='/'>&larr; Zurück</a><span>Einstellungen</span></h1>";
@@ -1038,6 +1045,17 @@ namespace
         page += "<div class='row small'>Status: <span id='vehicleStatus' data-base='Noch keine Daten'>Noch keine Daten</span></div>";
         page += F("<button type='button' class='btn' id='btnVehicleRefresh'>Fahrzeugdaten neu synchronisieren</button>");
         page += F("<div id='settingsError' class='error'></div></div>");
+
+        // --- Bluetooth Verbindung ---
+        page += F("<div class='section'><div class='section-title'>Bluetooth Verbindung<span id='bleSpinner' class='spinner hidden'></span></div>");
+        page += F("<div class='status-pill'><span id='bleStatusDot' class='status-dot'></span><span id='bleStatusText'>Keine Verbindung</span></div>");
+        page += "<div class='row small'>Gerät: <strong id='bleTargetName' data-base='" + htmlEscape(g_currentTargetName) + "'>" + htmlEscape(g_currentTargetName) + "</strong></div>";
+        page += "<div class='row small'>MAC: <span id='bleTargetAddr' data-base='" + htmlEscape(g_currentTargetAddr) + "'>" + htmlEscape(g_currentTargetAddr) + "</span></div>";
+        page += "<div class='ble-actions'><button type='button' class='btn' id='bleScanBtn'>Geräte suchen</button><span id='bleScanStatus' class='ble-inline'>Bereit</span></div>";
+        page += F("<div id='bleError' class='error'></div>");
+        page += F("<div id='bleResults' class='device-list collapsed'>");
+        page += F("<div id='bleResultsList'></div>");
+        page += F("<div id='bleScanEmpty' class='ble-inline'>Keine Geräte gefunden.</div></div></div>");
 
         // --- Dev-OBD-Konsole: ausblendbar über Entwicklermodus ---
         page += "<div id='devObdSection' class='section dev-section ";
@@ -1198,6 +1216,78 @@ namespace
             "  if(err) err.innerText=msg;"
             "}"
 
+            "function setBleError(msg){const el=document.getElementById('bleError');if(el) el.innerText=msg||'';}"
+            "function setBleStatusUi(data){"
+            "  data=data||{};"
+            "  const dot=document.getElementById('bleStatusDot');"
+            "  if(dot){dot.classList.remove('ok','warn');if(data.connected){dot.classList.add('ok');}else if(data.connectBusy||data.manualActive){dot.classList.add('warn');}}"
+            "  const txt=document.getElementById('bleStatusText');"
+            "  if(txt){"
+            "    let t='Keine Verbindung';"
+            "    if(data.manualFailed){t='Verbindung fehlgeschlagen';}"
+            "    else if(data.connectBusy||data.manualActive){t='Verbindung wird aufgebaut...';}"
+            "    else if(data.connected){t='Verbunden';}"
+            "    txt.textContent=t;"
+            "  }"
+            "  const tgt=document.getElementById('bleTargetName');"
+            "  if(tgt && data.targetName!==undefined){tgt.textContent=data.targetName||'(unbekannt)';}"
+            "  const addr=document.getElementById('bleTargetAddr');"
+            "  if(addr && data.targetAddr!==undefined){addr.textContent=data.targetAddr||'–';}"
+            "  const spinner=document.getElementById('bleSpinner');"
+            "  if(spinner){if(data.scanRunning||data.connectBusy||data.manualActive){spinner.classList.remove('hidden');}else{spinner.classList.add('hidden');}}"
+            "  const scanStatus=document.getElementById('bleScanStatus');"
+            "  if(scanStatus){"
+            "    if(data.scanRunning){scanStatus.textContent='Suche läuft...';}"
+            "    else if(data.manualActive||data.connectBusy){scanStatus.textContent='Verbinden...';}"
+            "    else if(data.manualFailed){scanStatus.textContent='Keine Verbindung';}"
+            "    else if(data.scanAge>=0){scanStatus.textContent='Letzter Scan: '+data.scanAge+'s';}"
+            "    else{scanStatus.textContent='Bereit';}"
+            "  }"
+            "  const scanBtn=document.getElementById('bleScanBtn');"
+            "  if(scanBtn){scanBtn.disabled=!!data.scanRunning||!!data.connectBusy;scanBtn.textContent=data.scanRunning?'Scanne...':'Geräte suchen';}"
+            "  renderBleResults(data);"
+            "}"
+            "function renderBleResults(data){"
+            "  const list=document.getElementById('bleResultsList');"
+            "  const empty=document.getElementById('bleScanEmpty');"
+            "  const wrapper=document.getElementById('bleResults');"
+            "  const results=(data&&data.results)||[];"
+            "  if(empty){empty.style.display=(!results||results.length===0)&&!data.scanRunning?'block':'none';}"
+            "  if(wrapper){const showList=data.scanRunning||!data.connected||data.manualActive||data.manualFailed; if(showList){wrapper.classList.remove('collapsed');wrapper.style.maxHeight='800px';}else{wrapper.classList.add('collapsed');wrapper.style.maxHeight='0px';}}"
+            "  if(!list) return;"
+            "  list.innerHTML='';"
+            "  results.forEach(dev=>{"
+            "    const btn=document.createElement('button');"
+            "    btn.className='device-item';"
+            "    btn.innerHTML=\`<span class=\"device-meta\"><span class=\"device-name\">${dev.name||'(unbekannt)'}</span><span class=\"device-addr\">${dev.addr||''}</span></span><span class=\"pill\">Verbinden</span>\`;"
+            "    btn.addEventListener('click',()=>{requestBleConnect(dev.addr||'',dev.name||'');});"
+            "    list.appendChild(btn);"
+            "  });"
+            "}"
+            "function requestBleConnect(addr,name){"
+            "  const btn=document.getElementById('bleScanBtn');"
+            "  if(btn) btn.disabled=true;"
+            "  setBleError('');"
+            "  fetch('/ble/connect-device',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:`address=${encodeURIComponent(addr)}&name=${encodeURIComponent(name||'')}&attempts=8`})"
+            "    .then(r=>{if(!r.ok) throw new Error(); return r.json ? r.json() : null;})"
+            "    .catch(()=>{setBleError('Verbindung konnte nicht gestartet werden.');});"
+            "}"
+            "function startBleScan(){"
+            "  setBleError('');"
+            "  const btn=document.getElementById('bleScanBtn');"
+            "  if(btn) btn.disabled=true;"
+            "  fetch('/ble/scan',{method:'POST'})"
+            "    .then(r=>r.json())"
+            "    .then(d=>{if(d&&d.status==='busy'){setBleError('Scan läuft bereits oder Verbindung wird aufgebaut.');}})"
+            "    .catch(()=>{setBleError('Scan konnte nicht gestartet werden.');});"
+            "}"
+            "function fetchBleStatus(){"
+            "  fetch('/ble/status')"
+            "    .then(r=>r.json())"
+            "    .then(d=>{setBleStatusUi(d||{}); if(!d.connected && !d.scanRunning && (!d.results || d.results.length===0)){startBleScan();}})"
+            "    .catch(()=>{});"
+            "}"
+
             "function updateVehicleInfo(data){"
             "  ['vehicleModel','vehicleVin','vehicleDiag'].forEach(id=>{"
             "    const el=document.getElementById(id);"
@@ -1287,6 +1377,9 @@ namespace
             "    .catch(()=>{setRefreshActive(false);showError('Sync fehlgeschlagen.');});"
             "});"
 
+            "const bleBtn=document.getElementById('bleScanBtn');"
+            "if(bleBtn){bleBtn.addEventListener('click',()=>{startBleScan();});}"
+
             "document.getElementById('settingsForm').addEventListener('submit',function(ev){"
             "  ev.preventDefault();"
             "  const fd=new FormData(this);"
@@ -1303,7 +1396,9 @@ namespace
             "});"
 
             "poll();"
+            "fetchBleStatus();"
             "setInterval(poll,1500);"
+            "setInterval(fetchBleStatus,1800);"
             "initObdAutoLog();"
             "captureInitialSettingsState();"
             "recomputeSettingsDirty();"
@@ -1625,6 +1720,66 @@ namespace
         server.send(200, "application/json", json);
     }
 
+    void handleBleStatus()
+    {
+        g_lastHttpMs = millis();
+        unsigned long now = millis();
+
+        String json = "{";
+        json += "\"connected\":" + String(g_connected ? "true" : "false");
+        json += ",\"targetName\":\"" + jsonEscape(g_currentTargetName) + "\"";
+        json += ",\"targetAddr\":\"" + jsonEscape(g_currentTargetAddr) + "\"";
+        json += ",\"autoReconnect\":" + String(g_autoReconnect ? "true" : "false");
+        json += ",\"manualActive\":" + String(g_manualConnectActive ? "true" : "false");
+        json += ",\"manualFailed\":" + String(g_manualConnectFailed ? "true" : "false");
+        json += ",\"manualAttempts\":" + String(g_manualConnectAttempts);
+        json += ",\"autoAttempts\":" + String(g_autoReconnectAttempts);
+        json += ",\"connectBusy\":" + String(g_connectTaskRunning ? "true" : "false");
+        json += ",\"connectManual\":" + String(g_connectTaskWasManual ? "true" : "false");
+        json += ",\"lastConnectOk\":" + String(g_connectTaskResult ? "true" : "false");
+        long scanAge = (g_bleScanFinishedMs > 0) ? static_cast<long>((now - g_bleScanFinishedMs) / 1000UL) : -1;
+        json += ",\"scanRunning\":" + String(g_bleScanRunning ? "true" : "false");
+        json += ",\"scanAge\":" + String(scanAge);
+        json += ",\"results\":[";
+        const auto &res = getBleScanResults();
+        for (size_t i = 0; i < res.size(); ++i)
+        {
+            if (i > 0)
+                json += ",";
+            json += "{\"name\":\"" + jsonEscape(res[i].name) + "\",\"addr\":\"" + jsonEscape(res[i].address) + "\"}";
+        }
+        json += "]";
+        json += "}";
+        server.send(200, "application/json", json);
+    }
+
+    void handleBleScan()
+    {
+        g_lastHttpMs = millis();
+        bool started = startBleScan();
+        if (started)
+            server.send(200, "application/json", "{\"status\":\"started\"}");
+        else
+            server.send(200, "application/json", "{\"status\":\"busy\"}");
+    }
+
+    void handleBleConnectDevice()
+    {
+        g_lastHttpMs = millis();
+        if (!server.hasArg("address"))
+        {
+            server.send(400, "application/json", "{\"status\":\"error\",\"reason\":\"missing-address\"}");
+            return;
+        }
+
+        String address = server.arg("address");
+        String name = server.hasArg("name") ? server.arg("name") : "";
+        int attempts = server.hasArg("attempts") ? server.arg("attempts").toInt() : MANUAL_CONNECT_RETRY_COUNT;
+
+        requestManualConnect(address, name, attempts);
+        server.send(200, "application/json", "{\"status\":\"queued\"}");
+    }
+
     void handleSettingsGet()
     {
         g_lastHttpMs = millis();
@@ -1685,6 +1840,9 @@ void initWebUi()
     server.on("/connect", HTTP_POST, handleConnect);
     server.on("/disconnect", HTTP_POST, handleDisconnect);
     server.on("/status", HTTP_GET, handleStatus);
+    server.on("/ble/status", HTTP_GET, handleBleStatus);
+    server.on("/ble/scan", HTTP_POST, handleBleScan);
+    server.on("/ble/connect-device", HTTP_POST, handleBleConnectDevice);
     server.on("/settings", HTTP_GET, handleSettingsGet);
     server.on("/settings", HTTP_POST, handleSettingsSave);
     server.on("/settings/vehicle-refresh", HTTP_POST, handleSettingsVehicleRefresh);
