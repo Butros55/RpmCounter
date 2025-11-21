@@ -1268,7 +1268,7 @@ namespace
             "    const isBusy=busy && !!dev.addr && dev.addr===busyAddr;"
             "    if(busy && !isBusy){btn.classList.add('disabled');}"
             "    const pill=isBusy?'<span class=\"device-pill\"><span class=\"spinner\"></span><span>Verbinde...</span></span>':'<span class=\"pill\">Verbinden</span>';"
-            "    btn.innerHTML=\`<span class=\"device-meta\"><span class=\"device-name\">${dev.name||'(unbekannt)'}</span><span class=\"device-addr\">${dev.addr||''}</span></span>${pill}\`;"
+            "    btn.innerHTML=`<span class=\"device-meta\"><span class=\"device-name\">${dev.name||'(unbekannt)'}</span><span class=\"device-addr\">${dev.addr||''}</span></span>${pill}`;"
             "    if(!busy || isBusy){btn.addEventListener('click',()=>{requestBleConnect(dev.addr||'',dev.name||'');});}"
             "    list.appendChild(btn);"
             "  });"
