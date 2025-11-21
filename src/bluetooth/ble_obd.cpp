@@ -396,7 +396,10 @@ bool startConnectTask(bool manualAttempt)
                 {
                     g_manualConnectActive = false;
                     g_manualConnectFailed = true;
-                    g_autoReconnectPaused = true;
+                    // Only keep auto reconnect paused if we have a previously known
+                    // device to wait for; otherwise resume the automatic loop so it
+                    // can retry once the dongle becomes available again.
+                    g_autoReconnectPaused = !g_lastSuccessfulAddr.isEmpty();
                     g_manualConnectFinishMs = millis();
                     g_bleConnectLastError = F("Verbindung fehlgeschlagen");
                 }
