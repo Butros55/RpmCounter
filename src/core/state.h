@@ -31,6 +31,7 @@ extern bool g_autoReconnect;
 extern bool g_devMode;
 extern unsigned long g_lastBleRetryMs;
 extern bool g_forceImmediateReconnect;
+extern bool g_autoReconnectPaused;
 
 extern bool g_testActive;
 extern unsigned long g_testStartMs;
@@ -53,11 +54,18 @@ extern int g_manualConnectAttempts;
 extern bool g_manualConnectActive;
 extern bool g_manualConnectFailed;
 extern unsigned long g_manualConnectStartMs;
+extern unsigned long g_manualConnectFinishMs;
 extern bool g_connectTaskRunning;
 extern bool g_connectTaskWasManual;
 extern bool g_connectTaskResult;
+extern unsigned long g_connectTaskStartMs;
 extern unsigned long g_connectTaskFinishedMs;
 extern int g_autoReconnectAttempts;
+extern String g_lastSuccessfulAddr;
+extern bool g_bleConnectInProgress;
+extern String g_bleConnectTargetAddr;
+extern String g_bleConnectTargetName;
+extern String g_bleConnectLastError;
 
 extern bool g_bleScanRunning;
 extern unsigned long g_bleScanStartMs;

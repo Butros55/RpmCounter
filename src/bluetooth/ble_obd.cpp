@@ -348,8 +348,10 @@ void requestManualConnect(const String &address, const String &name, int attempt
     g_currentTargetName = name;
     g_manualConnectAttempts = (attempts > 0) ? attempts : MANUAL_CONNECT_RETRY_COUNT;
     g_manualConnectRequested = true;
-        g_manualConnectFailed = false;
-        g_forceImmediateReconnect = true;
+    g_manualConnectFailed = false;
+    g_manualConnectFinishMs = 0;
+    g_autoReconnectPaused = true;
+    g_forceImmediateReconnect = true;
 }
 
 bool startConnectTask(bool manualAttempt)
@@ -362,6 +364,12 @@ bool startConnectTask(bool manualAttempt)
     g_connectTaskRunning = true;
     g_connectTaskWasManual = manualAttempt;
     g_connectTaskResult = false;
+    g_connectTaskStartMs = millis();
+    g_bleConnectInProgress = true;
+    g_bleConnectLastError = "";
+
+    g_bleConnectTargetAddr = g_currentTargetAddr;
+    g_bleConnectTargetName = g_currentTargetName;
 
     auto task = [](void *param) {
         bool manual = (bool)param;
@@ -376,6 +384,10 @@ bool startConnectTask(bool manualAttempt)
                 g_manualConnectFailed = false;
                 g_manualConnectAttempts = 0;
                 g_autoReconnectAttempts = 0;
+                g_lastSuccessfulAddr = g_currentTargetAddr;
+                g_autoReconnectPaused = false;
+                g_manualConnectFinishMs = millis();
+                g_bleConnectLastError = "";
             }
             else
             {
@@ -384,6 +396,9 @@ bool startConnectTask(bool manualAttempt)
                 {
                     g_manualConnectActive = false;
                     g_manualConnectFailed = true;
+                    g_autoReconnectPaused = true;
+                    g_manualConnectFinishMs = millis();
+                    g_bleConnectLastError = F("Verbindung fehlgeschlagen");
                 }
             }
         }
@@ -392,6 +407,8 @@ bool startConnectTask(bool manualAttempt)
             if (ok)
             {
                 g_autoReconnectAttempts = 0;
+                g_lastSuccessfulAddr = g_currentTargetAddr;
+                g_autoReconnectPaused = false;
             }
             else
             {
@@ -401,6 +418,7 @@ bool startConnectTask(bool manualAttempt)
 
         g_connectTaskRunning = false;
         g_connectTaskFinishedMs = millis();
+        g_bleConnectInProgress = false;
         vTaskDelete(nullptr);
     };
 
@@ -435,7 +453,12 @@ bool startBleScan(uint32_t durationSeconds)
             BleDeviceInfo info;
             info.address = String(dev.getAddress().toString().c_str());
             std::string name = dev.getName();
-            info.name = name.empty() ? String("(unbekannt)") : String(name.c_str());
+            info.name = name.empty() ? info.address : String(name.c_str());
+            if (g_autoReconnectPaused && !g_lastSuccessfulAddr.isEmpty() && info.address == g_lastSuccessfulAddr)
+            {
+                g_autoReconnectPaused = false;
+                g_forceImmediateReconnect = true;
+            }
             g_bleScanResults.push_back(info);
         }
 
@@ -482,11 +505,17 @@ void bleObdLoop()
 
     bool graceElapsed = (now - g_lastHttpMs > HTTP_GRACE_MS) || g_forceImmediateReconnect;
 
+    g_bleConnectInProgress = g_connectTaskRunning || g_manualConnectActive;
+
     if (g_manualConnectRequested && !g_manualConnectActive)
     {
         g_manualConnectActive = true;
         g_manualConnectFailed = false;
         g_manualConnectStartMs = now;
+        g_bleConnectTargetAddr = g_currentTargetAddr;
+        g_bleConnectTargetName = g_currentTargetName;
+        g_bleConnectLastError = "";
+        g_bleConnectInProgress = true;
         g_forceImmediateReconnect = true;
         g_lastBleRetryMs = 0;
         g_manualConnectRequested = false;
@@ -499,7 +528,7 @@ void bleObdLoop()
         startConnectTask(true);
     }
 
-    if (!g_manualConnectActive && g_autoReconnect && !g_connected && !g_connectTaskRunning && graceElapsed)
+    if (!g_manualConnectActive && g_autoReconnect && !g_autoReconnectPaused && !g_connected && !g_connectTaskRunning && graceElapsed)
     {
         unsigned long interval = (g_autoReconnectAttempts < AUTO_RECONNECT_FAST_ATTEMPTS) ? AUTO_RECONNECT_FAST_INTERVAL_MS : AUTO_RECONNECT_SLOW_INTERVAL_MS;
         bool intervalReady = (now - g_lastBleRetryMs > interval) || g_forceImmediateReconnect;

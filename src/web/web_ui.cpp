@@ -1014,12 +1014,14 @@ namespace
             ".status-dot.warn{background:#f5a524;}"
             ".ble-actions{display:flex;align-items:center;gap:10px;margin-top:6px;}"
             ".ble-inline{font-size:12px;color:#aaa;}"
-            ".device-list{overflow:hidden;transition:max-height .25s ease,opacity .25s ease,margin-top .25s ease;border-top:1px solid #222;margin-top:10px;padding-top:6px;}"
-            ".device-list.collapsed{max-height:0;opacity:0;margin-top:0;padding-top:0;border-top-width:0;}"
+            ".device-list{overflow:hidden;transition:max-height .25s ease,opacity .25s ease,margin-top .25s ease,transform .25s ease;border-top:1px solid #222;margin-top:10px;padding-top:6px;opacity:1;transform:translateY(0);}"
+            ".device-list.collapsed{max-height:0;opacity:0;margin-top:0;padding-top:0;border-top-width:0;transform:translateY(-6px);}"
             ".device-item{width:100%;margin-top:8px;padding:10px;border-radius:8px;border:1px solid #333;background:#141414;color:#eee;text-align:left;display:flex;justify-content:space-between;align-items:center;}"
             ".device-meta{display:flex;flex-direction:column;gap:2px;}"
             ".device-name{font-weight:600;font-size:14px;}"
             ".device-addr{font-size:11px;color:#aaa;}"
+            ".device-item.disabled{opacity:0.4;pointer-events:none;}"
+            ".device-pill{display:inline-flex;align-items:center;gap:6px;}"
             ".pill{padding:4px 8px;border-radius:999px;font-size:11px;font-weight:600;background:#222;border:1px solid #333;}"
             ".pill.bad{background:#331111;border-color:#442222;color:#f77;}"
             ".pill.ok{background:#113311;border-color:#224422;color:#8f8;}"
@@ -1047,7 +1049,7 @@ namespace
         page += F("<div id='settingsError' class='error'></div></div>");
 
         // --- Bluetooth Verbindung ---
-        page += F("<div class='section'><div class='section-title'>Bluetooth Verbindung<span id='bleSpinner' class='spinner hidden'></span></div>");
+        page += F("<div class='section'><div class='section-title'>Bluetooth Verbindung</div>");
         page += F("<div class='status-pill'><span id='bleStatusDot' class='status-dot'></span><span id='bleStatusText'>Keine Verbindung</span></div>");
         page += "<div class='row small'>Gerät: <strong id='bleTargetName' data-base='" + htmlEscape(g_currentTargetName) + "'>" + htmlEscape(g_currentTargetName) + "</strong></div>";
         page += "<div class='row small'>MAC: <span id='bleTargetAddr' data-base='" + htmlEscape(g_currentTargetAddr) + "'>" + htmlEscape(g_currentTargetAddr) + "</span></div>";
@@ -1093,8 +1095,9 @@ namespace
         page += F("</form>");
 
         // --- Script ---
+        page += F("<script>");
+        page += "const MANUAL_CONNECT_RETRY_COUNT=" + String(MANUAL_CONNECT_RETRY_COUNT) + ";";
         page += F(
-            "<script>"
             "let settingsDirty=false;"
             "let refreshActive=false;"
             "let refreshStart=0;"
@@ -1220,31 +1223,30 @@ namespace
             "function setBleStatusUi(data){"
             "  data=data||{};"
             "  const dot=document.getElementById('bleStatusDot');"
-            "  if(dot){dot.classList.remove('ok','warn');if(data.connected){dot.classList.add('ok');}else if(data.connectBusy||data.manualActive){dot.classList.add('warn');}}"
+            "  if(dot){dot.classList.remove('ok','warn');if(data.connected){dot.classList.add('ok');}else if(data.connectInProgress){dot.classList.add('warn');}}"
             "  const txt=document.getElementById('bleStatusText');"
             "  if(txt){"
             "    let t='Keine Verbindung';"
-            "    if(data.manualFailed){t='Verbindung fehlgeschlagen';}"
-            "    else if(data.connectBusy||data.manualActive){t='Verbindung wird aufgebaut...';}"
+            "    if(data.connectError){t=data.connectError;}"
+            "    else if(data.manualFailed){t='Verbindung fehlgeschlagen';}"
+            "    else if(data.connectInProgress){t='Verbindung wird aufgebaut...';}"
             "    else if(data.connected){t='Verbunden';}"
             "    txt.textContent=t;"
             "  }"
             "  const tgt=document.getElementById('bleTargetName');"
-            "  if(tgt && data.targetName!==undefined){tgt.textContent=data.targetName||'(unbekannt)';}"
+            "  if(tgt && data.targetName!==undefined){tgt.textContent=data.targetName||data.targetAddr||'(unbekannt)';}"
             "  const addr=document.getElementById('bleTargetAddr');"
             "  if(addr && data.targetAddr!==undefined){addr.textContent=data.targetAddr||'–';}"
-            "  const spinner=document.getElementById('bleSpinner');"
-            "  if(spinner){if(data.scanRunning||data.connectBusy||data.manualActive){spinner.classList.remove('hidden');}else{spinner.classList.add('hidden');}}"
             "  const scanStatus=document.getElementById('bleScanStatus');"
             "  if(scanStatus){"
             "    if(data.scanRunning){scanStatus.textContent='Suche läuft...';}"
-            "    else if(data.manualActive||data.connectBusy){scanStatus.textContent='Verbinden...';}"
+            "    else if(data.connectInProgress){scanStatus.textContent='Verbinden...';}"
             "    else if(data.manualFailed){scanStatus.textContent='Keine Verbindung';}"
             "    else if(data.scanAge>=0){scanStatus.textContent='Letzter Scan: '+data.scanAge+'s';}"
             "    else{scanStatus.textContent='Bereit';}"
             "  }"
             "  const scanBtn=document.getElementById('bleScanBtn');"
-            "  if(scanBtn){scanBtn.disabled=!!data.scanRunning||!!data.connectBusy;scanBtn.textContent=data.scanRunning?'Scanne...':'Geräte suchen';}"
+            "  if(scanBtn){scanBtn.disabled=!!data.scanRunning||!!data.connectInProgress;scanBtn.textContent=data.scanRunning?'Scanne...':'Geräte suchen';}"
             "  renderBleResults(data);"
             "}"
             "function renderBleResults(data){"
@@ -1252,6 +1254,8 @@ namespace
             "  const empty=document.getElementById('bleScanEmpty');"
             "  const wrapper=document.getElementById('bleResults');"
             "  const results=(data&&data.results)||[];"
+            "  const busyAddr=(data&&data.connectTargetAddr)||'';"
+            "  const busy=data&&data.connectInProgress;"
             "  if(empty){empty.style.display=(!results||results.length===0)&&!data.scanRunning?'block':'none';}"
             "  if(wrapper){const showList=data.scanRunning||!data.connected||data.manualActive||data.manualFailed; if(showList){wrapper.classList.remove('collapsed');wrapper.style.maxHeight='800px';}else{wrapper.classList.add('collapsed');wrapper.style.maxHeight='0px';}}"
             "  if(!list) return;"
@@ -1259,8 +1263,13 @@ namespace
             "  results.forEach(dev=>{"
             "    const btn=document.createElement('button');"
             "    btn.className='device-item';"
-            "    btn.innerHTML=\`<span class=\"device-meta\"><span class=\"device-name\">${dev.name||'(unbekannt)'}</span><span class=\"device-addr\">${dev.addr||''}</span></span><span class=\"pill\">Verbinden</span>\`;"
-            "    btn.addEventListener('click',()=>{requestBleConnect(dev.addr||'',dev.name||'');});"
+            "    btn.dataset.addr=dev.addr||'';"
+            "    btn.dataset.name=dev.name||'';"
+            "    const isBusy=busy && !!dev.addr && dev.addr===busyAddr;"
+            "    if(busy && !isBusy){btn.classList.add('disabled');}"
+            "    const pill=isBusy?'<span class=\"device-pill\"><span class=\"spinner\"></span><span>Verbinde...</span></span>':'<span class=\"pill\">Verbinden</span>';"
+            "    btn.innerHTML=\`<span class=\"device-meta\"><span class=\"device-name\">${dev.name||'(unbekannt)'}</span><span class=\"device-addr\">${dev.addr||''}</span></span>${pill}\`;"
+            "    if(!busy || isBusy){btn.addEventListener('click',()=>{requestBleConnect(dev.addr||'',dev.name||'');});}"
             "    list.appendChild(btn);"
             "  });"
             "}"
@@ -1268,7 +1277,21 @@ namespace
             "  const btn=document.getElementById('bleScanBtn');"
             "  if(btn) btn.disabled=true;"
             "  setBleError('');"
-            "  fetch('/ble/connect-device',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:`address=${encodeURIComponent(addr)}&name=${encodeURIComponent(name||'')}&attempts=8`})"
+            "  const list=document.getElementById('bleResultsList');"
+            "  if(list){"
+            "    list.querySelectorAll('.device-item').forEach(el=>{"
+            "      const isTarget=(el.dataset&&el.dataset.addr)===addr;"
+            "      if(isTarget){"
+            "        const meta=el.querySelector('.device-meta');"
+            "        const metaHtml=meta?meta.innerHTML:'';"
+            "        el.classList.remove('disabled');"
+            "        el.innerHTML='<span class=\\\"device-meta\\\">'+metaHtml+'</span><span class=\\\"device-pill\\\"><span class=\\\"spinner\\\"></span><span>Verbinde...</span></span>';"
+            "      }else{"
+            "        el.classList.add('disabled');"
+            "      }"
+            "    });"
+            "  }"
+            "  fetch('/ble/connect-device',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:`address=${encodeURIComponent(addr)}&name=${encodeURIComponent(name||'')}&attempts=${MANUAL_CONNECT_RETRY_COUNT}`})"
             "    .then(r=>{if(!r.ok) throw new Error(); return r.json ? r.json() : null;})"
             "    .catch(()=>{setBleError('Verbindung konnte nicht gestartet werden.');});"
             "}"
@@ -1716,6 +1739,10 @@ namespace
         json += ",\"vehicleInfoRequestRunning\":" + String(g_vehicleInfoRequestRunning ? "true" : "false");
         json += ",\"vehicleInfoReady\":" + String(ready ? "true" : "false");
         json += ",\"vehicleInfoAge\":" + String(vehicleAge);
+        json += ",\"bleConnectInProgress\":" + String(g_bleConnectInProgress ? "true" : "false");
+        json += ",\"bleConnectTargetAddr\":\"" + jsonEscape(g_bleConnectTargetAddr) + "\"";
+        json += ",\"bleConnectTargetName\":\"" + jsonEscape(g_bleConnectTargetName) + "\"";
+        json += ",\"bleConnectError\":\"" + jsonEscape(g_bleConnectLastError) + "\"";
         json += "}";
         server.send(200, "application/json", json);
     }
@@ -1737,9 +1764,15 @@ namespace
         json += ",\"connectBusy\":" + String(g_connectTaskRunning ? "true" : "false");
         json += ",\"connectManual\":" + String(g_connectTaskWasManual ? "true" : "false");
         json += ",\"lastConnectOk\":" + String(g_connectTaskResult ? "true" : "false");
+        json += ",\"connectInProgress\":" + String(g_bleConnectInProgress ? "true" : "false");
+        json += ",\"connectTargetAddr\":\"" + jsonEscape(g_bleConnectTargetAddr) + "\"";
+        json += ",\"connectTargetName\":\"" + jsonEscape(g_bleConnectTargetName) + "\"";
+        json += ",\"connectError\":\"" + jsonEscape(g_bleConnectLastError) + "\"";
         long scanAge = (g_bleScanFinishedMs > 0) ? static_cast<long>((now - g_bleScanFinishedMs) / 1000UL) : -1;
+        long connectAge = g_connectTaskRunning ? static_cast<long>((now - g_connectTaskStartMs) / 1000UL) : -1;
         json += ",\"scanRunning\":" + String(g_bleScanRunning ? "true" : "false");
         json += ",\"scanAge\":" + String(scanAge);
+        json += ",\"connectAge\":" + String(connectAge);
         json += ",\"results\":[";
         const auto &res = getBleScanResults();
         for (size_t i = 0; i < res.size(); ++i)
