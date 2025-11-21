@@ -7,7 +7,9 @@
 #include "hardware/logo_anim.h"
 #include "hardware/display.h"
 
-void setup() {
+#ifndef UNIT_TEST
+void setup()
+{
     initConfig();
     initGlobalState();
     initLeds();
@@ -17,9 +19,11 @@ void setup() {
     displayInit();
 }
 
-void loop() {
+void loop()
+{
     webUiLoop();
     bleObdLoop();
     ledBarLoop();
     logoAnimLoop();
 }
+#endif // UNIT_TEST
