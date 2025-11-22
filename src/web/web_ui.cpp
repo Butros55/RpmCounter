@@ -2326,6 +2326,12 @@ namespace
         displayShowTestLogo();
         server.send(200, "text/plain", "OK");
     }
+
+    void handleNotFound()
+    {
+        markHttpActivity("WEB_NOT_FOUND");
+        server.send(404, "text/plain", "Not found");
+    }
 }
 
 void initWebUi()
@@ -2346,10 +2352,13 @@ void initWebUi()
     server.on("/wifi/disconnect", HTTP_POST, handleWifiDisconnect);
     server.on("/wifi/save", HTTP_POST, handleWifiSave);
     server.on("/settings", HTTP_GET, handleSettingsGet);
+    server.on("/settings/", HTTP_GET, handleSettingsGet);
     server.on("/settings", HTTP_POST, handleSettingsSave);
+    server.on("/settings/", HTTP_POST, handleSettingsSave);
     server.on("/settings/vehicle-refresh", HTTP_POST, handleSettingsVehicleRefresh);
     server.on("/dev/display-logo", HTTP_POST, handleDevDisplayLogo);
     server.on("/dev/obd-send", HTTP_POST, handleDevObdSend);
+    server.onNotFound(handleNotFound);
 
     LOG_INFO("WEB", "WEB_INIT", "Web UI routes registered");
     server.begin();
