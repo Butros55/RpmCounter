@@ -508,7 +508,11 @@ const std::vector<BleDeviceInfo> &getBleScanResults()
 void initBle()
 {
     BLEDevice::init("ESP32-OBD-BLE");
-    BLEDevice::setPower(ESP_PWR_LVL_P7);
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+    BLEDevice::setPower(ESP_PWR_LVL_P9); // S3
+#else
+    BLEDevice::setPower(ESP_PWR_LVL_P7); // „normaler“ ESP32
+#endif
 
     if (g_autoReconnect)
     {
