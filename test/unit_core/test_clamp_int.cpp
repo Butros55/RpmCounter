@@ -23,7 +23,6 @@ static void test_clampInt_too_high(void)
     TEST_ASSERT_EQUAL(5, clampInt(100, -5, 5));
 }
 
-// Wird von beiden Runnern benutzt (ESP32 + native)
 void run_core_tests()
 {
     RUN_TEST(test_clampInt_within_bounds);

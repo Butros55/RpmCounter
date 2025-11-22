@@ -16,6 +16,7 @@ struct WifiStatus
 {
     WifiMode mode;
     bool apActive;
+    int apClients;
     bool staConnected;
     bool staConnecting;
     String staLastError;

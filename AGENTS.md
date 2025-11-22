@@ -2,112 +2,115 @@
 
 ## 🌟 Projektüberblick
 
-Dieses Repository enthält die Firmware für ein ShiftLight-/RPM-Anzeige-System auf Basis eines ESP32 (PlatformIO, Arduino).
+Dieses Repository enthält die Firmware für ein **ShiftLight-/RPM-Anzeige-System** auf Basis eines **ESP32 (PlatformIO, Arduino)**.
 
 Die Firmware:
 
 - verbindet sich über OBD-II per **BLE**
 - steuert eine **mehrfarbige LED-Bar**
-- zeigt Animationen auf einem **Display**
-- stellt eine **WLAN-Access-Point-Weboberfläche** bereit
+- zeigt Animationen und Statusinformationen auf einem **Display**
+- stellt eine **WLAN-Weboberfläche** (Access Point + optional STA) bereit
 - speichert Einstellungen dauerhaft (Preferences / NVS)
 
 **Ziel:**  
-Eine stabile, non-blocking Firmware, in der BLE, Webserver, WLAN-AP, LED-Bar und Display parallel laufen.
+Eine stabile, non-blocking Firmware, in der **BLE, WLAN/AP/STA, Webserver, LED-Bar und Display parallel** laufen, ohne sich gegenseitig zu blockieren.
 
 ---
 
-# ⚙️ Agent-Modi
+# 🤖 Agent-Rollen & Modi
 
-## 🟦 **STANDARD-MODUS (normaler Agent)**
+Der Agent („Codex“) läuft **in der Cloud** und arbeitet über VS Code / CLI auf diesem Repository.
 
-> _Dieser Modus ist der Standard. Er ist sicherer und wird in 95% der Fälle verwendet._
+## 🟦 STANDARD-MODUS (Default)
 
-Der Agent darf:
+> Dieser Modus ist der Standard und wird in ~95 % der Fälle verwendet.
 
-- Dateien lesen/schreiben
-- Projekt verändern
-- Build- & Test-Befehle ausführen:
+Der Agent darf im STANDARD-MODUS:
+
+- Dateien im Workspace lesen/schreiben
+- Projektstruktur einhalten und erweitern
+- Build- & Test-Befehle im Workspace ausführen:
   - `pio run`
   - `pio run -t upload`
-  - `pio device monitor`
+  - `pio device monitor` (falls verfügbar)
+  - `pio test -e native`
   - `pio test -e esp32dev`
-- Log-Ausgaben analysieren
-- Fehler reproduzieren (über echten ESP32)
-- Fix-Vorschläge machen
-- nur Befehle im Terminal ausführen, die **keinen externen Netzwerkzugriff** benötigen  
-  (lokale serielle Verbindung, lokale PIO-Tools, Git-Befehle im Workspace, etc.)
+- Log-Ausgaben aus dem seriellen Monitor analysieren (vom User bereitgestellt)
+- Fehler reproduzieren, soweit mit den zur Verfügung stehenden Tools möglich
+- Fix-Vorschläge umsetzen
 
-Der Standardmodus **reicht vollständig**, um:
+Der Agent führt **keine** Befehle aus, die:
 
-- Firmware zu bauen
-- Firmware zu flashen
-- Tests auf echter Hardware auszuführen
-- State-Machine/BLE/Webserver Verhalten anhand serieller Logs zu debuggen
+- ins Internet gehen (HTTP-Requests nach außen, `curl` auf fremde Hosts, etc.)
+- außerhalb des Projekt-Workspaces Dateien manipulieren
+
+Der STANDARD-MODUS reicht aus, um:
+
+- Firmware zu bauen und zu flashen
+- Tests auf echter Hardware (über `pio test -e esp32dev`) mechanisch anzustoßen
+- State-Machine/BLE/Webserver-Verhalten anhand serieller Logs zu debuggen
+- die Web-UI-/WLAN-Logik in Code & Unit-Tests zu verbessern
 
 ---
 
-## 🟩 **NETZWERK-DEBUG-MODUS (Agent: FULL ACCESS)**
+## 🟩 NETZWERK-DEBUG-MODUS („FULL ACCESS“)
 
-> _Dieser Modus darf **nur** aktiviert werden, wenn ich ihn dir ausdrücklich erlaube._
+> Dieser Modus darf **nur** genutzt werden, wenn ich ihn ausdrücklich erlaube.
 
-Dieser Modus erlaubt zusätzlich:
+Zusätzlich zu den Rechten im STANDARD-MODUS darf der Agent dann:
 
-- Befehle mit Netzwerkzugriff (curl, ping, wget,…)
-- Zugriff auf Geräte im lokalen Netzwerk (z. B. ESP32-AP)
-- Terminalbefehle außerhalb des Workspace
-- komplexere Diagnose über mehrere Interfaces
+- Befehle mit **Netzwerkzugriff** ausführen (z. B. `curl`, `ping`, `wget`)
+- HTTP-Requests an Geräte im lokalen Netzwerk senden (z. B. an den ESP32-AP)
+- Terminalbefehle außerhalb des Workspaces ausführen, falls für Debugging nötig
 
-Beispiele, wo dieser Modus erlaubt ist:
+Typische Einsätze:
 
-- Analyse, warum der ESP32-Webserver im AP-Modus nicht antwortet  
-  → `curl http://192.168.4.1/`
-- HTTP-Debugging während BLE-Verbindungsversuchen
-- Vergleich zwischen Heim-WLAN (STA-Mode) und Access-Point-Modus
+- Analyse, warum der ESP32-Webserver im **AP-Modus** nicht oder nur sporadisch antwortet  
+  → z. B. `curl http://192.168.4.1/`
+- Endpoints wie `/`, `/settings`, `/status`, `/wifi_scan` etc. testen
+- Verhalten bei parallelen Requests während BLE-Scans/WLAN-Scans untersuchen
+- Vergleiche zwischen Heim-WLAN (STA-Mode) und AP-Mode
 
-Wichtig:
-
-**Der Agent darf diesen Modus NICHT eigenständig nutzen.  
-Nur wenn ich explizit schreibe:**
+**Wichtig:**  
+Der Agent darf diesen Modus **nicht eigenständig** aktivieren.  
+Nur wenn ich explizit schreibe:
 
 > **„Nutze bitte Netzwerk-Debug / full access“**
 
+darf der Agent Netzwerkzugriffe verwenden.
+
 ---
 
-# 📡 Netzwerk-Szenarien für Debugging
+# 📡 Netzwerk-Szenarien
 
-## 1️⃣ Access-Point-Modus debuggen (Standardfall)
+## 1️⃣ Access-Point-Modus (AP)
 
-Wenn mein PC mit dem ESP32-AP verbunden ist:
+Wenn der ESP32 im AP-Modus läuft und mein PC mit dem AP verbunden ist:
 
-- Internet ist evtl. getrennt → das ist ok
-- Agent darf:
-  - HTTP-Requests an `http://192.168.4.1` senden (nur in full-access)
-  - Timeout-Verhalten analysieren
-  - Webserver-Fehler sichtbar machen (`404`, blockiert, keine Antwort)
-- Agent beurteilt:
-  - ob BLE-Connect Loops den Webserver blockieren
-  - ob der ESP32 im AP-Modus überlastet wird
-  - ob die HTTP-Handler non-blocking sind
+- Internet ist ggf. getrennt – das ist in Ordnung.
+- Im FULL-ACCESS-Modus darf der Agent:
+  - HTTP-Requests an `http://192.168.4.1` senden
+  - Antwortzeiten, Timeouts und Fehlercodes analysieren
+- Der Agent beurteilt:
+  - ob BLE-Connect-Loops den Webserver blockieren
+  - ob WLAN-Scan/Connect den AP überlastet
+  - ob HTTP-Handler non-blocking implementiert sind
 
 ## 2️⃣ Heim-WLAN (STA-Modus)
 
-Wenn der ESP32 ins Heim-WLAN eingebunden wird (Variante C):
+Wenn der ESP32 sich ins Heim-WLAN einwählt:
 
-- AP- und Internetprobleme werden realitätsnah simuliert
-- Agent kann _gleichzeitig_:
-  - Internet nutzen
-  - HTTP-Requests zum ESP senden
-  - BLE/Webserver testen
-- Eignet sich hervorragend zum **Remote-Debugging** und für PIO Remote.
-
-Beide Modi werden im Agent unterstützt, aber AP-Modus ist nötig, um reale spätere Nutzung zu simulieren.
+- Der PC hat Internet + Verbindung zum ESP32.
+- Im FULL-ACCESS-Modus kann der Agent:
+  - sowohl ins Internet als auch zum ESP32 (z. B. `http://esp32.local` oder IP)
+  - HTTP-Requests während BLE/WLAN-Aktivität senden
+- Gut geeignet für komplexeres Integration-Debugging.
 
 ---
 
 ## 📁 Projektstruktur (verbindlich)
 
-> Wichtig: Bitte diese Struktur respektieren und neue Dateien in den passenden Ordnern anlegen.
+> Bitte diese Struktur respektieren und neue Dateien nur an sinnvollen Stellen ergänzen.
 
 ```text
 .
@@ -118,43 +121,50 @@ Beide Modi werden im Agent unterstützt, aber AP-Modus ist nötig, um reale spä
 │  │  └─ ble_obd.h
 │  ├─ core/
 │  │  ├─ config.cpp
+│  │  ├─ config.h
 │  │  ├─ state.cpp
 │  │  ├─ state.h
 │  │  ├─ utils.cpp
-│  │  └─ vehicle_info.cpp
+│  │  ├─ utils.h
+│  │  ├─ vehicle_info.cpp
+│  │  ├─ vehicle_info.h
+│  │  ├─ wifi.cpp          # zentrale WLAN-Logik (AP/STA, Scan, Connect)
+│  │  └─ wifi.h
 │  ├─ hardware/
 │  │  ├─ display.cpp
+│  │  ├─ display.h
 │  │  ├─ led_bar.cpp
-│  │  └─ logo_anim.cpp
-│  └─ web/
-│     ├─ web_ui.cpp
-│     └─ web_helpers.cpp
-├─ include/          # gemeinsame Header (falls benötigt)
-├─ lib/              # externe / eigene Libraries (falls genutzt)
-└─ test/             # PlatformIO-Tests (Unity)
-   ├─ test_main.cpp                  # zentrales Unity-Setup (einziges setup()/loop())
+│  │  ├─ led_bar.h
+│  │  ├─ logo_anim.cpp
+│  │  └─ logo_anim.h
+│  ├─ web/
+│  │  ├─ web_ui.cpp        # HTML-Generierung & Routen-Handler
+│  │  ├─ web_ui.h
+│  │  ├─ web_helpers.cpp
+│  │  └─ web_helpers.h
+│  └─ main.cpp
+├─ include/                # gemeinsame Header (falls benötigt)
+├─ lib/                    # externe / eigene Libraries
+└─ test/                   # PlatformIO-Tests (Unity)
+   ├─ test_main.cpp        # zentrales Unity-Setup (einziges setup()/loop())
    ├─ unit_core/
-   │  └─ test_clamp_int.cpp          # Unit-Tests für core/* (z.B. Utils, State)
+   │  └─ test_clamp_int.cpp
    ├─ unit_bluetooth/
-   │  └─ (geplant)                  # Unit-Tests für BLE-Logik (mit Stubs/Mocks)
+   │  └─ (geplant)
    ├─ integration_connectivity/
-   │  └─ (geplant)                  # Integrationstests BLE/WLAN/Webserver
+   │  └─ (geplant)        # BLE/WLAN/Webserver-Integration
    └─ unit_ap/
-      └─ (geplant)                  # Tests für Access-Point-/WLAN-Logik
-```
+      └─ (geplant)        # Tests für Access-Point-/WLAN-Logik
+Alle Tests werden über test/test_main.cpp gestartet.
+Wichtig: keine weiteren setup()/loop() in anderen Testdateien definieren.
 
-Alle Tests in den Unterordnern werden über test/test_main.cpp gestartet.
-Bitte kein weiteres setup()/loop() in anderen Test-Dateien definieren.
-
----
-
-## ⚙️ Build & Flash
-
+⚙️ Build & Flash
 Entwicklungsumgebung: PlatformIO
 
-platformio.ini (relevant):
+Relevanter Ausschnitt aus platformio.ini (kann vom Agent ergänzt/angepasst werden, aber nicht grundlegend umgebaut):
 
-```
+ini
+Code kopieren
 [env:esp32dev]
 platform = espressif32
 board = esp32dev
@@ -172,82 +182,125 @@ lib_deps =
   adafruit/Adafruit ST7735 and ST7789 Library
 
 board_build.partitions = huge_app.csv
-```
-
 Standard-Workflows:
 
-Build: `pio run`  
-Flash: `pio run -t upload`  
-Serieller Monitor: `pio device monitor`
+Build: pio run
 
----
+Flash: pio run -t upload
 
-# 📌 Betriebsregeln für Codex
+Serieller Monitor: pio device monitor
 
-## Der Agent MUSS:
+Unit-/Integration-Tests:
 
-- Architektur & Struktur beibehalten
-- state/config/utils zentral halten
-- Webserver + BLE + Display non-blocking halten
-- Fixes erklären (Dateien + Gründe)
-- Tests grün halten
-- keine Interfaces ungewollt umbauen
-- niemals Tests löschen
+pio test -e native
 
-## Der Agent DARF:
+pio test -e esp32dev
 
-- neue Tests im `test/` Ordner anlegen
-- UI minimal verbessern
-- Debug-Logs zentralisieren
-- neue States hinzufügen (wenn nötig)
-- Fehler im bestehenden Code beheben
+🔁 Arbeits- & Test-Workflow für den Agent
+Der Agent MUSS nach Änderungen:
 
-## Der Agent DARF NICHT:
+Projekt bauen
 
-- neue Frameworks einführen
-- Libraries austauschen
-- große Refactorings ohne Not
-- Pinbelegung ändern
-- Funktionsnamen ändern, die im Web UI genutzt werden
-- Netzwerkzugriff im Standardmodus durchführen
+bash
+Code kopieren
+pio run
+Tests ausführen
 
----
+Immer:
 
-# 🧪 Tests
+bash
+Code kopieren
+pio test -e native
+Wenn WLAN-/Webserver-/BLE-/Hardware-nahe Logik verändert wurde, zusätzlich:
 
-Alle Tests laufen über:
+bash
+Code kopieren
+pio test -e esp32dev
+Bei Testfehlschlägen:
 
-- `pio test -e esp32dev` (echter ESP32)
+Fehler analysieren
 
-Später optional:
+Code nachbessern
 
-- `pio test -e native`
+Build & Tests wiederholen
 
----
+Erst wenn alle relevanten Tests grün sind, gilt der Fix als abgeschlossen.
 
-# 📌 Wann soll der Agent mich um Interaktion bitten?
+Im Ergebnis soll der Agent immer kurz dokumentieren:
 
-- Wenn Tests fehlschlagen
-- Wenn Hardware erwartet wird (BLE-Scanner, Fahrzeug)
-- Wenn ein Netzwerkzugriff nur im Full-Access-Modus erlaubt wäre
-- Wenn ein Sicherheitsrisiko besteht (File-Write außerhalb Workspace)
+Welche Dateien geändert wurden
 
----
+Welche Probleme behoben wurden (inkl. Fehlermeldungen vorher/nachher)
 
-# 🔥 Beispiele für sinnvolle Full-Access-Jobs
+Welche Kommandos (Build/Test) ausgeführt wurden und ob sie erfolgreich waren
 
-- „Teste über `curl` die Endpunkte `/status`, `/settings`, `/debug` während BLE-Connect.“
-- „Simuliere 5 parallele Web-Requests, während BLE scannt.“
-- „Analysiere HTTP-Timeouts beim ESP32-AP und verbinde das Verhalten mit der State-Machine.“
-- „Prüfe, ob `/rpm` während BLE-Reconnect zuverlässig antwortet.“
+📌 Regeln für Änderungen
+Der Agent MUSS:
 
----
+die bestehende Architektur (core/hardware/web/bluetooth) respektieren
 
-# 🧩 Beispiele für Standard-Modus-Aufgaben
+non-blocking Verhalten sicherstellen (kein langes delay(), keine blockierenden Scans im HTTP-Handler)
 
-- BLE-State-Fixes
-- Non-blocking Webserver-Aufbereitung
-- LED-Bar-F1-Modus implementieren
-- Retry-Logik in state.cpp erweitern
-- Utils-Tests um Randfälle erweitern
-- Log-System einbauen
+NVS/Preferences-Zugriff über das bestehende Config-System führen
+
+neue Zustände sauber in state.* integrieren
+
+Tests niemals löschen oder deaktivieren, sondern erweitern
+
+Der Agent DARF:
+
+neue Unit- und Integrationstests im test/-Ordner hinzufügen
+
+kleine UI-Verbesserungen in der Weboberfläche vornehmen
+
+Logging konsolidieren (z. B. zentrale Debug-Funktion)
+
+neue State-Machine-Zustände hinzufügen, wenn für Stabilität nötig
+
+die WLAN-Logik so umbauen, dass:
+
+Scan & Connect asynchron ablaufen
+
+AP/STA-Modus sauber verwaltet werden
+
+die Web-UI sofort reagiert (z. B. mit Status „Scan läuft…“)
+
+Der Agent DARF NICHT:
+
+neue Frameworks oder große externe Libraries einführen
+
+Plattform/Board ohne Rücksprache wechseln
+
+Pinbelegung eigenmächtig ändern
+
+Funktionsnamen ändern, die von anderen Modulen (v. a. Web-UI) verwendet werden, ohne alle Call-Sites konsequent anzupassen
+
+Tests entfernen oder „grün patchen“, ohne das eigentliche Problem zu lösen
+
+🧪 Tests
+Alle Tests laufen mit:
+
+bash
+Code kopieren
+pio test -e native
+pio test -e esp32dev
+Der Fokus liegt auf:
+
+core/ (State, Utils, Config, WLAN-Logik)
+
+integration_connectivity/ (geplant für BLE/WLAN/Webserver)
+
+stabiler Webserver-/WLAN-Interaktion (insbesondere beim Wechsel auf die Einstellungsseite und beim WLAN-Scan)
+
+📌 Wann soll der Agent Rückfragen stellen?
+Wenn Hardwareverhalten unklar ist (z. B. bestimmte OBD-Werte, LED-Verhalten)
+
+Wenn Logs fehlen, um einen Fehler nachzuvollziehen
+
+Wenn für die Lösung Netzwerkzugriff im FULL-ACCESS-Modus notwendig ist
+
+Wenn sicherheitsrelevante Aktionen außerhalb des Workspaces erforderlich wären
+
+bash
+Code kopieren
+```

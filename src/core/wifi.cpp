@@ -7,6 +7,8 @@
 
 namespace
 {
+    constexpr unsigned long WIFI_SCAN_MAX_DURATION_MS = 15000;
+
     struct WifiRuntimeState
     {
         WifiMode configuredMode = AP_ONLY;
@@ -16,6 +18,7 @@ namespace
         unsigned long staConnectStartMs = 0;
         uint32_t staConnectTimeoutMs = 15000;
         bool apActive = false;
+        int apClients = 0;
         bool scanRunning = false;
         unsigned long scanStartMs = 0;
         std::vector<WifiScanResult> scanResults;
@@ -33,6 +36,13 @@ namespace
         String out = value;
         out.trim();
         return out;
+    }
+
+    void refreshApState()
+    {
+        wifi_mode_t mode = WiFi.getMode();
+        g_wifi.apActive = (mode == WIFI_AP || mode == WIFI_AP_STA);
+        g_wifi.apClients = g_wifi.apActive ? WiFi.softAPgetStationNum() : 0;
     }
 
     void updateIp()
@@ -82,6 +92,7 @@ namespace
         WiFi.mode(mode);
         bool ok = WiFi.softAP(ssid.c_str(), pass.c_str());
         g_wifi.apActive = ok;
+        g_wifi.apClients = ok ? WiFi.softAPgetStationNum() : 0;
         updateIp();
         if (ok)
         {
@@ -117,6 +128,7 @@ bool startApMode(const AppConfig &config)
     g_wifi.configuredMode = config.wifiMode;
     g_wifi.activeMode = AP_ONLY;
     g_wifi.apActive = ok;
+    g_wifi.apClients = ok ? WiFi.softAPgetStationNum() : 0;
     g_wifi.currentSsid = ssid;
     updateIp();
 
@@ -176,6 +188,7 @@ bool startStaMode(const AppConfig &config, uint32_t timeoutMs)
     }
 
     WiFi.begin(ssid.c_str(), pass.c_str());
+    refreshApState();
     LOG_INFO("WIFI", "WIFI_STA_START", String("ssid=") + ssid);
     return true;
 }
@@ -211,6 +224,12 @@ bool startWifiScan()
     if (g_wifi.scanRunning)
         return false;
 
+    if (g_wifi.staConnecting)
+    {
+        LOG_DEBUG("WIFI", "WIFI_SCAN_SKIP_CONNECT", "skip scan while STA connecting");
+        return false;
+    }
+
     // Ensure STA interface exists for scanning.
     wifi_mode_t mode = WiFi.getMode();
     if (mode == WIFI_AP)
@@ -237,7 +256,7 @@ bool startWifiScan()
 
 void requestWifiDisconnect()
 {
-    handleStaFailure("manual-disconnect");
+    handleStaFailure("");
     if (g_wifi.configuredMode != STA_ONLY)
     {
         startApMode(cfg);
@@ -246,14 +265,38 @@ void requestWifiDisconnect()
 
 bool requestWifiConnect(const String &ssid, const String &password, WifiMode mode)
 {
+    if (g_wifi.staConnecting)
+    {
+        LOG_DEBUG("WIFI", "WIFI_CONNECT_BUSY", "connect already running");
+        return false;
+    }
+
+    if (g_wifi.scanRunning)
+    {
+        LOG_DEBUG("WIFI", "WIFI_CONNECT_SCAN_BUSY", "skip connect while scan running");
+        return false;
+    }
+
+    String cleanSsid = trimmed(ssid);
+    if (cleanSsid.isEmpty())
+    {
+        LOG_ERROR("WIFI", "WIFI_CONNECT_INVALID", "missing ssid");
+        return false;
+    }
+
     AppConfig temp = cfg;
     temp.wifiMode = mode;
-    temp.staSsid = ssid;
+    temp.staSsid = cleanSsid;
     temp.staPassword = password;
 
     cfg.wifiMode = mode;
-    cfg.staSsid = ssid;
+    cfg.staSsid = cleanSsid;
     cfg.staPassword = password;
+
+    if (mode == STA_WITH_AP_FALLBACK && !g_wifi.apActive)
+    {
+        ensureApForFallback(temp, true);
+    }
 
     return startStaMode(temp);
 }
@@ -263,6 +306,7 @@ WifiStatus getWifiStatus()
     WifiStatus status;
     status.mode = g_wifi.configuredMode;
     status.apActive = g_wifi.apActive;
+    status.apClients = g_wifi.apClients;
     status.staConnected = g_wifi.staConnected;
     status.staConnecting = g_wifi.staConnecting;
     status.staLastError = g_wifi.staLastError;
@@ -277,6 +321,7 @@ void wifiLoop()
 {
     unsigned long now = millis();
     wl_status_t status = WiFi.status();
+    refreshApState();
 
     if (g_wifi.staConnecting)
     {
@@ -319,6 +364,15 @@ void wifiLoop()
 
     if (g_wifi.scanRunning)
     {
+        if ((now - g_wifi.scanStartMs) > WIFI_SCAN_MAX_DURATION_MS)
+        {
+            g_wifi.scanRunning = false;
+            g_wifi.staLastError = "scan-timeout";
+            WiFi.scanDelete();
+            LOG_ERROR("WIFI", "WIFI_SCAN_TIMEOUT", "scan timed out");
+            return;
+        }
+
         int16_t res = WiFi.scanComplete();
         if (res == WIFI_SCAN_RUNNING)
         {

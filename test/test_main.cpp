@@ -3,7 +3,6 @@
 #include <Arduino.h>
 #include <unity.h>
 
-// Deklarationen der Runner aus Unterordnern
 void run_core_tests();
 // später:
 // void run_bluetooth_tests();
@@ -23,7 +22,6 @@ void setup()
 
 void loop()
 {
-    // nicht benutzt in PlatformIO Tests
 }
 
 #endif // ARDUINO
