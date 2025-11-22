@@ -5,6 +5,8 @@
 #include <BLEScan.h>
 #include <BLEAdvertisedDevice.h>
 #include <math.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include "core/config.h"
 #include "hardware/led_bar.h"
@@ -13,6 +15,7 @@
 #include "core/vehicle_info.h"
 #include "core/utils.h"
 #include "hardware/display.h"
+#include "core/logging.h"
 
 namespace
 {
@@ -77,8 +80,8 @@ namespace
         if (line.length() == 0)
             return;
 
-        Serial.print("[OBD] ");
-        Serial.println(line);
+        // Serial.print("[OBD] ");
+        // Serial.println(line);
 
         g_lastObdInfo = line;
 
@@ -185,10 +188,10 @@ namespace
                     processObdLine(g_obdLine);
                     g_obdLine = "";
                 }
-                if (c == '>')
-                {
-                    Serial.println(">");
-                }
+                // if (c == '>')
+                // {
+                //     Serial.println(">");
+                // }
             }
             else
             {
@@ -199,20 +202,20 @@ namespace
 
     class MyClientCallback : public BLEClientCallbacks
     {
-    void onConnect(BLEClient * /*pclient*/) override
-    {
-        Serial.println("BLE-Client: onConnect()");
-        g_connected = true;
-        setStatusLED(true);
-        g_manualConnectActive = false;
-        g_manualConnectRequested = false;
-        g_manualConnectFailed = false;
-    }
+        void onConnect(BLEClient * /*pclient*/) override
+        {
+            LOG_INFO("BLE", "BLE_CONNECTED", "BLE client connected");
+            g_connected = true;
+            setStatusLED(true);
+            g_manualConnectActive = false;
+            g_manualConnectRequested = false;
+            g_manualConnectFailed = false;
+        }
 
-    void onDisconnect(BLEClient * /*pclient*/) override
-    {
-        Serial.println("BLE-Client: onDisconnect()");
-        bool wasIgnition = g_ignitionOn;
+        void onDisconnect(BLEClient * /*pclient*/) override
+        {
+            LOG_INFO("BLE", "BLE_DISCONNECTED", "BLE client disconnected");
+            bool wasIgnition = g_ignitionOn;
 
             g_connected = false;
             g_charWrite = nullptr;
@@ -255,28 +258,30 @@ bool connectToObd(const String &address, const String &name)
     g_charWrite = nullptr;
     g_charNotify = nullptr;
 
-    Serial.print("Versuche Verbindung zu OBDII bei ");
-    Serial.println(targetAddr);
+    unsigned long startMs = millis();
+    LOG_INFO("BLE", "BLE_CONNECT_START", String("target=") + targetAddr + " name=" + g_currentTargetName);
 
     BLEAddress obdAddress(targetAddr.c_str());
 
     g_client = BLEDevice::createClient();
+    delay(1);
     g_client->setClientCallbacks(new MyClientCallback());
 
     g_client->setMTU(200);
+    delay(1);
 
     if (!g_client->connect(obdAddress))
     {
-        Serial.println("❌ BLE connect() fehlgeschlagen.");
+        LOG_ERROR("BLE", "BLE_CONNECT_FAIL", "connect() returned false");
         return false;
     }
 
-    Serial.println("✅ Verbunden, suche Service FFF0...");
+    LOG_INFO("BLE", "BLE_CONNECT_LINK", "Connected, discovering service FFF0");
 
     BLERemoteService *pService = g_client->getService(SERVICE_UUID);
     if (pService == nullptr)
     {
-        Serial.println("❌ Service FFF0 nicht gefunden, trenne.");
+        LOG_ERROR("BLE", "BLE_SERVICE_MISSING", "Service FFF0 not found, disconnecting");
         g_client->disconnect();
         return false;
     }
@@ -286,12 +291,12 @@ bool connectToObd(const String &address, const String &name)
 
     if (!g_charWrite || !g_charNotify)
     {
-        Serial.println("❌ Write-/Notify-Characteristic nicht gefunden, trenne.");
+        LOG_ERROR("BLE", "BLE_CHAR_MISSING", "Write/Notify characteristics missing, disconnecting");
         g_client->disconnect();
         return false;
     }
 
-    Serial.println("✅ Characteristics gefunden.");
+    LOG_INFO("BLE", "BLE_CONNECT_CHARS", "Characteristics found");
 
     if (g_charNotify->canNotify())
     {
@@ -299,10 +304,10 @@ bool connectToObd(const String &address, const String &name)
     }
     else
     {
-        Serial.println("WARNUNG: Notify-Characteristic kann nicht notify-en.");
+        LOG_ERROR("BLE", "BLE_NOTIFY_DISABLED", "Notify characteristic cannot notify");
     }
 
-    Serial.println("🎉 BLE-Verbindung steht! Serial-Monitor kann weiterhin AT/OBD-Befehle schicken.");
+    LOG_INFO("BLE", "BLE_CONNECT_READY", String("Connected in ") + String(millis() - startMs) + "ms");
     requestVehicleInfo();
     return true;
 }
@@ -316,7 +321,7 @@ void sendObdCommand(const String &cmd)
 {
     if (!g_connected || !g_charWrite)
     {
-        Serial.println("\r\n[!] Nicht verbunden, kann nicht senden.");
+        LOG_ERROR("BLE", "OBD_TX_DISCONNECTED", "Not connected, cannot send");
         return;
     }
 
@@ -332,8 +337,7 @@ void sendObdCommand(const String &cmd)
     if (!isRpmCmd || (nowMs - g_lastTxLogMs > TX_LOG_INTERVAL_MS))
     {
         String info = cmd + " @ " + String(nowMs / 1000) + "s";
-        Serial.print("[TX] ");
-        Serial.println(info);
+        LOG_DEBUG("BLE", "OBD_TX", info);
 
         g_lastTxInfo = info;
         g_lastTxLogMs = nowMs;
@@ -348,8 +352,11 @@ void requestManualConnect(const String &address, const String &name, int attempt
     g_currentTargetName = name;
     g_manualConnectAttempts = (attempts > 0) ? attempts : MANUAL_CONNECT_RETRY_COUNT;
     g_manualConnectRequested = true;
-        g_manualConnectFailed = false;
-        g_forceImmediateReconnect = true;
+    g_manualConnectFailed = false;
+    g_manualConnectFinishMs = 0;
+    g_autoReconnectPaused = true;
+    g_forceImmediateReconnect = true;
+    LOG_INFO("BLE", "BLE_MANUAL_REQUEST", String("addr=") + g_currentTargetAddr + " name=" + g_currentTargetName + " attempts=" + String(g_manualConnectAttempts));
 }
 
 bool startConnectTask(bool manualAttempt)
@@ -362,11 +369,22 @@ bool startConnectTask(bool manualAttempt)
     g_connectTaskRunning = true;
     g_connectTaskWasManual = manualAttempt;
     g_connectTaskResult = false;
+    g_connectTaskStartMs = millis();
+    g_bleConnectInProgress = true;
+    g_bleConnectLastError = "";
 
-    auto task = [](void *param) {
+    g_bleConnectTargetAddr = g_currentTargetAddr;
+    g_bleConnectTargetName = g_currentTargetName;
+    LOG_INFO("BLE", manualAttempt ? "BLE_CONNECT_TASK_MANUAL" : "BLE_CONNECT_TASK_AUTO", String("target=") + g_bleConnectTargetAddr + " name=" + g_bleConnectTargetName);
+
+    auto task = [](void *param)
+    {
         bool manual = (bool)param;
         bool ok = connectToObd();
         g_connectTaskResult = ok;
+        unsigned long finishedMs = millis();
+        LOG_INFO("BLE", manual ? "BLE_CONNECT_DONE_MANUAL" : "BLE_CONNECT_DONE_AUTO",
+                 String(ok ? "ok" : "fail") + " duration_ms=" + String(finishedMs - g_connectTaskStartMs));
 
         if (manual)
         {
@@ -376,6 +394,10 @@ bool startConnectTask(bool manualAttempt)
                 g_manualConnectFailed = false;
                 g_manualConnectAttempts = 0;
                 g_autoReconnectAttempts = 0;
+                g_lastSuccessfulAddr = g_currentTargetAddr;
+                g_autoReconnectPaused = false;
+                g_manualConnectFinishMs = millis();
+                g_bleConnectLastError = "";
             }
             else
             {
@@ -384,6 +406,12 @@ bool startConnectTask(bool manualAttempt)
                 {
                     g_manualConnectActive = false;
                     g_manualConnectFailed = true;
+                    // Only keep auto reconnect paused if we have a previously known
+                    // device to wait for; otherwise resume the automatic loop so it
+                    // can retry once the dongle becomes available again.
+                    g_autoReconnectPaused = !g_lastSuccessfulAddr.isEmpty();
+                    g_manualConnectFinishMs = millis();
+                    g_bleConnectLastError = F("Verbindung fehlgeschlagen");
                 }
             }
         }
@@ -392,6 +420,8 @@ bool startConnectTask(bool manualAttempt)
             if (ok)
             {
                 g_autoReconnectAttempts = 0;
+                g_lastSuccessfulAddr = g_currentTargetAddr;
+                g_autoReconnectPaused = false;
             }
             else
             {
@@ -401,6 +431,7 @@ bool startConnectTask(bool manualAttempt)
 
         g_connectTaskRunning = false;
         g_connectTaskFinishedMs = millis();
+        g_bleConnectInProgress = false;
         vTaskDelete(nullptr);
     };
 
@@ -412,19 +443,24 @@ bool startBleScan(uint32_t durationSeconds)
 {
     if (g_bleScanRunning || g_connectTaskRunning)
     {
+        LOG_DEBUG("BLE", "BLE_SCAN_SKIP", "Scan skipped because another task is active");
         return false;
     }
 
     g_bleScanRunning = true;
     g_bleScanStartMs = millis();
     g_bleScanResults.clear();
+    LOG_INFO("BLE", "BLE_SCAN_START", String("duration_s=") + String(durationSeconds));
 
-    auto task = [](void *param) {
+    auto task = [](void *param)
+    {
         uint32_t duration = (uint32_t)(uintptr_t)param;
         BLEScan *pScan = BLEDevice::getScan();
         pScan->setActiveScan(true);
-        pScan->setInterval(100);
-        pScan->setWindow(80);
+        // Slightly reduce duty cycle to keep WiFi/AP responsive during scans.
+        pScan->setInterval(140);
+        pScan->setWindow(60);
+        vTaskDelay(pdMS_TO_TICKS(2));
 
         BLEScanResults results = pScan->start(duration, false);
         g_bleScanResults.clear();
@@ -435,12 +471,18 @@ bool startBleScan(uint32_t durationSeconds)
             BleDeviceInfo info;
             info.address = String(dev.getAddress().toString().c_str());
             std::string name = dev.getName();
-            info.name = name.empty() ? String("(unbekannt)") : String(name.c_str());
+            info.name = name.empty() ? info.address : String(name.c_str());
+            if (g_autoReconnectPaused && !g_lastSuccessfulAddr.isEmpty() && info.address == g_lastSuccessfulAddr)
+            {
+                g_autoReconnectPaused = false;
+                g_forceImmediateReconnect = true;
+            }
             g_bleScanResults.push_back(info);
         }
 
         g_bleScanFinishedMs = millis();
         g_bleScanRunning = false;
+        LOG_INFO("BLE", "BLE_SCAN_DONE", String("found=") + String(g_bleScanResults.size()) + " duration_ms=" + String(g_bleScanFinishedMs - g_bleScanStartMs));
         vTaskDelete(nullptr);
     };
 
@@ -466,7 +508,11 @@ const std::vector<BleDeviceInfo> &getBleScanResults()
 void initBle()
 {
     BLEDevice::init("ESP32-OBD-BLE");
-    BLEDevice::setPower(ESP_PWR_LVL_P7);
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+    BLEDevice::setPower(ESP_PWR_LVL_P9); // S3
+#else
+    BLEDevice::setPower(ESP_PWR_LVL_P7); // „normaler“ ESP32
+#endif
 
     if (g_autoReconnect)
     {
@@ -480,13 +526,17 @@ void bleObdLoop()
     unsigned long now = millis();
     const unsigned long HTTP_GRACE_MS = 5000;
 
-    bool graceElapsed = (now - g_lastHttpMs > HTTP_GRACE_MS) || g_forceImmediateReconnect;
+    g_bleConnectInProgress = g_connectTaskRunning || g_manualConnectActive;
 
     if (g_manualConnectRequested && !g_manualConnectActive)
     {
         g_manualConnectActive = true;
         g_manualConnectFailed = false;
         g_manualConnectStartMs = now;
+        g_bleConnectTargetAddr = g_currentTargetAddr;
+        g_bleConnectTargetName = g_currentTargetName;
+        g_bleConnectLastError = "";
+        g_bleConnectInProgress = true;
         g_forceImmediateReconnect = true;
         g_lastBleRetryMs = 0;
         g_manualConnectRequested = false;
@@ -495,29 +545,36 @@ void bleObdLoop()
     if (g_manualConnectActive && !g_connected && g_manualConnectAttempts > 0 && !g_connectTaskRunning && (now - g_lastBleRetryMs > MANUAL_CONNECT_RETRY_DELAY_MS))
     {
         g_lastBleRetryMs = now;
-        Serial.println("[BLE] Manueller Verbindungsversuch...");
+        LOG_INFO("BLE", "BLE_MANUAL_ATTEMPT", String("attempts_left=") + String(g_manualConnectAttempts));
         startConnectTask(true);
     }
 
-    if (!g_manualConnectActive && g_autoReconnect && !g_connected && !g_connectTaskRunning && graceElapsed)
+    bool autoReconnectReady = shouldAutoReconnectNow(now,
+                                                     g_autoReconnect,
+                                                     g_autoReconnectPaused,
+                                                     g_connected,
+                                                     g_connectTaskRunning,
+                                                     g_manualConnectActive,
+                                                     g_lastBleRetryMs,
+                                                     g_autoReconnectAttempts,
+                                                     HTTP_GRACE_MS,
+                                                     g_lastHttpMs,
+                                                     g_forceImmediateReconnect);
+    if (autoReconnectReady)
     {
-        unsigned long interval = (g_autoReconnectAttempts < AUTO_RECONNECT_FAST_ATTEMPTS) ? AUTO_RECONNECT_FAST_INTERVAL_MS : AUTO_RECONNECT_SLOW_INTERVAL_MS;
-        bool intervalReady = (now - g_lastBleRetryMs > interval) || g_forceImmediateReconnect;
-        if (intervalReady)
+        g_lastBleRetryMs = now;
+        bool immediate = g_forceImmediateReconnect;
+        g_forceImmediateReconnect = false;
+        if (immediate)
         {
-            g_lastBleRetryMs = now;
-            bool immediate = g_forceImmediateReconnect;
-            g_forceImmediateReconnect = false;
-            if (immediate)
-            {
-                Serial.println("🔄 Manueller Sofort-Reconnect nach Save.");
-            }
-            else
-            {
-                Serial.println("🔄 Verbindung verloren – versuche Reconnect (auto)...");
-            }
-            startConnectTask(false);
+            LOG_INFO("BLE", "BLE_AUTORECONNECT_FORCE", "Immediate reconnect triggered");
         }
+        else
+        {
+            unsigned long intervalMs = computeAutoReconnectInterval(g_autoReconnectAttempts);
+            LOG_INFO("BLE", "BLE_AUTORECONNECT", String("attempt=") + String(g_autoReconnectAttempts + 1) + " interval_ms=" + String(intervalMs));
+        }
+        startConnectTask(false);
     }
 
     if (!g_testActive && g_connected && g_charWrite && (now - g_lastRpmRequest > RPM_INTERVAL_MS))
@@ -552,6 +609,8 @@ void bleObdLoop()
         {
             g_serialLine += c;
         }
+
+        yield();
     }
 
     delay(1);

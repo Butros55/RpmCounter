@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include "core/config.h"
+#include "core/wifi.h"
 #include "core/state.h"
 #include "bluetooth/ble_obd.h"
 #include "web/web_ui.h"
@@ -7,19 +8,25 @@
 #include "hardware/logo_anim.h"
 #include "hardware/display.h"
 
-void setup() {
+#ifndef UNIT_TEST
+void setup()
+{
     initConfig();
+    loadConfig();
     initGlobalState();
     initLeds();
-    initWifiAP();
+    setupWifiFromConfig(cfg);
     initWebUi();
     initBle();
     displayInit();
 }
 
-void loop() {
+void loop()
+{
     webUiLoop();
+    wifiLoop();
     bleObdLoop();
     ledBarLoop();
     logoAnimLoop();
 }
+#endif // UNIT_TEST

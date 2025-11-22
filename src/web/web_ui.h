@@ -1,7 +1,8 @@
 #ifndef WEB_UI_H
 #define WEB_UI_H
 
-void initWifiAP();
+#include "core/config.h"
+
 void initWebUi();
 void webUiLoop();
 

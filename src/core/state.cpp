@@ -20,6 +20,7 @@ bool g_autoReconnect = true;
 bool g_devMode = true;
 unsigned long g_lastBleRetryMs = 0;
 bool g_forceImmediateReconnect = false;
+bool g_autoReconnectPaused = false;
 
 bool g_testActive = false;
 unsigned long g_testStartMs = 0;
@@ -58,11 +59,18 @@ int g_manualConnectAttempts = 0;
 bool g_manualConnectActive = false;
 bool g_manualConnectFailed = false;
 unsigned long g_manualConnectStartMs = 0;
+unsigned long g_manualConnectFinishMs = 0;
 bool g_connectTaskRunning = false;
 bool g_connectTaskWasManual = false;
 bool g_connectTaskResult = false;
+unsigned long g_connectTaskStartMs = 0;
 unsigned long g_connectTaskFinishedMs = 0;
 int g_autoReconnectAttempts = 0;
+String g_lastSuccessfulAddr;
+bool g_bleConnectInProgress = false;
+String g_bleConnectTargetAddr;
+String g_bleConnectTargetName;
+String g_bleConnectLastError;
 
 bool g_bleScanRunning = false;
 unsigned long g_bleScanStartMs = 0;
@@ -96,6 +104,7 @@ void initGlobalState()
     g_devMode = true;
     g_lastBleRetryMs = 0;
     g_forceImmediateReconnect = false;
+    g_autoReconnectPaused = false;
 
     g_testActive = false;
     g_testStartMs = 0;
@@ -134,14 +143,67 @@ void initGlobalState()
     g_manualConnectActive = false;
     g_manualConnectFailed = false;
     g_manualConnectStartMs = 0;
+    g_manualConnectFinishMs = 0;
     g_connectTaskRunning = false;
     g_connectTaskWasManual = false;
     g_connectTaskResult = false;
+    g_connectTaskStartMs = 0;
     g_connectTaskFinishedMs = 0;
     g_autoReconnectAttempts = 0;
+    g_lastSuccessfulAddr = "";
+    g_bleConnectInProgress = false;
+    g_bleConnectTargetAddr = "";
+    g_bleConnectTargetName = "";
+    g_bleConnectLastError = "";
 
     g_bleScanRunning = false;
     g_bleScanStartMs = 0;
     g_bleScanFinishedMs = 0;
     g_bleScanResults.clear();
+}
+
+unsigned long computeAutoReconnectInterval(int attemptCount)
+{
+    return (attemptCount < AUTO_RECONNECT_FAST_ATTEMPTS) ? AUTO_RECONNECT_FAST_INTERVAL_MS : AUTO_RECONNECT_SLOW_INTERVAL_MS;
+}
+
+bool isHttpGraceElapsed(unsigned long nowMs, unsigned long lastHttpMs, unsigned long graceMs, bool forceImmediateReconnect)
+{
+    if (forceImmediateReconnect)
+    {
+        return true;
+    }
+
+    if (graceMs == 0)
+    {
+        return true;
+    }
+
+    return (nowMs - lastHttpMs) > graceMs;
+}
+
+bool shouldAutoReconnectNow(unsigned long nowMs,
+                            bool autoReconnectEnabled,
+                            bool autoReconnectPaused,
+                            bool connected,
+                            bool connectTaskRunning,
+                            bool manualConnectActive,
+                            unsigned long lastRetryMs,
+                            int autoReconnectAttempts,
+                            unsigned long graceMs,
+                            unsigned long lastHttpMs,
+                            bool forceImmediateReconnect)
+{
+    if (!autoReconnectEnabled || autoReconnectPaused || connected || connectTaskRunning || manualConnectActive)
+    {
+        return false;
+    }
+
+    if (!isHttpGraceElapsed(nowMs, lastHttpMs, graceMs, forceImmediateReconnect))
+    {
+        return false;
+    }
+
+    unsigned long interval = computeAutoReconnectInterval(autoReconnectAttempts);
+    return (nowMs - lastRetryMs > interval) || forceImmediateReconnect;
 }

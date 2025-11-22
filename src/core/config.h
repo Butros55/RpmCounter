@@ -23,7 +23,14 @@ struct RgbColor
     uint8_t b;
 };
 
-struct ShiftConfig
+enum WifiMode
+{
+    AP_ONLY = 0,
+    STA_ONLY = 1,
+    STA_WITH_AP_FALLBACK = 2
+};
+
+struct AppConfig
 {
     bool autoScaleMaxRpm;
     int fixedMaxRpm;
@@ -41,6 +48,12 @@ struct ShiftConfig
     String greenLabel;
     String yellowLabel;
     String redLabel;
+
+    WifiMode wifiMode;
+    String staSsid;
+    String staPassword;
+    String apSsid;
+    String apPassword;
 };
 
 constexpr int MANUAL_CONNECT_RETRY_COUNT = 1;
@@ -49,7 +62,7 @@ constexpr unsigned long AUTO_RECONNECT_FAST_INTERVAL_MS = 5000;
 constexpr unsigned long AUTO_RECONNECT_SLOW_INTERVAL_MS = 12000;
 constexpr int AUTO_RECONNECT_FAST_ATTEMPTS = 3;
 
-extern ShiftConfig cfg;
+extern AppConfig cfg;
 
 extern BLEUUID SERVICE_UUID;
 extern BLEUUID CHAR_UUID_NOTIFY;
@@ -60,5 +73,7 @@ extern const char *AP_SSID;
 extern const char *AP_PASS;
 
 void initConfig();
+void loadConfig();
+void saveConfig();
 
 #endif // CONFIG_H

@@ -3,5 +3,6 @@
         "*.embeddedhtml": "html",
         ".fantomasignore": "ignore",
         "functional": "cpp"
-    }
+    },
+    "chatgpt.openOnStartup": true
 }
