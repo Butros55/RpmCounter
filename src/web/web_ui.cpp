@@ -971,6 +971,7 @@ namespace
 
     String settingsPage(bool savedNotice)
     {
+        (void)savedNotice;
         String vin = readVehicleVin();
         String model = readVehicleModel();
         String diag = readVehicleDiagStatus();
@@ -1091,11 +1092,30 @@ namespace
             ".device-meta{display:flex;flex-direction:column;gap:2px;}"
             ".device-name{font-weight:600;font-size:14px;}"
             ".device-addr{font-size:11px;color:#aaa;}"
-            ".device-item.disabled{opacity:0.4;pointer-events:none;}"
-            ".device-pill{display:inline-flex;align-items:center;gap:6px;}"
-            ".pill{padding:4px 8px;border-radius:999px;font-size:11px;font-weight:600;background:#222;border:1px solid #333;}"
-            ".pill.bad{background:#331111;border-color:#442222;color:#f77;}"
-            ".pill.ok{background:#113311;border-color:#224422;color:#8f8;}"
+            ".device-item.disabled{opacity:0.4;pointer-events:none;}" 
+            ".device-pill{display:inline-flex;align-items:center;gap:6px;}" 
+            ".pill{padding:4px 8px;border-radius:999px;font-size:11px;font-weight:600;background:#222;border:1px solid #333;}" 
+            ".pill.bad{background:#331111;border-color:#442222;color:#f77;}" 
+            ".pill.ok{background:#113311;border-color:#224422;color:#8f8;}" 
+            ".wifi-status-card{display:flex;gap:10px;align-items:flex-start;padding:10px;border-radius:10px;background:#141414;border:1px solid #222;box-shadow:0 6px 18px rgba(0,0,0,0.25);}"
+            ".wifi-status-main{font-weight:700;font-size:15px;}"
+            ".wifi-status-meta{font-size:12px;color:#aaa;line-height:1.4;}"
+            ".wifi-error{color:#f77;font-size:12px;margin-top:4px;}"
+            ".wifi-mode-select{appearance:none;-webkit-appearance:none;-moz-appearance:none;padding:10px 12px;border-radius:10px;border:1px solid #333;background:linear-gradient(145deg,#1c1c1c,#111);color:#eee;font-weight:600;position:relative;}"
+            ".select-wrap{position:relative;}"
+            ".select-wrap:after{content:'\\25BE';position:absolute;right:12px;top:50%;transform:translateY(-50%);color:#888;font-size:12px;pointer-events:none;}"
+            ".collapsible{overflow:hidden;transition:max-height .3s ease,opacity .3s ease,margin-top .3s ease,padding-top .3s ease,padding-bottom .3s ease;}"
+            ".collapsible.expanded{max-height:900px;opacity:1;margin-top:10px;}"
+            ".collapsible.collapsed{max-height:0;opacity:0;margin-top:0;padding-top:0;padding-bottom:0;}"
+            ".wifi-note{font-size:12px;color:#aaa;margin-top:6px;}"
+            ".modal{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:30;}"
+            ".modal.hidden{display:none;}"
+            ".modal-backdrop{position:absolute;inset:0;background:rgba(0,0,0,0.5);backdrop-filter:blur(2px);}" 
+            ".modal-card{position:relative;background:#0f0f10;border:1px solid #2a2a2a;border-radius:12px;padding:16px;width:92%;max-width:360px;box-shadow:0 14px 36px rgba(0,0,0,0.55);z-index:2;}"
+            ".modal-title{font-weight:700;font-size:17px;margin-bottom:10px;}"
+            ".modal-actions{display:flex;gap:10px;margin-top:14px;}"
+            ".btn-secondary{background:#333;color:#eee;}"
+            ".btn-outline{background:transparent;border:1px solid #444;color:#eee;}"
             "</style></head><body>");
 
         page += "<h1><a href='/'>&larr; Zurück</a><span>Einstellungen</span></h1>";
@@ -1112,27 +1132,10 @@ namespace
 
         // --- WLAN ---
         page += F("<div class='section'><div class='section-title'>WLAN</div>");
-        page += F("<div class='status-pill wifi-status'><span id='wifiStatusDot' class='status-dot bad'></span><div class='status-texts'><div id='wifiStatusText'>Keine Verbindung</div><div id='wifiStatusSub' class='status-sub'>Modus: -</div></div></div>");
-        page += "<div class='wifi-meta'><span>IP: <strong id='wifiCurrentIp'>-</strong></span><span>AP-Clients: <strong id='wifiApClients'>0</strong></span><span>Fehler: <span id='wifiLastError'>-</span></span></div>";
-
-        page += "<div class='wifi-actions'>";
-        page += "<button type='button' class='btn' id='wifiScanBtn'>Netzwerke suchen</button>";
-        page += "<button type='button' class='btn btn-secondary' id='wifiDisconnectBtn'>Trennen</button>";
-        page += "<span id='wifiScanStatus' class='wifi-inline'>Bereit</span>";
-        page += "</div>";
-
-        page += "<div id='wifiResults' class='device-list collapsed'>";
-        page += "<div id='wifiResultsList'></div>";
-        page += "<div id='wifiScanEmpty' class='wifi-inline'>Keine Netzwerke gefunden.</div>";
-        page += "</div>";
-
-        page += "<div id='wifiSaveNote' class='note'";
-        if (!savedNotice)
-            page += " style=\"display:none;\"";
-        page += ">WLAN-Konfiguration gespeichert. Verbindung wird neu aufgebaut, AP bleibt bei Bedarf aktiv.</div>";
+        page += "<div class='wifi-status-card'><span id='wifiStatusDot' class='status-dot bad'></span><div class='status-texts'><div id='wifiStatusText' class='wifi-status-main'>Keine Verbindung</div><div id='wifiStatusSub' class='status-sub'>Modus: -</div><div id='wifiStatusMeta' class='wifi-status-meta'>IP: -</div><div id='wifiStatusError' class='wifi-error'></div></div></div>";
 
         page += F("<label for='wifiMode'>WLAN-Modus</label>");
-        page += "<select name='wifiMode' id='wifiMode'>";
+        page += "<div class='select-wrap'><select name='wifiMode' id='wifiMode' class='wifi-mode-select'>";
         page += "<option value='0'";
         if (cfg.wifiMode == AP_ONLY)
             page += " selected";
@@ -1145,30 +1148,26 @@ namespace
         if (cfg.wifiMode == STA_WITH_AP_FALLBACK)
             page += " selected";
         page += ">Heim-WLAN mit AP-Fallback</option>";
-        page += "</select>";
-
+        page += "</select></div>";
         page += "<div class='wifi-note'>Speichern loest einen kurzen WLAN-Neustart aus. STA verbindet neu, AP bleibt in AP- oder Fallback-Modus aktiv.</div>";
 
-        page += "<div class='wifi-field wifi-sta-only'>";
-        page += F("<label for='staSsid'>Heim-WLAN SSID</label>");
-        page += "<input type='text' id='staSsid' name='staSsid' value='" + htmlEscape(cfg.staSsid) + "' placeholder='z.B. Zuhause'>";
+        page += "<div id='wifiInteractive' class='collapsible ";
+        if (cfg.wifiMode == AP_ONLY)
+            page += "collapsed";
+        else
+            page += "expanded";
+        page += "'>";
+        page += "<div class='wifi-actions'>";
+        page += "<button type='button' class='btn' id='wifiScanBtn'>Netzwerke suchen</button>";
+        page += "<button type='button' class='btn btn-secondary' id='wifiDisconnectBtn'>Trennen</button>";
+        page += "<span id='wifiScanStatus' class='wifi-inline'>Bereit</span>";
         page += "</div>";
-        page += "<div class='wifi-field wifi-sta-only'>";
-        page += F("<label for='staPassword'>Heim-WLAN Passwort</label>");
-        page += "<input type='password' id='staPassword' name='staPassword' value='" + htmlEscape(cfg.staPassword) + "'>";
+        page += "<div id='wifiResults' class='device-list collapsed'>";
+        page += "<div id='wifiResultsList'></div>";
+        page += "<div id='wifiScanEmpty' class='wifi-inline'>Keine Netzwerke gefunden.</div>";
         page += "</div>";
-
-        page += "<div class='wifi-field'>";
-        page += F("<label for='apSsid'>AP-SSID</label>");
-        page += "<input type='text' id='apSsid' name='apSsid' value='" + htmlEscape(cfg.apSsid) + "'>";
         page += "</div>";
-        page += "<div class='wifi-field'>";
-        page += F("<label for='apPassword'>AP-Passwort</label>");
-        page += "<input type='password' id='apPassword' name='apPassword' value='" + htmlEscape(cfg.apPassword) + "'>";
-        page += "</div>";
-        page += F("<div class='small'>AP-Passwort muss mindestens 8 Zeichen lang sein.</div>");
-        page += "<button type='button' class='btn' id='wifiSaveBtn'>WLAN speichern</button>";
-        page += "<div id='wifiModal' class='modal hidden'><div class='modal-backdrop'></div><div class='modal-card'><div class='modal-title'>Verbinden mit <span id='wifiModalSsid'></span></div><label for='wifiModalPassword'>Passwort</label><input type='password' id='wifiModalPassword' autocomplete='off'><div class='modal-actions'><button type='button' class='btn' id='wifiModalConnect'>Verbinden</button><button type='button' class='btn btn-secondary' id='wifiModalCancel'>Abbrechen</button></div></div></div>";
+        page += "<div id='wifiPasswordModal' class='modal hidden'><div class='modal-backdrop'></div><div class='modal-card'><div class='modal-title'>Verbinden mit <span id='wifiModalSsid'></span></div><label for='wifiModalPassword'>Passwort</label><input type='password' id='wifiModalPassword' autocomplete='off'><div class='modal-actions'><button type='button' class='btn' id='wifiModalConnect'>Verbinden</button><button type='button' class='btn btn-outline' id='wifiModalCancel'>Abbrechen</button></div></div></div>";
         page += F("</div>");
 
         // --- Mein Fahrzeug ---
@@ -1367,10 +1366,7 @@ namespace
             "    default: return 'Access Point (nur AP)';"
             "  }"
             "}"
-            "function updateWifiFieldVisibility(){"
-            "  const showSta=wifiModeValue()!=='0';"
-            "  document.querySelectorAll('.wifi-sta-only').forEach(el=>{el.style.display=showSta?'block':'none';});"
-            "}"
+            "function isApOnlyMode(mode){const val=mode||wifiModeValue();return val==='0' || val==='AP_ONLY';}"
             "function wifiBars(rssi){"
             "  const level=parseInt(rssi,10);"
             "  const steps=[-90,-75,-60];"
@@ -1416,20 +1412,20 @@ namespace
             "    const pill=document.createElement('span');"
             "    pill.className='device-pill';"
             "    if(isConnected){pill.innerHTML='<span class=\"pill ok\">Verbunden</span>';item.classList.add('disabled');}"
-            "    else if(isBusy){pill.innerHTML='<span class=\"spinner\"></span><span>Verbinde...</span>';}"
+            "    else if(isBusy){pill.innerHTML='<span class=\"spinner\"></span><span>Verbinde...</span>'; }"
             "    else{pill.innerHTML='<span class=\"pill\">Verbinden</span>'; }"
             "    if((busySsid && !isBusy) || isConnected){item.classList.add('disabled');}"
             "    item.appendChild(meta);"
             "    item.appendChild(pill);"
             "    if(!isBusy){"
-            "      item.addEventListener('click',()=>openWifiModal(res.ssid||''));"
+            "      item.addEventListener('click',()=>openWifiPasswordModal(res.ssid||''));"
             "    }"
             "    list.appendChild(item);"
             "  });"
             "  if(empty){empty.style.display=results.length===0&&!data.scanRunning?'block':'none';}"
             "  if(wrapper){"
-            "    if(results.length>0 || data.scanRunning || busySsid){wrapper.classList.remove('collapsed');}"
-            "    else{wrapper.classList.add('collapsed');}"
+            "    const showList=!isApOnlyMode(data.mode) && (results.length>0 || data.scanRunning || busySsid);"
+            "    wrapper.classList.toggle('collapsed',!showList);"
             "  }"
             "}"
             "function setWifiStatusUi(data){"
@@ -1438,51 +1434,44 @@ namespace
             "  const dot=document.getElementById('wifiStatusDot');"
             "  if(dot){dot.classList.remove('ok','warn','bad');}"
             "  const ssidLabel=data.currentSsid||'(unbekannt)';"
-            "  const ipLabel=data.ip||'-';"
+            "  const apActive=!!data.apActive;"
+            "  const staConnected=!!data.staConnected;"
+            "  const connecting=!!data.staConnecting;"
+            "  const scanning=!!data.scanRunning;"
             "  const clients=Number(data.apClients||0);"
             "  let statusText='Keine Verbindung';"
             "  let dotClass='bad';"
-            "  if(data.staConnecting){"
-            "    statusText='Verbindung wird aufgebaut... '+(ssidLabel?('('+ssidLabel+')'):'');"
-            "    dotClass='warn';"
-            "  }else if(data.staConnected){"
-            "    statusText='Verbunden mit: '+ssidLabel+' (IP: '+ipLabel+')';"
-            "    dotClass='ok';"
-            "  }else if(data.scanRunning){"
-            "    statusText='Suche nach Netzwerken...';"
-            "    dotClass='warn';"
-            "  }else if(data.apActive){"
-            "    const clientText=clients===1?'1 Client':(clients+' Clients');"
-            "    statusText='AP aktiv ('+(clients>0?clientText:'keine Clients')+') (IP: '+ipLabel+')';"
-            "    dotClass=clients>0?'ok':'bad';"
-            "  }"
+            "  if(isApOnlyMode(data.mode)){statusText=apActive?'Access Point aktiv':'Access Point inaktiv';dotClass=apActive?'ok':'bad';}"
+            "  else if(staConnected){statusText='STA verbunden mit '+ssidLabel;dotClass='ok';}"
+            "  else if(connecting||scanning){statusText=connecting?('Verbindung wird aufgebaut... '+ssidLabel):'Suche nach Netzwerken...';dotClass='warn';}"
+            "  else if(apActive){statusText='AP aktiv, STA nicht verbunden';dotClass='ok';}"
             "  if(dot && dotClass){dot.classList.add(dotClass);}"
             "  const text=document.getElementById('wifiStatusText');"
             "  if(text){text.textContent=statusText;}"
             "  const sub=document.getElementById('wifiStatusSub');"
-            "  if(sub){"
-            "    let subText='Modus: '+wifiModeLabel(data.mode);"
-            "    if(data.staLastError){subText+=' | Fehler: '+data.staLastError;}"
-            "    sub.textContent=subText;"
+            "  if(sub){sub.textContent='Modus: '+wifiModeLabel(data.mode);}"
+            "  const meta=document.getElementById('wifiStatusMeta');"
+            "  if(meta){"
+            "    const parts=[];"
+            "    if(data.staIp){parts.push('STA-IP: '+data.staIp);}"
+            "    if(apActive && data.apIp){parts.push('AP-IP: '+data.apIp);}"
+            "    if(apActive){parts.push('AP-Clients: '+clients);}"
+            "    meta.textContent=parts.length?parts.join(' • '):'Keine IP verfügbar';"
             "  }"
-            "  const ip=document.getElementById('wifiCurrentIp');"
-            "  if(ip){ip.textContent=ipLabel;}"
-            "  const err=document.getElementById('wifiLastError');"
-            "  if(err){err.textContent=data.staLastError||'-';}"
-            "  const clientsEl=document.getElementById('wifiApClients');"
-            "  if(clientsEl){clientsEl.textContent=clients;}"
+            "  const err=document.getElementById('wifiStatusError');"
+            "  if(err){err.textContent=data.staLastError||'';err.style.display=data.staLastError?'block':'none';}"
             "  const disconnect=document.getElementById('wifiDisconnectBtn');"
-            "  if(disconnect){const en=!!(data.staConnected||data.staConnecting);disconnect.disabled=!en;disconnect.style.opacity=en?'1':'0.6';}"
-            "  const scanLabel=data.staConnecting?'Verbinde...':(data.scanRunning?'Suche...':'Bereit');"
-            "  updateWifiScanUi(data.scanRunning||data.staConnecting,scanLabel);"
+            "  if(disconnect){const show=!isApOnlyMode(data.mode)&&(staConnected||connecting);disconnect.style.display=show?'inline-block':'none';disconnect.disabled=connecting;disconnect.style.opacity=disconnect.disabled?'0.7':'1';}"
+            "  const scanLabel=connecting?'Verbinde...':(scanning?'Suche...':(isApOnlyMode(data.mode)?'AP-Modus aktiv':'Bereit'));"
+            "  updateWifiScanUi(scanning||connecting,scanLabel);"
             "  renderWifiResults(data);"
-            "  if(!wifiInitialScanDone && !data.scanRunning && !data.staConnecting){"
-            "    wifiInitialScanDone=true;"
-            "    if(!data.scanResults || data.scanResults.length===0){startWifiScan(true);}"
-            "  }"
+            "  const interactive=document.getElementById('wifiInteractive');"
+            "  if(interactive){interactive.classList.toggle('expanded',!isApOnlyMode(data.mode));interactive.classList.toggle('collapsed',isApOnlyMode(data.mode));}"
+            "  if(!wifiInitialScanDone && !data.scanRunning && !data.staConnecting && !isApOnlyMode(data.mode)){wifiInitialScanDone=true;if(!data.scanResults || data.scanResults.length===0){startWifiScan(true);}}"
             "}"
             "function startWifiScan(force){"
             "  const now=Date.now();"
+            "  if(isApOnlyMode(wifiStatusCache?wifiStatusCache.mode:null)){updateWifiScanUi(false,'AP-Modus aktiv');return;}"
             "  if(!force && now-lastWifiScanStart<WIFI_SCAN_COOLDOWN_MS){return;}"
             "  if(wifiStatusCache && (wifiStatusCache.staConnecting || wifiStatusCache.scanRunning)){"
             "    lastWifiScanStart=now;"
@@ -1502,21 +1491,21 @@ namespace
             "    .then(setWifiStatusUi)"
             "    .catch(()=>{});"
             "}"
-            "function closeWifiModal(){"
-            "  const modal=document.getElementById('wifiModal');"
+            "function closeWifiPasswordModal(){"
+            "  const modal=document.getElementById('wifiPasswordModal');"
             "  if(modal) modal.classList.add('hidden');"
             "  const pw=document.getElementById('wifiModalPassword');"
             "  if(pw) pw.value='';"
             "}"
-            "function openWifiModal(ssid){"
-            "  const modal=document.getElementById('wifiModal');"
+            "function openWifiPasswordModal(ssid){"
+            "  const modal=document.getElementById('wifiPasswordModal');"
             "  const label=document.getElementById('wifiModalSsid');"
             "  if(label) label.textContent=ssid||'';"
             "  const pwd=document.getElementById('wifiModalPassword');"
             "  if(pwd){pwd.value='';pwd.focus();}"
             "  if(modal) modal.classList.remove('hidden');"
             "}"
-            "function submitWifiConnect(){"
+            "function submitWifiPassword(){"
             "  const ssidEl=document.getElementById('wifiModalSsid');"
             "  const passEl=document.getElementById('wifiModalPassword');"
             "  if(!ssidEl || !passEl) return;"
@@ -1535,17 +1524,7 @@ namespace
             "  if(btn) btn.disabled=true;"
             "  fetch('/wifi/connect',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:params.toString()})"
             "    .catch(()=>{})"
-            "    .finally(()=>{wifiConnectInFlight=false;if(btn) btn.disabled=false;closeWifiModal();fetchWifiStatus();});"
-            "}"
-            "function saveWifiConfig(){"
-            "  const params=new URLSearchParams();"
-            "  ['wifiMode','staSsid','staPassword','apSsid','apPassword'].forEach(id=>{"
-            "    const el=document.getElementById(id);"
-            "    if(el) params.append(id,el.value);"
-            "  });"
-            "  fetch('/wifi/save',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:params.toString()})"
-            "    .then(()=>{const note=document.getElementById('wifiSaveNote');if(note) note.style.display='block';captureInitialSettingsState();recomputeSettingsDirty();})"
-            "    .catch(()=>{});"
+            "    .finally(()=>{wifiConnectInFlight=false;if(btn) btn.disabled=false;closeWifiPasswordModal();fetchWifiStatus();});"
             "}"
             "function disconnectWifi(){"
             "  const btn=document.getElementById('wifiDisconnectBtn');"
@@ -1553,7 +1532,6 @@ namespace
             "  updateWifiScanUi(true,'Trenne...');"
             "  fetch('/wifi/disconnect',{method:'POST'}).finally(()=>{updateWifiScanUi(false,'Bereit');fetchWifiStatus();});"
             "}"
-
             "function setBleError(msg){const el=document.getElementById('bleError');if(el) el.innerText=msg||'';}"
             "function setBleStatusUi(data){"
             "  data=data||{};"
@@ -1715,17 +1693,15 @@ namespace
             "document.getElementById('settingsForm').addEventListener('change',markSettingsDirty);"
             "document.getElementById('settingsReset').addEventListener('click',()=>window.location.reload());"
             "const wifiModeSel=document.getElementById('wifiMode');"
-            "if(wifiModeSel){wifiModeSel.addEventListener('change',()=>{updateWifiFieldVisibility();markSettingsDirty();});updateWifiFieldVisibility();}"
+            "if(wifiModeSel){wifiModeSel.addEventListener('change',()=>{wifiInitialScanDone=false;markSettingsDirty();setWifiStatusUi(Object.assign({},wifiStatusCache||{}, {mode:wifiModeValue()}));});setWifiStatusUi(wifiStatusCache||{mode:wifiModeValue()});}"
             "const wifiScan=document.getElementById('wifiScanBtn');"
             "if(wifiScan){wifiScan.addEventListener('click',()=>startWifiScan(true));}"
-            "const wifiSave=document.getElementById('wifiSaveBtn');"
-            "if(wifiSave){wifiSave.addEventListener('click',saveWifiConfig);}"
             "const wifiDisconnect=document.getElementById('wifiDisconnectBtn');"
-            "if(wifiDisconnect){wifiDisconnect.addEventListener('click',disconnectWifi);}"
+            "if(wifiDisconnect){wifiDisconnect.addEventListener('click',disconnectWifi);}" 
             "const wifiModalCancel=document.getElementById('wifiModalCancel');"
-            "if(wifiModalCancel){wifiModalCancel.addEventListener('click',closeWifiModal);}"
+            "if(wifiModalCancel){wifiModalCancel.addEventListener('click',closeWifiPasswordModal);}" 
             "const wifiModalConnect=document.getElementById('wifiModalConnect');"
-            "if(wifiModalConnect){wifiModalConnect.addEventListener('click',submitWifiConnect);}"
+            "if(wifiModalConnect){wifiModalConnect.addEventListener('click',submitWifiPassword);}" 
 
             "document.getElementById('btnVehicleRefresh').addEventListener('click',()=>{"
             "  setRefreshActive(true);"
@@ -1755,17 +1731,12 @@ namespace
             "  const fd=new FormData(this);"
             "  const params=new URLSearchParams();"
             "  fd.forEach((v,k)=>{params.append(k,v);});"
-            "  fetch('/settings',{"
-            "    method:'POST',"
-            "    headers:{'Content-Type':'application/x-www-form-urlencoded'},"
-            "    body:params.toString()"
-            "  }).then(()=>{"
-            "    captureInitialSettingsState();"
-            "    recomputeSettingsDirty();"
-            "    const note=document.getElementById('wifiSaveNote');"
-            "    if(note) note.style.display='block';"
-            "  }).catch(()=>{});"
-            "});"
+            "  fetch('/settings',{" 
+            "    method:'POST'," 
+            "    headers:{'Content-Type':'application/x-www-form-urlencoded'}," 
+            "    body:params.toString()" 
+            "  }).then(()=>{captureInitialSettingsState();recomputeSettingsDirty();}).catch(()=>{});" 
+            "});" 
 
             "poll();"
             "fetchWifiStatus();"
@@ -2198,10 +2169,12 @@ namespace
         json += "\"mode\":\"" + wifiModeToString(st.mode) + "\"";
         json += ",\"apActive\":" + String(st.apActive ? "true" : "false");
         json += ",\"apClients\":" + String(st.apClients);
+        json += ",\"apIp\":\"" + jsonEscape(st.apIp) + "\"";
         json += ",\"staConnected\":" + String(st.staConnected ? "true" : "false");
         json += ",\"staConnecting\":" + String(st.staConnecting ? "true" : "false");
         json += ",\"staLastError\":\"" + jsonEscape(st.staLastError) + "\"";
         json += ",\"currentSsid\":\"" + jsonEscape(st.currentSsid) + "\"";
+        json += ",\"staIp\":\"" + jsonEscape(st.staIp) + "\"";
         json += ",\"ip\":\"" + jsonEscape(st.ip) + "\"";
         json += ",\"scanRunning\":" + String(st.scanRunning ? "true" : "false");
         json += ",\"scanResults\":[";
