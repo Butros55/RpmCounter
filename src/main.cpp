@@ -7,6 +7,9 @@
 #include "hardware/led_bar.h"
 #include "hardware/logo_anim.h"
 #include "hardware/display.h"
+#include "display_s3.h"
+#include "touch_s3.h"
+#include "ui_main.h"
 
 #ifndef UNIT_TEST
 void setup()
@@ -19,6 +22,9 @@ void setup()
     initWebUi();
     initBle();
     displayInit();
+    display_s3_init();
+    touch_s3_init();
+    ui_main_init();
 }
 
 void loop()
@@ -28,5 +34,6 @@ void loop()
     bleObdLoop();
     ledBarLoop();
     logoAnimLoop();
+    display_s3_loop();
 }
 #endif // UNIT_TEST
