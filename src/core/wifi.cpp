@@ -336,7 +336,8 @@ void wifiLoop()
         }
         else if (status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL)
         {
-            handleStaFailure("connect-failed");
+            String reason = (status == WL_NO_SSID_AVAIL) ? "ssid-not-found" : "connect-failed";
+            handleStaFailure(reason);
             if (g_wifi.configuredMode == STA_WITH_AP_FALLBACK)
             {
                 startApMode(cfg);
