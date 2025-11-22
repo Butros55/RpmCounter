@@ -161,3 +161,49 @@ void initGlobalState()
     g_bleScanFinishedMs = 0;
     g_bleScanResults.clear();
 }
+
+unsigned long computeAutoReconnectInterval(int attemptCount)
+{
+    return (attemptCount < AUTO_RECONNECT_FAST_ATTEMPTS) ? AUTO_RECONNECT_FAST_INTERVAL_MS : AUTO_RECONNECT_SLOW_INTERVAL_MS;
+}
+
+bool isHttpGraceElapsed(unsigned long nowMs, unsigned long lastHttpMs, unsigned long graceMs, bool forceImmediateReconnect)
+{
+    if (forceImmediateReconnect)
+    {
+        return true;
+    }
+
+    if (graceMs == 0)
+    {
+        return true;
+    }
+
+    return (nowMs - lastHttpMs) > graceMs;
+}
+
+bool shouldAutoReconnectNow(unsigned long nowMs,
+                            bool autoReconnectEnabled,
+                            bool autoReconnectPaused,
+                            bool connected,
+                            bool connectTaskRunning,
+                            bool manualConnectActive,
+                            unsigned long lastRetryMs,
+                            int autoReconnectAttempts,
+                            unsigned long graceMs,
+                            unsigned long lastHttpMs,
+                            bool forceImmediateReconnect)
+{
+    if (!autoReconnectEnabled || autoReconnectPaused || connected || connectTaskRunning || manualConnectActive)
+    {
+        return false;
+    }
+
+    if (!isHttpGraceElapsed(nowMs, lastHttpMs, graceMs, forceImmediateReconnect))
+    {
+        return false;
+    }
+
+    unsigned long interval = computeAutoReconnectInterval(autoReconnectAttempts);
+    return (nowMs - lastRetryMs > interval) || forceImmediateReconnect;
+}

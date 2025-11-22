@@ -1,4 +1,4 @@
-# ✅ AGENTS.md – RpmCounter / ShiftLight
+# ✅ AGENTS.md – RpmCounter / ShiftLight (mit Netzwerk-Debug-Modus)
 
 ## 🌟 Projektüberblick
 
@@ -6,14 +6,104 @@ Dieses Repository enthält die Firmware für ein ShiftLight-/RPM-Anzeige-System 
 
 Die Firmware:
 
-- verbindet sich über OBD-II per **BLE**, um Live-Daten wie Motordrehzahl auszulesen
-- steuert eine **mehrfarbige LED-Bar** (grün → gelb → rot, inkl. Modi und Animationen)
-- zeigt animierte Informationen auf einem **Display**
-- stellt eine **WLAN-Access-Point-Weboberfläche** zur Konfiguration bereit
-- speichert Einstellungen dauerhaft (NVS / Preferences)
+- verbindet sich über OBD-II per **BLE**
+- steuert eine **mehrfarbige LED-Bar**
+- zeigt Animationen auf einem **Display**
+- stellt eine **WLAN-Access-Point-Weboberfläche** bereit
+- speichert Einstellungen dauerhaft (Preferences / NVS)
 
 **Ziel:**  
-Eine stabile, nicht-blockierende Firmware, bei der BLE, Webserver, LED-Bar und Display parallel laufen, ohne sich gegenseitig zu stören.
+Eine stabile, non-blocking Firmware, in der BLE, Webserver, WLAN-AP, LED-Bar und Display parallel laufen.
+
+---
+
+# ⚙️ Agent-Modi
+
+## 🟦 **STANDARD-MODUS (normaler Agent)**
+
+> _Dieser Modus ist der Standard. Er ist sicherer und wird in 95% der Fälle verwendet._
+
+Der Agent darf:
+
+- Dateien lesen/schreiben
+- Projekt verändern
+- Build- & Test-Befehle ausführen:
+  - `pio run`
+  - `pio run -t upload`
+  - `pio device monitor`
+  - `pio test -e esp32dev`
+- Log-Ausgaben analysieren
+- Fehler reproduzieren (über echten ESP32)
+- Fix-Vorschläge machen
+- nur Befehle im Terminal ausführen, die **keinen externen Netzwerkzugriff** benötigen  
+  (lokale serielle Verbindung, lokale PIO-Tools, Git-Befehle im Workspace, etc.)
+
+Der Standardmodus **reicht vollständig**, um:
+
+- Firmware zu bauen
+- Firmware zu flashen
+- Tests auf echter Hardware auszuführen
+- State-Machine/BLE/Webserver Verhalten anhand serieller Logs zu debuggen
+
+---
+
+## 🟩 **NETZWERK-DEBUG-MODUS (Agent: FULL ACCESS)**
+
+> _Dieser Modus darf **nur** aktiviert werden, wenn ich ihn dir ausdrücklich erlaube._
+
+Dieser Modus erlaubt zusätzlich:
+
+- Befehle mit Netzwerkzugriff (curl, ping, wget,…)
+- Zugriff auf Geräte im lokalen Netzwerk (z. B. ESP32-AP)
+- Terminalbefehle außerhalb des Workspace
+- komplexere Diagnose über mehrere Interfaces
+
+Beispiele, wo dieser Modus erlaubt ist:
+
+- Analyse, warum der ESP32-Webserver im AP-Modus nicht antwortet  
+  → `curl http://192.168.4.1/`
+- HTTP-Debugging während BLE-Verbindungsversuchen
+- Vergleich zwischen Heim-WLAN (STA-Mode) und Access-Point-Modus
+
+Wichtig:
+
+**Der Agent darf diesen Modus NICHT eigenständig nutzen.  
+Nur wenn ich explizit schreibe:**
+
+> **„Nutze bitte Netzwerk-Debug / full access“**
+
+---
+
+# 📡 Netzwerk-Szenarien für Debugging
+
+## 1️⃣ Access-Point-Modus debuggen (Standardfall)
+
+Wenn mein PC mit dem ESP32-AP verbunden ist:
+
+- Internet ist evtl. getrennt → das ist ok
+- Agent darf:
+  - HTTP-Requests an `http://192.168.4.1` senden (nur in full-access)
+  - Timeout-Verhalten analysieren
+  - Webserver-Fehler sichtbar machen (`404`, blockiert, keine Antwort)
+- Agent beurteilt:
+  - ob BLE-Connect Loops den Webserver blockieren
+  - ob der ESP32 im AP-Modus überlastet wird
+  - ob die HTTP-Handler non-blocking sind
+
+## 2️⃣ Heim-WLAN (STA-Modus)
+
+Wenn der ESP32 ins Heim-WLAN eingebunden wird (Variante C):
+
+- AP- und Internetprobleme werden realitätsnah simuliert
+- Agent kann _gleichzeitig_:
+  - Internet nutzen
+  - HTTP-Requests zum ESP senden
+  - BLE/Webserver testen
+- Eignet sich hervorragend zum **Remote-Debugging** und für PIO Remote.
+
+Beide Modi werden im Agent unterstützt, aber AP-Modus ist nötig, um reale spätere Nutzung zu simulieren.
+
+---
 
 ## 📁 Projektstruktur (verbindlich)
 
@@ -92,108 +182,72 @@ Serieller Monitor: `pio device monitor`
 
 ---
 
-## ✅ Wichtige Anforderungen
+# 📌 Betriebsregeln für Codex
 
-Keine Blockierung des Webservers:
+## Der Agent MUSS:
 
-- BLE-Verbindungsversuche dürfen den HTTP-Server nicht blockieren.
-- WLAN-AP muss stabil bleiben (kein unerwarteter Disconnect / Passwort-Fehler).
+- Architektur & Struktur beibehalten
+- state/config/utils zentral halten
+- Webserver + BLE + Display non-blocking halten
+- Fixes erklären (Dateien + Gründe)
+- Tests grün halten
+- keine Interfaces ungewollt umbauen
+- niemals Tests löschen
 
-BLE-Stabilität:
+## Der Agent DARF:
 
-- OBD-II-Verbindung darf nicht sporadisch abbrechen.
-- Wiederverbindungslogik muss kontrollierbar konfiguriert sein.
+- neue Tests im `test/` Ordner anlegen
+- UI minimal verbessern
+- Debug-Logs zentralisieren
+- neue States hinzufügen (wenn nötig)
+- Fehler im bestehenden Code beheben
 
-LED-Bar & Display:
+## Der Agent DARF NICHT:
 
-- Updates sollten nicht mit BLE/WLAN kollidieren.
-- Animationen sollen möglichst non-blocking (Timer, millis-basiert) sein.
-
-Konfiguration:
-
-- Einstellungen (z. B. Auto-Reconnect, Retry-Counts etc.) müssen aus der globalen Konfiguration stammen und konsistent genutzt werden.
-
----
-
-## 🧪 Tests (Zielbild)
-
-Tests sind noch im Aufbau. Ziel:
-
-Unit-Tests für:
-
-- core/state.\* (Zustandsmaschine, Retry-Zähler, Flags)
-- core/utils.cpp (Hilfsfunktionen wie clampInt, Mapping/Parsing)
-
-Unit-Tests mit Stubs für:
-
-- BLE-Logik (Verbindungsstatus, Retry-Handling ohne echte Hardware)
-
-Integrationstests für:
-
-- Zusammenspiel von BLE-Connect-Versuchen und Webserver/WLAN
-- Sicherstellen, dass HTTP-Requests auch während BLE-Aktivität beantwortet werden
-
-Framework: PlatformIO Tests mit Unity (test/\*/test_main.cpp).
-
-Alle Tests laufen über test/test_main.cpp und können mit
-
-- pio test -e esp32dev (auf echter Hardware)
-- später: pio test -e native (ohne Hardware, hostseitig) ausgeführt werden.
+- neue Frameworks einführen
+- Libraries austauschen
+- große Refactorings ohne Not
+- Pinbelegung ändern
+- Funktionsnamen ändern, die im Web UI genutzt werden
+- Netzwerkzugriff im Standardmodus durchführen
 
 ---
 
-## 🧩 Coding-Guidelines
+# 🧪 Tests
 
-C++17 (soweit vom Board/Framework unterstützt), Arduino-Stil ok, aber:
+Alle Tests laufen über:
 
-- lieber klare Funktionen statt langer loop()-Monster
-- keine unnötigen globalen Variablen – wenn nötig, klar in state.\* dokumentieren
+- `pio test -e esp32dev` (echter ESP32)
 
-Namenskonventionen:
+Später optional:
 
-- Globale Zustände/Flags: `g_...`
-- Konstante Konfiguration: `k...` oder `CONST_NAME`
-
-Hilfsfunktionen wiederverwenden:
-
-- `clampInt` nur an einer zentralen Stelle definieren (core/utils.cpp + Header)
-- Keine Duplikate derselben Funktion in mehreren Dateien
+- `pio test -e native`
 
 ---
 
-## 🚫 Was Codex NICHT tun soll
+# 📌 Wann soll der Agent mich um Interaktion bitten?
 
-- Keine radikale Umstrukturierung des Repos (keine neuen Frameworks / Libraries einführen).
-- Keine großen Refactorings quer durchs Projekt, wenn nicht explizit angefordert.
-- Keine Hardware-spezifischen Konstanten ohne Kommentar ändern (Pins, Timer, Partitionen…).
-- Keine sensiblen Konfigurationsdaten in den Code hardcoden, die aktuell über UI/Konfig kommen sollen.
+- Wenn Tests fehlschlagen
+- Wenn Hardware erwartet wird (BLE-Scanner, Fahrzeug)
+- Wenn ein Netzwerkzugriff nur im Full-Access-Modus erlaubt wäre
+- Wenn ein Sicherheitsrisiko besteht (File-Write außerhalb Workspace)
 
 ---
 
-## 💡 Beispiele für sinnvolle Aufgaben an Codex
+# 🔥 Beispiele für sinnvolle Full-Access-Jobs
 
-### Bugfixes
+- „Teste über `curl` die Endpunkte `/status`, `/settings`, `/debug` während BLE-Connect.“
+- „Simuliere 5 parallele Web-Requests, während BLE scannt.“
+- „Analysiere HTTP-Timeouts beim ESP32-AP und verbinde das Verhalten mit der State-Machine.“
+- „Prüfe, ob `/rpm` während BLE-Reconnect zuverlässig antwortet.“
 
-- „Warum blockiert der Webserver bei laufenden BLE-Connect-Versuchen? Bitte analysieren und ein nicht-blockierendes Verhalten implementieren, ohne vorhandene Funktionen zu löschen.“
-- „Analysiere, warum die WLAN-Verbindung nach einiger Zeit abbricht, und behebe das Problem möglichst ohne neue globale Variablen einzuführen.“
+---
 
-### Tests schreiben
+# 🧩 Beispiele für Standard-Modus-Aufgaben
 
-- „Lege Unit-Tests für core/state.cpp in test/unit_core/ an, die die Retry-Logik, Flags und Zeitstempel prüfen. Die Tests sollen mit `pio test -e esp32dev` laufen und bei Fehlern eine gut lesbare Ausgabe liefern.“
-- „Erweitere die bestehenden Tests in test/unit_core/test_main.cpp um Randfälle (z. B. Grenzwerte, ungültige Parameter) für clampInt, ohne das Produktionsverhalten zu ändern.“
-
-### Debugging-Helfer
-
-- „Baue strukturierte Debug-Logs für WLAN/BLE ein (mit Zeitstempeln und klaren Statuscodes), ohne den normalen Ablauf zu verlangsamen. Logs sollen sich zentral ein- und ausschalten lassen (z. B. über ein `DEBUG_*`-Flag) und klar anzeigen, wann Verbindungen aufgebaut, verloren oder neu versucht werden.“
-- „Füge im BLE- und WLAN-Code an sinnvollen Stellen Logging hinzu, damit ersichtlich wird, warum Verbindungen abreißen oder blockieren (inkl. Fehlercodes und Retry-Zähler).“
-
-### UI-Anpassungen
-
-- „Verbessere die Bluetooth-Geräteliste in web_ui.cpp, ohne das Backend-Verhalten zu ändern (nur HTML/CSS/JS). Die Liste soll Öffnen/Schließen animiert darstellen und einen Loading-Indikator im jeweiligen Button zeigen, während ein Verbindungsversuch läuft.“
-- „Passe die Weboberfläche so an, dass bei Verbindungsfehlern eine klare Statusmeldung angezeigt wird (z. B. ‚BLE-Verbindung fehlgeschlagen – siehe Debug-Logs‘), ohne die bestehenden REST-Endpunkte zu verändern.“
-
-### Neue Features / Refactorings
-
-- „Implementiere eine optionale ‚F1-Shiftlight‘-Logik als zusätzlichen Modus, ohne die bestehende RPM-Logik zu brechen. Der Modus soll sauber in die Konfiguration integriert sein und in der Vorschau sichtbar werden.“
-- „Räume den BLE- und WLAN-Code auf (Refactoring), ohne Verhalten zu verändern: Duplikate entfernen, gemeinsame Hilfsfunktionen in core/utils.cpp auslagern, Kommentare ergänzen und Namenskonventionen vereinheitlichen.“
-- „Implementiere ein zentrales Logging-Modul (z. B. core/logging.{h,cpp}), das sowohl Webserver, BLE als auch WLAN verwenden können, anstatt überall eigene `Serial.println`-Aufrufe zu haben.“
+- BLE-State-Fixes
+- Non-blocking Webserver-Aufbereitung
+- LED-Bar-F1-Modus implementieren
+- Retry-Logik in state.cpp erweitern
+- Utils-Tests um Randfälle erweitern
+- Log-System einbauen

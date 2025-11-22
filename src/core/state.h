@@ -88,6 +88,21 @@ extern String g_vehicleVin;
 extern String g_vehicleModel;
 extern String g_vehicleDiagStatus;
 
+// Helper functions for retry/backoff policies (test-friendly).
+unsigned long computeAutoReconnectInterval(int attemptCount);
+bool isHttpGraceElapsed(unsigned long nowMs, unsigned long lastHttpMs, unsigned long graceMs, bool forceImmediateReconnect);
+bool shouldAutoReconnectNow(unsigned long nowMs,
+                            bool autoReconnectEnabled,
+                            bool autoReconnectPaused,
+                            bool connected,
+                            bool connectTaskRunning,
+                            bool manualConnectActive,
+                            unsigned long lastRetryMs,
+                            int autoReconnectAttempts,
+                            unsigned long graceMs,
+                            unsigned long lastHttpMs,
+                            bool forceImmediateReconnect);
+
 void initGlobalState();
 
 #endif // STATE_H

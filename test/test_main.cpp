@@ -2,7 +2,6 @@
 
 #include <Arduino.h>
 #include <unity.h>
-#include "unit_core/test_clamp_int.cpp"
 
 // Deklarationen der Runner aus Unterordnern
 void run_core_tests();

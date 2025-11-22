@@ -11,11 +11,41 @@
 #include "core/vehicle_info.h"
 #include "core/state.h"
 #include "hardware/display.h"
+#include "core/logging.h"
 #include <core/utils.h>
 
 namespace
 {
     WebServer server(80);
+
+    String httpMethodName()
+    {
+        switch (server.method())
+        {
+        case HTTP_GET:
+            return "GET";
+        case HTTP_POST:
+            return "POST";
+        default:
+            return "OTHER";
+        }
+    }
+
+    void markHttpActivity(const char *code)
+    {
+        g_lastHttpMs = millis();
+        LOG_DEBUG("WEB", code, String("method=") + httpMethodName() + " uri=" + server.uri());
+    }
+
+    String currentIpString()
+    {
+        IPAddress staIp = WiFi.localIP();
+        IPAddress apIp = WiFi.softAPIP();
+        bool staActive = (WiFi.getMode() == WIFI_STA || WiFi.getMode() == WIFI_AP_STA) && staIp != IPAddress(0, 0, 0, 0);
+        if (staActive)
+            return staIp.toString();
+        return apIp.toString();
+    }
 
     String colorToHex(const RgbColor &color)
     {
@@ -64,7 +94,7 @@ namespace
 
     void handleDevObdSend()
     {
-        g_lastHttpMs = millis();
+        markHttpActivity("WEB_DEV_OBD_SEND");
 
         if (!g_connected)
         {
@@ -102,6 +132,7 @@ namespace
                 break;
             }
             delay(10);
+            yield();
         }
 
         // Kleine JSON-Antwort mit letztem TX/OBD zurückgeben
@@ -389,7 +420,7 @@ namespace
         page += F("<button type='button' class='btn-danger' id='btnReset' style='display:none'>Zurücksetzen</button>");
         page += F("</form>");
 
-        page += "<div class='small' style='text-align:center;margin-top:16px;'>" + WiFi.softAPIP().toString() + "</div>";
+        page += "<div class='small' style='text-align:center;margin-top:16px;'>IP: " + currentIpString() + "</div>";
 
         // --- Script ---
         page += F(
@@ -918,14 +949,14 @@ namespace
         return page;
     }
 
-    String settingsPage()
+    String settingsPage(bool savedNotice)
     {
         String vin = readVehicleVin();
         String model = readVehicleModel();
         String diag = readVehicleDiagStatus();
 
         String page;
-        page.reserve(9000);
+        page.reserve(11000);
 
         page += F(
             "<!DOCTYPE html><html><head><meta charset='utf-8'>"
@@ -987,6 +1018,7 @@ namespace
             "  max-height:500px;"
             "  opacity:1;"
             "}"
+            ".note{background:#112233;border:1px solid #1f3b55;color:#a3c5ff;padding:10px;border-radius:8px;font-size:13px;margin-top:8px;}"
             ".console-box{"
             "  background:#000;"
             "  border-radius:6px;"
@@ -1038,6 +1070,40 @@ namespace
             page += " checked";
         page += "><span class='slider'></span></label></div>";
         page += F("<div class='small'>Schaltet zusätzliche Debug- und OBD-Einstellungen frei.</div></div>");
+
+        // --- WLAN ---
+        page += F("<div class='section'><div class='section-title'>WLAN</div>");
+        page += "<div id='wifiSaveNote' class='note'";
+        if (!savedNotice)
+            page += " style=\"display:none;\"";
+        page += ">WLAN-Konfiguration gespeichert. Neustart empfohlen.</div>";
+        page += F("<label for='wifiMode'>WLAN-Modus</label>");
+        page += "<select name='wifiMode' id='wifiMode'>";
+        page += "<option value='0'";
+        if (cfg.wifiMode == AP_ONLY)
+            page += " selected";
+        page += ">Access Point (nur AP)</option>";
+        page += "<option value='1'";
+        if (cfg.wifiMode == STA_ONLY)
+            page += " selected";
+        page += ">Heim-WLAN (nur STA)</option>";
+        page += "<option value='2'";
+        if (cfg.wifiMode == STA_WITH_AP_FALLBACK)
+            page += " selected";
+        page += ">Heim-WLAN mit AP-Fallback</option>";
+        page += "</select>";
+
+        page += F("<label for='staSsid'>Heim-WLAN SSID</label>");
+        page += "<input type='text' id='staSsid' name='staSsid' value='" + htmlEscape(cfg.staSsid) + "' placeholder='z.B. Zuhause'>";
+        page += F("<label for='staPassword'>Heim-WLAN Passwort</label>");
+        page += "<input type='password' id='staPassword' name='staPassword' value='" + htmlEscape(cfg.staPassword) + "'>";
+
+        page += F("<label for='apSsid'>AP-SSID</label>");
+        page += "<input type='text' id='apSsid' name='apSsid' value='" + htmlEscape(cfg.apSsid) + "'>";
+        page += F("<label for='apPassword'>AP-Passwort</label>");
+        page += "<input type='password' id='apPassword' name='apPassword' value='" + htmlEscape(cfg.apPassword) + "'>";
+        page += F("<div class='small'>AP-Passwort muss mindestens 8 Zeichen lang sein.</div>");
+        page += F("</div>");
 
         // --- Mein Fahrzeug ---
         page += F("<div class='section'><div class='section-title'>Mein Fahrzeug</div>");
@@ -1415,6 +1481,8 @@ namespace
             "  }).then(()=>{"
             "    captureInitialSettingsState();"
             "    recomputeSettingsDirty();"
+            "    const note=document.getElementById('wifiSaveNote');"
+            "    if(note) note.style.display='block';"
             "  }).catch(()=>{});"
             "});"
 
@@ -1576,13 +1644,13 @@ namespace
 
     void handleRoot()
     {
-        g_lastHttpMs = millis();
+        markHttpActivity("WEB_ROOT");
         server.send(200, "text/html", htmlPage());
     }
 
     void handleBrightness()
     {
-        g_lastHttpMs = millis();
+        markHttpActivity("WEB_BRIGHTNESS");
         if (server.hasArg("val"))
         {
             int v = clampInt(server.arg("val").toInt(), 0, 255);
@@ -1671,14 +1739,15 @@ namespace
 
     void handleSave()
     {
-        g_lastHttpMs = millis();
+        markHttpActivity("WEB_SAVE");
         applyConfigFromRequest(true);
+        saveConfig();
         server.send(200, "text/plain", "OK");
     }
 
     void handleTest()
     {
-        g_lastHttpMs = millis();
+        markHttpActivity("WEB_TEST");
         if (server.method() == HTTP_POST)
         {
             applyConfigFromRequest(true);
@@ -1696,7 +1765,7 @@ namespace
 
     void handleConnect()
     {
-        g_lastHttpMs = millis();
+        markHttpActivity("WEB_CONNECT");
         g_autoReconnect = true;
         g_forceImmediateReconnect = true;
         g_lastBleRetryMs = 0;
@@ -1705,7 +1774,7 @@ namespace
 
     void handleDisconnect()
     {
-        g_lastHttpMs = millis();
+        markHttpActivity("WEB_DISCONNECT");
         if (g_client != nullptr)
             g_client->disconnect();
         server.send(200, "text/plain", "OK");
@@ -1713,7 +1782,7 @@ namespace
 
     void handleStatus()
     {
-        g_lastHttpMs = millis();
+        markHttpActivity("WEB_STATUS");
         unsigned long now = millis();
         int vehicleAge = 0;
         bool ready = g_vehicleInfoAvailable;
@@ -1749,7 +1818,7 @@ namespace
 
     void handleBleStatus()
     {
-        g_lastHttpMs = millis();
+        markHttpActivity("WEB_BLE_STATUS");
         unsigned long now = millis();
 
         String json = "{";
@@ -1788,7 +1857,7 @@ namespace
 
     void handleBleScan()
     {
-        g_lastHttpMs = millis();
+        markHttpActivity("WEB_BLE_SCAN");
         bool started = startBleScan();
         if (started)
             server.send(200, "application/json", "{\"status\":\"started\"}");
@@ -1798,7 +1867,7 @@ namespace
 
     void handleBleConnectDevice()
     {
-        g_lastHttpMs = millis();
+        markHttpActivity("WEB_BLE_CONNECT_DEVICE");
         if (!server.hasArg("address"))
         {
             server.send(400, "application/json", "{\"status\":\"error\",\"reason\":\"missing-address\"}");
@@ -1815,13 +1884,14 @@ namespace
 
     void handleSettingsGet()
     {
-        g_lastHttpMs = millis();
-        server.send(200, "text/html", settingsPage());
+        markHttpActivity("WEB_SETTINGS_GET");
+        bool saved = server.hasArg("saved");
+        server.send(200, "text/html", settingsPage(saved));
     }
 
     void handleSettingsSave()
     {
-        g_lastHttpMs = millis();
+        markHttpActivity("WEB_SETTINGS_SAVE");
         bool newDev = server.hasArg("devMode");
         g_devMode = newDev;
         if (!g_devMode)
@@ -1830,13 +1900,44 @@ namespace
             g_forceImmediateReconnect = true;
             g_lastBleRetryMs = 0;
         }
-        server.sendHeader("Location", "/settings", true);
+
+        if (server.hasArg("wifiMode"))
+        {
+            int mode = clampInt(server.arg("wifiMode").toInt(), 0, 2);
+            cfg.wifiMode = static_cast<WifiMode>(mode);
+        }
+
+        String staSsid = server.arg("staSsid");
+        String staPass = server.arg("staPassword");
+        staSsid.trim();
+        staPass.trim();
+        cfg.staSsid = staSsid;
+        cfg.staPassword = staPass;
+
+        String apSsid = server.arg("apSsid");
+        String apPass = server.arg("apPassword");
+        apSsid.trim();
+        apPass.trim();
+        if (apSsid.isEmpty())
+        {
+            apSsid = AP_SSID;
+        }
+        if (apPass.length() < 8)
+        {
+            apPass = AP_PASS;
+        }
+        cfg.apSsid = apSsid;
+        cfg.apPassword = apPass;
+
+        saveConfig();
+
+        server.sendHeader("Location", "/settings?saved=1", true);
         server.send(303, "text/plain", "Redirect");
     }
 
     void handleSettingsVehicleRefresh()
     {
-        g_lastHttpMs = millis();
+        markHttpActivity("WEB_SETTINGS_VEHICLE_REFRESH");
         if (!g_connected)
         {
             server.send(200, "application/json", "{\"status\":\"error\",\"reason\":\"no-connection\"}");
@@ -1848,20 +1949,96 @@ namespace
 
     void handleDevDisplayLogo()
     {
-        g_lastHttpMs = millis();
+        markHttpActivity("WEB_DEV_DISPLAY_LOGO");
         displayShowTestLogo();
         server.send(200, "text/plain", "OK");
     }
 }
 
+bool startApMode(const AppConfig &config)
+{
+    String ssid = config.apSsid;
+    String pass = config.apPassword;
+    ssid.trim();
+    pass.trim();
+
+    if (ssid.isEmpty())
+        ssid = AP_SSID;
+    if (pass.length() < 8)
+        pass = AP_PASS;
+
+    WiFi.mode(WIFI_AP);
+    bool ok = WiFi.softAP(ssid.c_str(), pass.c_str());
+    if (ok)
+    {
+        LOG_INFO("WIFI", "WIFI_AP_START", String("ssid=") + ssid + " ip=" + WiFi.softAPIP().toString());
+    }
+    else
+    {
+        LOG_ERROR("WIFI", "WIFI_AP_FAIL", String("ssid=") + ssid);
+    }
+    return ok;
+}
+
+bool startStaMode(const AppConfig &config, uint32_t timeoutMs)
+{
+    String ssid = config.staSsid;
+    String pass = config.staPassword;
+    ssid.trim();
+    pass.trim();
+
+    if (ssid.isEmpty())
+    {
+        LOG_INFO("WIFI", "WIFI_STA_FAIL", "ssid-missing");
+        return false;
+    }
+
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid.c_str(), pass.c_str());
+    LOG_INFO("WIFI", "WIFI_STA_START", String("ssid=") + ssid);
+
+    unsigned long start = millis();
+    while (WiFi.status() != WL_CONNECTED && (millis() - start) < timeoutMs)
+    {
+        delay(120);
+        yield();
+    }
+
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        LOG_INFO("WIFI", "WIFI_STA_READY", String("ip=") + WiFi.localIP().toString());
+        return true;
+    }
+
+    LOG_INFO("WIFI", "WIFI_STA_FAIL", String("ssid=") + ssid);
+    WiFi.disconnect(true);
+    return false;
+}
+
+void setupWifiFromConfig(const AppConfig &config)
+{
+    switch (config.wifiMode)
+    {
+    case AP_ONLY:
+        startApMode(config);
+        break;
+    case STA_ONLY:
+        startStaMode(config);
+        break;
+    case STA_WITH_AP_FALLBACK:
+    default:
+        if (!startStaMode(config))
+        {
+            LOG_INFO("WIFI", "WIFI_STA_FALLBACK_TO_AP", "STA failed, switching to AP");
+            startApMode(config);
+        }
+        break;
+    }
+}
+
 void initWifiAP()
 {
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP(AP_SSID, AP_PASS);
-    Serial.print("AP SSID: ");
-    Serial.println(AP_SSID);
-    Serial.print("AP IP address: ");
-    Serial.println(WiFi.softAPIP());
+    startApMode(cfg);
 }
 
 void initWebUi()
@@ -1882,6 +2059,7 @@ void initWebUi()
     server.on("/dev/display-logo", HTTP_POST, handleDevDisplayLogo);
     server.on("/dev/obd-send", HTTP_POST, handleDevObdSend);
 
+    LOG_INFO("WEB", "WEB_INIT", "Web UI routes registered");
     server.begin();
 }
 

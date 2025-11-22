@@ -11,9 +11,10 @@
 void setup()
 {
     initConfig();
+    loadConfig();
     initGlobalState();
     initLeds();
-    initWifiAP();
+    setupWifiFromConfig(cfg);
     initWebUi();
     initBle();
     displayInit();

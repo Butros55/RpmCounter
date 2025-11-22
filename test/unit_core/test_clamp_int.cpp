@@ -2,6 +2,8 @@
 #include <unity.h>
 #include "core/utils.h"
 
+void register_state_retry_tests();
+
 static void test_clampInt_within_bounds(void)
 {
     TEST_ASSERT_EQUAL(5, clampInt(5, 0, 10));
@@ -27,4 +29,5 @@ void run_core_tests()
     RUN_TEST(test_clampInt_within_bounds);
     RUN_TEST(test_clampInt_too_low);
     RUN_TEST(test_clampInt_too_high);
+    register_state_retry_tests();
 }
