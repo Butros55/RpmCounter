@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include "core/config.h"
+#include "core/wifi.h"
 #include "core/state.h"
 #include "bluetooth/ble_obd.h"
 #include "web/web_ui.h"
@@ -23,6 +24,7 @@ void setup()
 void loop()
 {
     webUiLoop();
+    wifiLoop();
     bleObdLoop();
     ledBarLoop();
     logoAnimLoop();
