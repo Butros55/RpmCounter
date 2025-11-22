@@ -1,32 +1,20 @@
 #include <Arduino.h>
-#include "core/config.h"
-#include "core/wifi.h"
-#include "core/state.h"
-#include "bluetooth/ble_obd.h"
-#include "web/web_ui.h"
-#include "hardware/led_bar.h"
-#include "hardware/logo_anim.h"
-#include "hardware/display.h"
 
-#ifndef UNIT_TEST
+#include "display_s3.h"
+#include "touch_s3.h"
+#include "ui_main.h"
+
 void setup()
 {
-    initConfig();
-    loadConfig();
-    initGlobalState();
-    initLeds();
-    setupWifiFromConfig(cfg);
-    initWebUi();
-    initBle();
-    displayInit();
+    Serial.begin(115200);
+    delay(200);
+
+    display_init();
+    touch_init();
+    ui_init();
 }
 
 void loop()
 {
-    webUiLoop();
-    wifiLoop();
-    bleObdLoop();
-    ledBarLoop();
-    logoAnimLoop();
+    display_loop();
 }
-#endif // UNIT_TEST
