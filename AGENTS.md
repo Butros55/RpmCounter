@@ -277,20 +277,6 @@ Funktionsnamen ändern, die von anderen Modulen (v. a. Web-UI) verwendet werden,
 
 Tests entfernen oder „grün patchen“, ohne das eigentliche Problem zu lösen
 
-🧪 Tests
-Alle Tests laufen mit:
-
-bash
-Code kopieren
-pio test -e native
-pio test -e esp32dev
-Der Fokus liegt auf:
-
-core/ (State, Utils, Config, WLAN-Logik)
-
-integration_connectivity/ (geplant für BLE/WLAN/Webserver)
-
-stabiler Webserver-/WLAN-Interaktion (insbesondere beim Wechsel auf die Einstellungsseite und beim WLAN-Scan)
 
 📌 Wann soll der Agent Rückfragen stellen?
 Wenn Hardwareverhalten unklar ist (z. B. bestimmte OBD-Werte, LED-Verhalten)
