@@ -17,10 +17,12 @@ struct WifiStatus
     WifiMode mode;
     bool apActive;
     int apClients;
+    String apIp;
     bool staConnected;
     bool staConnecting;
     String staLastError;
     String currentSsid;
+    String staIp;
     String ip;
     bool scanRunning;
     std::vector<WifiScanResult> scanResults;
