@@ -1119,14 +1119,6 @@ namespace
             ".ble-device{transition:opacity .25s ease,transform .25s ease,max-height .25s ease,margin .25s ease,padding .25s ease;}"
             ".ble-device-fadeout{opacity:0;transform:translateY(-8px);max-height:0;margin-top:0;margin-bottom:0;padding-top:0;padding-bottom:0;}"
             "</style></head><body>");
-            ".modal.hidden{display:none;}"
-            ".modal-backdrop{position:absolute;inset:0;background:rgba(0,0,0,0.5);backdrop-filter:blur(2px);}" 
-            ".modal-card{position:relative;background:#0f0f10;border:1px solid #2a2a2a;border-radius:12px;padding:16px;width:92%;max-width:360px;box-shadow:0 14px 36px rgba(0,0,0,0.55);z-index:2;}"
-            ".modal-title{font-weight:700;font-size:17px;margin-bottom:10px;}"
-            ".modal-actions{display:flex;gap:10px;margin-top:14px;}"
-            ".btn-secondary{background:#333;color:#eee;}"
-            ".btn-outline{background:transparent;border:1px solid #444;color:#eee;}"
-            "</style></head><body>");
 
         page += "<h1><a href='/'>&larr; Zurück</a><span>Einstellungen</span></h1>";
         page += F("<form id='settingsForm' method='POST' action='/settings'>");
@@ -1622,7 +1614,7 @@ namespace
             "    const isBusy=busy && !!dev.addr && dev.addr===busyAddr;"
             "    if(busy && !isBusy){btn.classList.add('disabled');}"
             "    const pill=isBusy?'<span class=\"device-pill\"><span class=\"spinner\"></span><span>Verbinde...</span></span>':'<span class=\"pill\">Verbinden</span>';"
-            "    btn.innerHTML=`<span class=\"device-meta\"><span class=\"device-name\">${dev.name||'(unbekannt)'}<\/span><span class=\"device-addr\">${dev.addr||''}<\/span><\/span>${pill}`;"
+            "    btn.innerHTML=`<span class=\"device-meta\"><span class=\"device-name\">${dev.name||'(unbekannt)'}</span><span class=\"device-addr\">${dev.addr||''}</span></span>${pill}`;"
             "    if(!busy || isBusy){btn.onclick=()=>{requestBleConnect(dev.addr||'',dev.name||'');};}else{btn.onclick=null;}"
             "  });"
             "  if(!scanning){"
