@@ -5,6 +5,11 @@
 
 #if 1 /*Set it to "1" to enable content*/
 
+#ifndef LV_CONF_H
+#define LV_CONF_H
+
+#include <stdint.h>
+
 #define LV_HOR_RES_MAX (320)
 #define LV_VER_RES_MAX (170)
 
@@ -32,5 +37,7 @@
 
 #define LV_THEME_DEFAULT_DARK 0
 #define LV_THEME_DEFAULT_LIGHT 1
+
+#endif /*LV_CONF_H*/
 
 #endif /*LV_CONF_H_ENABLE*/
