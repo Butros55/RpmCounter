@@ -19,6 +19,7 @@ namespace
         uint32_t staConnectTimeoutMs = 15000;
         bool apActive = false;
         int apClients = 0;
+        String apIp;
         bool scanRunning = false;
         unsigned long scanStartMs = 0;
         std::vector<WifiScanResult> scanResults;
@@ -26,6 +27,7 @@ namespace
         String targetSsid;
         String targetPass;
         String currentSsid;
+        String staIp;
         String lastIp;
     };
 
@@ -43,21 +45,36 @@ namespace
         wifi_mode_t mode = WiFi.getMode();
         g_wifi.apActive = (mode == WIFI_AP || mode == WIFI_AP_STA);
         g_wifi.apClients = g_wifi.apActive ? WiFi.softAPgetStationNum() : 0;
+        g_wifi.apIp = g_wifi.apActive ? WiFi.softAPIP().toString() : "";
     }
 
     void updateIp()
     {
-        if (g_wifi.staConnected)
+        if (WiFi.status() == WL_CONNECTED || g_wifi.staConnected)
         {
-            g_wifi.lastIp = WiFi.localIP().toString();
-        }
-        else if (g_wifi.apActive)
-        {
-            g_wifi.lastIp = WiFi.softAPIP().toString();
+            g_wifi.staIp = WiFi.localIP().toString();
         }
         else
         {
-            g_wifi.lastIp = WiFi.localIP().toString();
+            g_wifi.staIp.clear();
+        }
+
+        if (g_wifi.apActive)
+        {
+            g_wifi.apIp = WiFi.softAPIP().toString();
+        }
+        else
+        {
+            g_wifi.apIp.clear();
+        }
+
+        if (g_wifi.staConnected)
+        {
+            g_wifi.lastIp = g_wifi.staIp;
+        }
+        else
+        {
+            g_wifi.lastIp = g_wifi.apIp.length() > 0 ? g_wifi.apIp : WiFi.localIP().toString();
         }
     }
 
@@ -74,6 +91,7 @@ namespace
         g_wifi.staConnected = false;
         g_wifi.staConnecting = false;
         g_wifi.currentSsid = "";
+        g_wifi.staIp = "";
     }
 
     void ensureApForFallback(const AppConfig &config, bool keepSta)
@@ -93,6 +111,7 @@ namespace
         bool ok = WiFi.softAP(ssid.c_str(), pass.c_str());
         g_wifi.apActive = ok;
         g_wifi.apClients = ok ? WiFi.softAPgetStationNum() : 0;
+        g_wifi.apIp = ok ? WiFi.softAPIP().toString() : "";
         updateIp();
         if (ok)
         {
@@ -129,6 +148,7 @@ bool startApMode(const AppConfig &config)
     g_wifi.activeMode = AP_ONLY;
     g_wifi.apActive = ok;
     g_wifi.apClients = ok ? WiFi.softAPgetStationNum() : 0;
+    g_wifi.apIp = ok ? WiFi.softAPIP().toString() : "";
     g_wifi.currentSsid = ssid;
     updateIp();
 
@@ -164,6 +184,7 @@ bool startStaMode(const AppConfig &config, uint32_t timeoutMs)
     g_wifi.staConnectStartMs = millis();
     g_wifi.staConnecting = true;
     g_wifi.staConnected = false;
+    g_wifi.staIp = "";
     g_wifi.lastIp = "";
     if (config.wifiMode != STA_WITH_AP_FALLBACK)
     {
@@ -307,10 +328,12 @@ WifiStatus getWifiStatus()
     status.mode = g_wifi.configuredMode;
     status.apActive = g_wifi.apActive;
     status.apClients = g_wifi.apClients;
+    status.apIp = g_wifi.apIp;
     status.staConnected = g_wifi.staConnected;
     status.staConnecting = g_wifi.staConnecting;
     status.staLastError = g_wifi.staLastError;
     status.currentSsid = g_wifi.currentSsid;
+    status.staIp = g_wifi.staIp;
     status.ip = g_wifi.lastIp;
     status.scanRunning = g_wifi.scanRunning;
     status.scanResults = g_wifi.scanResults;
