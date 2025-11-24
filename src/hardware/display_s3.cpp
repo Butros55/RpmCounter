@@ -81,7 +81,11 @@ static void display_flush_cb(lv_disp_drv_t *disp, const lv_area_t *area, lv_colo
 
     g_tft.startWrite();
     g_tft.setAddrWindow(area->x1, area->y1, w, h);
-    g_tft.pushColors(reinterpret_cast<uint16_t *>(color_p), w * h, true);
+    uint16_t *pix = reinterpret_cast<uint16_t *>(color_p);
+    for (uint32_t i = 0; i < w * h; ++i)
+    {
+        g_tft.pushColor(pix[i]);
+    }
     g_tft.endWrite();
 
     lv_disp_flush_ready(disp);
@@ -96,7 +100,7 @@ static TouchPoint readTouch()
     if (Wire.endTransmission(false) != 0)
         return p;
 
-    if (Wire.requestFrom(S3_TOUCH_ADDR, static_cast<uint8_t>(6)) < 6)
+    if (Wire.requestFrom((uint8_t)S3_TOUCH_ADDR, (uint8_t)6) < 6)
         return p;
 
     Wire.read(); // gesture id (unused)
@@ -231,8 +235,7 @@ void display_s3_loop()
     ui_main_update_status(wifiConnected, wifiConnecting, g_connected, g_bleConnectInProgress);
     ui_main_loop();
 
-    lv_timer_handler();
+    // lv_timer_handler();
 }
 
 #endif
-
