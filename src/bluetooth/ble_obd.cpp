@@ -264,6 +264,11 @@ bool connectToObd(const String &address, const String &name)
     BLEAddress obdAddress(targetAddr.c_str());
 
     g_client = BLEDevice::createClient();
+    if (!g_client)
+    {
+        LOG_ERROR("BLE", "BLE_CLIENT_NULL", "BLEDevice::createClient() returned nullptr");
+        return false;
+    }
     delay(1);
     g_client->setClientCallbacks(new MyClientCallback());
 
@@ -435,7 +440,7 @@ bool startConnectTask(bool manualAttempt)
         vTaskDelete(nullptr);
     };
 
-    xTaskCreate(task, "bleConnectTask", 6144, (void *)manualAttempt, 1, nullptr);
+    xTaskCreate(task, "bleConnectTask", 6144, (void *)(uintptr_t)manualAttempt, 1, nullptr);
     return true;
 }
 
