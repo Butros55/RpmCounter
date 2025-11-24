@@ -1,6 +1,8 @@
 #include "display_s3.h"
 
 #include <Arduino.h>
+#include "lvgl.h"
+#include "ui_main.h"
 #include <Arduino_GFX_Library.h>
 
 extern "C"
@@ -36,24 +38,26 @@ namespace
 
     uint32_t last_tick = 0;
 
-    void display_flush(lv_disp_drv_t *driver, const lv_area_t *area, lv_color_t *color_p)
+    static void display_flush(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p)
     {
-        Arduino_GFX *target = static_cast<Arduino_GFX *>(driver->user_data);
-        if (!target)
+        if (!gfx)
         {
-            lv_disp_flush_ready(driver);
+            lv_disp_flush_ready(disp);
             return;
         }
 
-        uint16_t w = static_cast<uint16_t>(area->x2 - area->x1 + 1);
-        uint16_t h = static_cast<uint16_t>(area->y2 - area->y1 + 1);
+        uint32_t w = (area->x2 - area->x1 + 1);
+        uint32_t h = (area->y2 - area->y1 + 1);
 
-        target->startWrite();
-        target->writeAddrWindow(area->x1, area->y1, w, h);
-        target->writePixels(reinterpret_cast<uint16_t *>(color_p), static_cast<uint32_t>(w) * h);
-        target->endWrite();
+        // LVGL ist auf 16-Bit-Farben (RGB565) konfiguriert -> direkter Cast
+        gfx->draw16bitRGBBitmap(
+            area->x1,
+            area->y1,
+            reinterpret_cast<uint16_t *>(&color_p->full),
+            w,
+            h);
 
-        lv_disp_flush_ready(driver);
+        lv_disp_flush_ready(disp);
     }
 
     void init_backlight()
@@ -74,10 +78,15 @@ void display_s3_init()
     lv_init();
 
     bus = new Arduino_ESP32QSPI(PIN_LCD_CS, PIN_LCD_SCK, PIN_LCD_D0, PIN_LCD_D1, PIN_LCD_D2, PIN_LCD_D3);
-    gfx = new Arduino_RM67162(bus, PIN_LCD_RST, DISPLAY_ROTATION, true /* IPS */, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    gfx = new Arduino_RM67162(
+        bus,
+        PIN_LCD_RST,
+        DISPLAY_ROTATION,
+        true // IPS
+    );
 
     gfx->begin();
-    gfx->fillScreen(BLACK);
+    gfx->fillScreen(0x0000);
     init_backlight();
 
     lv_disp_draw_buf_init(&draw_buf, lv_buf1, lv_buf2, DISPLAY_WIDTH * LVGL_BUFFER_LINES);
@@ -108,6 +117,6 @@ void display_s3_loop()
     uint32_t diff = now - last_tick;
     last_tick = now;
 
-    lv_tick_inc(diff);
+    // lv_tick_inc(diff);
     lv_timer_handler();
 }
