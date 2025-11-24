@@ -112,11 +112,9 @@ namespace
             lv_anim_set_var(&a, hint_label);
             lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_TRANSP);
             lv_anim_set_exec_cb(&a, [](void *obj, int32_t v)
-                               { lv_obj_set_style_opa(static_cast<lv_obj_t *>(obj), static_cast<lv_opa_t>(v), 0); });
+                                { lv_obj_set_style_opa(static_cast<lv_obj_t *>(obj), static_cast<lv_opa_t>(v), 0); });
             lv_anim_set_ready_cb(&a, [](lv_anim_t *anim)
-                                 {
-                                     lv_obj_add_flag(static_cast<lv_obj_t *>(anim->var), LV_OBJ_FLAG_HIDDEN);
-                                 });
+                                 { lv_obj_add_flag(static_cast<lv_obj_t *>(anim->var), LV_OBJ_FLAG_HIDDEN); });
             lv_anim_start(&a);
         }
 
@@ -205,7 +203,7 @@ namespace
 
         bluetooth_icon = lv_label_create(container);
         lv_label_set_text(bluetooth_icon, LV_SYMBOL_BLUETOOTH);
-        lv_obj_set_style_text_font(bluetooth_icon, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_font(bluetooth_icon, LV_FONT_MONTSERRAT_20, 0);
         lv_obj_set_style_text_color(bluetooth_icon, lv_color_hex(0xFF4040), 0);
 
         wifi_container = lv_obj_create(container);
@@ -252,12 +250,12 @@ namespace
         lv_obj_add_event_cb(main_button, on_main_button, LV_EVENT_CLICKED, nullptr);
 
         main_icon = lv_label_create(main_button);
-        lv_obj_set_style_text_font(main_icon, &lv_font_montserrat_32, 0);
+        lv_obj_set_style_text_font(main_icon, LV_FONT_MONTSERRAT_32, 0);
         lv_obj_set_style_text_color(main_icon, lv_color_white(), 0);
         lv_obj_align(main_icon, LV_ALIGN_CENTER, 0, -22);
 
         main_label = lv_label_create(home_screen);
-        lv_obj_set_style_text_font(main_label, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_font(main_label, LV_FONT_MONTSERRAT_20, 0);
         lv_obj_set_style_text_color(main_label, lv_color_hex(0xDADADA), 0);
         lv_obj_align(main_label, LV_ALIGN_CENTER, 0, 70);
 

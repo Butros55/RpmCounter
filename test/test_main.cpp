@@ -7,6 +7,9 @@ void run_core_tests();
 // später:
 // void run_bluetooth_tests();
 // void run_connectivity_tests();
+// Force-include the actual test implementations so PlatformIO links them in one runner.
+#include "unit_core/test_clamp_int.cpp"
+#include "unit_core/test_state_retry.cpp"
 
 void setup()
 {

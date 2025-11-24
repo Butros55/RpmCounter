@@ -33,8 +33,8 @@ Der Agent darf im STANDARD-MODUS:
   - `pio run`
   - `pio run -t upload`
   - `pio device monitor` (falls verfügbar)
-  - `pio test -e native`
-  - `pio test -e esp32dev`
+  - `
+  - `pio test -e esp32s3`
 - Log-Ausgaben aus dem seriellen Monitor analysieren (vom User bereitgestellt)
 - Fehler reproduzieren, soweit mit den zur Verfügung stehenden Tools möglich
 - Fix-Vorschläge umsetzen
@@ -47,7 +47,7 @@ Der Agent führt **keine** Befehle aus, die:
 Der STANDARD-MODUS reicht aus, um:
 
 - Firmware zu bauen und zu flashen
-- Tests auf echter Hardware (über `pio test -e esp32dev`) mechanisch anzustoßen
+- Tests auf echter Hardware (über `pio test -e esp32s3`) mechanisch anzustoßen
 - State-Machine/BLE/Webserver-Verhalten anhand serieller Logs zu debuggen
 - die Web-UI-/WLAN-Logik in Code & Unit-Tests zu verbessern
 
@@ -165,9 +165,9 @@ Relevanter Ausschnitt aus platformio.ini (kann vom Agent ergänzt/angepasst werd
 
 ini
 Code kopieren
-[env:esp32dev]
+[env:esp32s3]
 platform = espressif32
-board = esp32dev
+board = esp32s3
 framework = arduino
 monitor_speed = 115200
 test_framework = unity
@@ -192,30 +192,22 @@ Serieller Monitor: pio device monitor
 
 Unit-/Integration-Tests:
 
-pio test -e native
 
-pio test -e esp32dev
+pio test -e esp32s3
 
 🔁 Arbeits- & Test-Workflow für den Agent
 Der Agent MUSS nach Änderungen:
 
 Projekt bauen
 
-bash
-Code kopieren
 pio run
 Tests ausführen
 
 Immer:
 
-bash
-Code kopieren
-pio test -e native
 Wenn WLAN-/Webserver-/BLE-/Hardware-nahe Logik verändert wurde, zusätzlich:
 
-bash
-Code kopieren
-pio test -e esp32dev
+pio test -e esp32s3
 Bei Testfehlschlägen:
 
 Fehler analysieren
@@ -277,6 +269,17 @@ Funktionsnamen ändern, die von anderen Modulen (v. a. Web-UI) verwendet werden,
 
 Tests entfernen oder „grün patchen“, ohne das eigentliche Problem zu lösen
 
+🧪 Tests
+Alle Tests laufen mit:
+
+pio test -e esp32s3
+Der Fokus liegt auf:
+
+core/ (State, Utils, Config, WLAN-Logik)
+
+integration_connectivity/ (geplant für BLE/WLAN/Webserver)
+
+stabiler Webserver-/WLAN-Interaktion (insbesondere beim Wechsel auf die Einstellungsseite und beim WLAN-Scan)
 
 📌 Wann soll der Agent Rückfragen stellen?
 Wenn Hardwareverhalten unklar ist (z. B. bestimmte OBD-Werte, LED-Verhalten)
@@ -286,7 +289,4 @@ Wenn Logs fehlen, um einen Fehler nachzuvollziehen
 Wenn für die Lösung Netzwerkzugriff im FULL-ACCESS-Modus notwendig ist
 
 Wenn sicherheitsrelevante Aktionen außerhalb des Workspaces erforderlich wären
-
-bash
-Code kopieren
 ```
