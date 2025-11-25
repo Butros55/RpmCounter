@@ -42,8 +42,8 @@ namespace
     constexpr uint8_t TOUCH_ADDR = 0x38;
     constexpr i2c_port_t TOUCH_PORT = I2C_NUM_0;
 
-    // Enable to show a minimal debug UI instead of the full application UI
-    #define DISPLAY_DEBUG_SIMPLE_UI 1
+// Enable to show a minimal debug UI instead of the full application UI
+#define DISPLAY_DEBUG_SIMPLE_UI 1
 
     static const char *TAG = "display_s3";
 
@@ -359,10 +359,10 @@ void display_s3_init()
         .reset_gpio_num = PIN_LCD_RST,
         .color_space = ESP_LCD_COLOR_SPACE_RGB,
         .bits_per_pixel = LCD_BIT_PER_PIXEL,
-        .vendor_config = &vendor_config,
         .flags = {
             .reset_active_high = 0,
         },
+        .vendor_config = &vendor_config,
     };
     err = esp_lcd_new_panel_sh8601(g_panelIo, &panel_config, &g_panel);
     if (err != ESP_OK)
@@ -415,9 +415,9 @@ void display_s3_init()
     }
 
     const esp_timer_create_args_t tick_args = {
-        .callback = [](void *) { lv_tick_inc(LVGL_TICK_PERIOD_MS); },
-        .name = "lvgl_tick"
-    };
+        .callback = [](void *)
+        { lv_tick_inc(LVGL_TICK_PERIOD_MS); },
+        .name = "lvgl_tick"};
     if (esp_timer_create(&tick_args, &g_lvglTickTimer) == ESP_OK)
     {
         esp_timer_start_periodic(g_lvglTickTimer, LVGL_TICK_PERIOD_MS * 1000);
