@@ -1,5 +1,7 @@
 #include "display.h"
 
+#if !defined(CONFIG_IDF_TARGET_ESP32S3)
+
 #include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_ST7789.h>
@@ -212,3 +214,5 @@ void displaySetShiftBlink(bool active)
     g_displayBlink = active;
     renderGearDisplay();
 }
+
+#endif // !defined(CONFIG_IDF_TARGET_ESP32S3)
