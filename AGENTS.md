@@ -1,120 +1,195 @@
-# ✅ AGENTS.md – RpmCounter / ShiftLight (mit Netzwerk-Debug-Modus)
+# ✅ AGENTS.md – RpmCounter / ShiftLight (Architektur, Regeln, Display-Pfade)
 
 ## 🌟 Projektüberblick
 
-Dieses Repository enthält die Firmware für ein **ShiftLight-/RPM-Anzeige-System** auf Basis eines **ESP32 (PlatformIO, Arduino)**.
+Dieses Repository enthält die Firmware für ein ShiftLight-/RPM-Anzeige-System auf Basis eines ESP32 (PlatformIO, Arduino).
 
-Die Firmware:
+Der Code unterstützt mehrere Hardwarevarianten, insbesondere:
 
-- verbindet sich über OBD-II per **BLE**
-- steuert eine **mehrfarbige LED-Bar**
-- zeigt Animationen und Statusinformationen auf einem **Display**
-- stellt eine **WLAN-Weboberfläche** (Access Point + optional STA) bereit
-- speichert Einstellungen dauerhaft (Preferences / NVS)
+- ältere Boards mit ST7789-Display (240×240)
+- neue Waveshare ESP32-S3 Boards mit 1.64" QSPI AMOLED (280×456)
+- BLE-OBD Anbindung
+- LED-Bar
+- WLAN-Webserver (AP/STA)
+- LVGL-UI
+- NVS-Konfiguration
 
 **Ziel:**  
-Eine stabile, non-blocking Firmware, in der **BLE, WLAN/AP/STA, Webserver, LED-Bar und Display parallel** laufen, ohne sich gegenseitig zu blockieren.
+Eine stabile, nicht-blockierende Firmware, bei der BLE, WLAN/AP/STA, LED-Bar, Webserver und Display parallel funktionieren.
 
 ---
 
-# 🤖 Agent-Rollen & Modi
+## 🤖 Agent-Modi
 
-Der Agent („Codex“) läuft **in der Cloud** und arbeitet über VS Code / CLI auf diesem Repository.
+### 🟦 STANDARD-MODUS
 
-## 🟦 STANDARD-MODUS (Default)
-
-> Dieser Modus ist der Standard und wird in ~95 % der Fälle verwendet.
-
-Der Agent darf im STANDARD-MODUS:
+**Der Agent darf:**
 
 - Dateien im Workspace lesen/schreiben
-- Projektstruktur einhalten und erweitern
-- Build- & Test-Befehle im Workspace ausführen:
-  - `pio run`
-  - `pio run -t upload`
-  - `pio device monitor` (falls verfügbar)
-  - `
-  - `pio test -e esp32s3`
-- Log-Ausgaben aus dem seriellen Monitor analysieren (vom User bereitgestellt)
-- Fehler reproduzieren, soweit mit den zur Verfügung stehenden Tools möglich
-- Fix-Vorschläge umsetzen
+- Build/Test-Befehle in PowerShell ausführen
+- Logs analysieren
+- architekturgemäße Änderungen vornehmen
 
-Der Agent führt **keine** Befehle aus, die:
+**Der Agent darf NICHT:**
 
-- ins Internet gehen (HTTP-Requests nach außen, `curl` auf fremde Hosts, etc.)
-- außerhalb des Projekt-Workspaces Dateien manipulieren
+- Netzwerkbefehle (curl/wget) ausführen
+- Linux/WSL-Syntax verwenden
+- Dateien außerhalb des Repositories verändern
 
-Der STANDARD-MODUS reicht aus, um:
+### 🟩 NETZWERK-DEBUG („FULL ACCESS”)
 
-- Firmware zu bauen und zu flashen
-- Tests auf echter Hardware (über `pio test -e esp32s3`) mechanisch anzustoßen
-- State-Machine/BLE/Webserver-Verhalten anhand serieller Logs zu debuggen
-- die Web-UI-/WLAN-Logik in Code & Unit-Tests zu verbessern
+Nur erlaubt, wenn der Nutzer explizit schreibt:
+
+> „Nutze bitte Netzwerk-Debug / full access“
+
+Dann darf der Agent zusätzlich Netzwerkbefehle im LAN ausführen.
 
 ---
 
-## 🟩 NETZWERK-DEBUG-MODUS („FULL ACCESS“)
+### ✔ PowerShell-Befehle (Python 3.11, PlatformIO)
 
-> Dieser Modus darf **nur** genutzt werden, wenn ich ihn ausdrücklich erlaube.
+# Build
 
-Zusätzlich zu den Rechten im STANDARD-MODUS darf der Agent dann:
+'C:\Program Files\PowerShell\7\pwsh.exe' -Command 'Set-Location "c:\dev\RpmCounter"; $env:PLATFORMIO_HOME_DIR = "$PWD\.pio-home"; pio run -e esp32s3'
 
-- Befehle mit **Netzwerkzugriff** ausführen (z. B. `curl`, `ping`, `wget`)
-- HTTP-Requests an Geräte im lokalen Netzwerk senden (z. B. an den ESP32-AP)
-- Terminalbefehle außerhalb des Workspaces ausführen, falls für Debugging nötig
+# Flash
 
-Typische Einsätze:
+'C:\Program Files\PowerShell\7\pwsh.exe' -Command 'Set-Location "c:\dev\RpmCounter"; $env:PLATFORMIO_HOME_DIR = "$PWD\.pio-home"; pio run -e esp32s3 -t upload'
 
-- Analyse, warum der ESP32-Webserver im **AP-Modus** nicht oder nur sporadisch antwortet  
-  → z. B. `curl http://192.168.4.1/`
-- Endpoints wie `/`, `/settings`, `/status`, `/wifi_scan` etc. testen
-- Verhalten bei parallelen Requests während BLE-Scans/WLAN-Scans untersuchen
-- Vergleiche zwischen Heim-WLAN (STA-Mode) und AP-Mode
+# Serieller Monitor
 
-**Wichtig:**  
-Der Agent darf diesen Modus **nicht eigenständig** aktivieren.  
-Nur wenn ich explizit schreibe:
+'C:\Program Files\PowerShell\7\pwsh.exe' -Command 'Set-Location "c:\dev\RpmCounter"; $env:PLATFORMIO_HOME_DIR = "$PWD\.pio-home"; pio device monitor'
 
-> **„Nutze bitte Netzwerk-Debug / full access“**
+# Clean
 
-darf der Agent Netzwerkzugriffe verwenden.
+'C:\Program Files\PowerShell\7\pwsh.exe' -Command 'Set-Location "c:\dev\RpmCounter"; $env:PLATFORMIO_HOME_DIR = "$PWD\.pio-home"; pio run -e esp32s3 -t clean'
+
+# Full-Clean (falls nötig)
+
+'C:\Program Files\PowerShell\7\pwsh.exe' -Command 'Set-Location "c:\dev\RpmCounter"; $env:PLATFORMIO_HOME_DIR = "$PWD\.pio-home"; pio run -e esp32s3 -t fullclean'
+
+````
 
 ---
 
-# 📡 Netzwerk-Szenarien
+## 🧹 Build-Clean & .pio-Probleme
 
-## 1️⃣ Access-Point-Modus (AP)
+### Typische Fehler
 
-Wenn der ESP32 im AP-Modus läuft und mein PC mit dem AP verbunden ist:
+- WinError 5 – Zugriff verweigert (In diesem fall mich nach permission prompten!! nachdem ich allow for this session angeklick habe gehts)
+- „Can not remove temporary directory .pio\build …“
 
-- Internet ist ggf. getrennt – das ist in Ordnung.
-- Im FULL-ACCESS-Modus darf der Agent:
-  - HTTP-Requests an `http://192.168.4.1` senden
-  - Antwortzeiten, Timeouts und Fehlercodes analysieren
-- Der Agent beurteilt:
-  - ob BLE-Connect-Loops den Webserver blockieren
-  - ob WLAN-Scan/Connect den AP überlastet
-  - ob HTTP-Handler non-blocking implementiert sind
 
-## 2️⃣ Heim-WLAN (STA-Modus)
+### Eskalationsstufen
 
-Wenn der ESP32 sich ins Heim-WLAN einwählt:
+#### 1) Normaler Clean
 
-- Der PC hat Internet + Verbindung zum ESP32.
-- Im FULL-ACCESS-Modus kann der Agent:
-  - sowohl ins Internet als auch zum ESP32 (z. B. `http://esp32.local` oder IP)
-  - HTTP-Requests während BLE/WLAN-Aktivität senden
-- Gut geeignet für komplexeres Integration-Debugging.
+```powershell
+Set-Location "C:\dev\RpmCounter"
+py -3.11 -m platformio run -e esp32s3 -t clean
+```
+
+#### 2) Full-Clean
+
+```powershell
+Set-Location "C:\dev\RpmCounter"
+py -3.11 -m platformio run -e esp32s3 -t fullclean
+```
+
+#### 3) .pio\build hart löschen (nur wenn PlatformIO ausdrücklich scheitert!)
+
+```powershell
+Set-Location "C:\dev\RpmCounter"
+
+if (Test-Path ".pio\build") {
+    Get-ChildItem ".pio\build" -Recurse -Force | ForEach-Object {
+        if (-not $_.PSIsContainer) {
+            try { $_.IsReadOnly = $false } catch {}
+        }
+    }
+    Remove-Item ".pio\build" -Recurse -Force
+}
+```
+
+**Wenn immer noch „Access Denied“:**
+Nutzer informieren, dass ein Prozess den Ordner blockiert (VS Code, Monitor, Explorer, PlatformIO Build-Prozess).
+
+---
+
+## 🖥️ Display- & LVGL-Regeln
+
+Das Projekt unterstützt zwei klar getrennte Displaypfade:
+
+### 1) hardware/display.cpp (ST7789, 240×240)
+
+- ✔ Bleibt erhalten
+- ✔ Wird für ältere Boards verwendet
+- ✔ Darf NICHT gelöscht werden
+- ✔ Darf weiterhin die ST7789-Library nutzen
+
+Damit bleibt das komplette bisherige Paket kompatibel.
+
+### 2) hardware/display_s3.cpp (Waveshare ESP32-S3 AMOLED)
+
+- ❗ Dieses Display ist kein ST7789
+- ❗ Dieses Display ist ein QSPI AMOLED (280×456)
+- ❗ Daher darf in display_s3.cpp KEIN ST7789-Code mehr existieren
+
+#### ✔ Anforderungen an den ESP32-S3-Pfad
+
+- **Displaytyp:** Waveshare 1.64" AMOLED
+- **Interface:** QSPI (6-Pin: CLK, CS, D0–D3)
+- **Auflösung:** 280 × 456 Pixel
+- **Farbtiefe:** 16 Bit
+- **Touch:** I²C (GPIO 47/48)
+
+#### ✔ Pinbelegung (laut Waveshare-Pinout)
+
+| AMOLED Pin   | ESP32-S3 GPIO | Verwendung       |
+| ------------ | ------------- | ---------------- |
+| QSPI_CS      | GPIO 9        | DC / Host CS     |
+| QSPI_CLK     | GPIO 10       | Clock            |
+| QSPI_D0      | GPIO 11       | Data0            |
+| QSPI_D1      | GPIO 12       | Data1            |
+| QSPI_D2      | GPIO 13       | Data2            |
+| QSPI_D3      | GPIO 14       | Data3 / RST      |
+| AMOLED_RESET | GPIO 21       | Reset (optional) |
+| TP_SDA       | GPIO 47       | Touch I²C SDA    |
+| TP_SCL       | GPIO 48       | Touch I²C SCL    |
+
+#### ✔ LVGL-Konfiguration
+
+`include/lv_conf.h` MUSS für den S3-Pfad diese Werte widerspiegeln:
+
+```c
+#define LV_HOR_RES_MAX 280
+#define LV_VER_RES_MAX 456
+#define LV_COLOR_DEPTH 16
+```
+
+Rotation/Orientierung muss konsistent mit dem Displaytreiber sein.
+
+---
+
+## 🧩 UI-Struktur (nur Architekturregeln)
+
+- `src/ui/ui_main.cpp` ist die zentrale Stelle für LVGL-Screens
+- Display-Update-Loop fließt über `display_s3_loop()`
+- Keine blockierenden Operationen
+- Statusanzeigen (WiFi, BLE) laufen über `state.*`
+- Keine inhaltlichen Anweisungen hier – nur Struktur.
 
 ---
 
 ## 📁 Projektstruktur (verbindlich)
 
-> Bitte diese Struktur respektieren und neue Dateien nur an sinnvollen Stellen ergänzen.
-
-```text
+```
 .
 ├─ platformio.ini
+├─ boards/
+│  └─ esp32s3.json
+├─ include/
+│  └─ lv_conf.h
 ├─ src/
 │  ├─ bluetooth/
 │  │  ├─ ble_obd.cpp
@@ -122,171 +197,94 @@ Wenn der ESP32 sich ins Heim-WLAN einwählt:
 │  ├─ core/
 │  │  ├─ config.cpp
 │  │  ├─ config.h
+│  │  ├─ logging.cpp
+│  │  ├─ logging.h
 │  │  ├─ state.cpp
 │  │  ├─ state.h
 │  │  ├─ utils.cpp
 │  │  ├─ utils.h
 │  │  ├─ vehicle_info.cpp
 │  │  ├─ vehicle_info.h
-│  │  ├─ wifi.cpp          # zentrale WLAN-Logik (AP/STA, Scan, Connect)
+│  │  ├─ wifi.cpp        # zentrale WLAN-Logik (AP/STA, Scan, Connect)
 │  │  └─ wifi.h
 │  ├─ hardware/
+│  │  ├─ display_s3.cpp
+│  │  ├─ display_s3.h
 │  │  ├─ display.cpp
 │  │  ├─ display.h
 │  │  ├─ led_bar.cpp
 │  │  ├─ led_bar.h
 │  │  ├─ logo_anim.cpp
 │  │  └─ logo_anim.h
+│  ├─ ui/
+│  │  ├─ ui_main.cpp
+│  │  └─ ui_main.h
 │  ├─ web/
-│  │  ├─ web_ui.cpp        # HTML-Generierung & Routen-Handler
+│  │  ├─ web_ui.cpp      # HTML-Generierung & Routen-Handler
 │  │  ├─ web_ui.h
 │  │  ├─ web_helpers.cpp
 │  │  └─ web_helpers.h
 │  └─ main.cpp
-├─ include/                # gemeinsame Header (falls benötigt)
-├─ lib/                    # externe / eigene Libraries
-└─ test/                   # PlatformIO-Tests (Unity)
-   ├─ test_main.cpp        # zentrales Unity-Setup (einziges setup()/loop())
+├─ lib/                  # externe / eigene Libraries
+└─ test/                 # PlatformIO-Tests (Unity)
+   ├─ test_main.cpp      # zentrales Unity-Setup (einziges setup()/loop())
    ├─ unit_core/
    │  └─ test_clamp_int.cpp
    ├─ unit_bluetooth/
    │  └─ (geplant)
    ├─ integration_connectivity/
-   │  └─ (geplant)        # BLE/WLAN/Webserver-Integration
+   │  └─ (geplant)       # BLE/WLAN/Webserver-Integration
    └─ unit_ap/
-      └─ (geplant)        # Tests für Access-Point-/WLAN-Logik
-Alle Tests werden über test/test_main.cpp gestartet.
-Wichtig: keine weiteren setup()/loop() in anderen Testdateien definieren.
-
-⚙️ Build & Flash
-Entwicklungsumgebung: PlatformIO
-
-Relevanter Ausschnitt aus platformio.ini (kann vom Agent ergänzt/angepasst werden, aber nicht grundlegend umgebaut):
-
-ini
-Code kopieren
-[env:esp32s3]
-platform = espressif32
-board = esp32s3
-framework = arduino
-monitor_speed = 115200
-test_framework = unity
-test_build_src = yes
-
-upload_port = COM3
-
-lib_deps =
-  Adafruit NeoPixel
-  ESP32 BLE Arduino
-  adafruit/Adafruit GFX Library
-  adafruit/Adafruit ST7735 and ST7789 Library
-
-board_build.partitions = huge_app.csv
-Standard-Workflows:
-
-Build: pio run
-
-Flash: pio run -t upload
-
-Serieller Monitor: pio device monitor
-
-Unit-/Integration-Tests:
-
-
-pio test -e esp32s3
-
-🔁 Arbeits- & Test-Workflow für den Agent
-Der Agent MUSS nach Änderungen:
-
-Projekt bauen
-
-pio run
-Tests ausführen
-
-Immer:
-
-Wenn WLAN-/Webserver-/BLE-/Hardware-nahe Logik verändert wurde, zusätzlich:
-
-pio test -e esp32s3
-Bei Testfehlschlägen:
-
-Fehler analysieren
-
-Code nachbessern
-
-Build & Tests wiederholen
-
-Erst wenn alle relevanten Tests grün sind, gilt der Fix als abgeschlossen.
-
-Im Ergebnis soll der Agent immer kurz dokumentieren:
-
-Welche Dateien geändert wurden
-
-Welche Probleme behoben wurden (inkl. Fehlermeldungen vorher/nachher)
-
-Welche Kommandos (Build/Test) ausgeführt wurden und ob sie erfolgreich waren
-
-📌 Regeln für Änderungen
-Der Agent MUSS:
-
-die bestehende Architektur (core/hardware/web/bluetooth) respektieren
-
-non-blocking Verhalten sicherstellen (kein langes delay(), keine blockierenden Scans im HTTP-Handler)
-
-NVS/Preferences-Zugriff über das bestehende Config-System führen
-
-neue Zustände sauber in state.* integrieren
-
-Tests niemals löschen oder deaktivieren, sondern erweitern
-
-Der Agent DARF:
-
-neue Unit- und Integrationstests im test/-Ordner hinzufügen
-
-kleine UI-Verbesserungen in der Weboberfläche vornehmen
-
-Logging konsolidieren (z. B. zentrale Debug-Funktion)
-
-neue State-Machine-Zustände hinzufügen, wenn für Stabilität nötig
-
-die WLAN-Logik so umbauen, dass:
-
-Scan & Connect asynchron ablaufen
-
-AP/STA-Modus sauber verwaltet werden
-
-die Web-UI sofort reagiert (z. B. mit Status „Scan läuft…“)
-
-Der Agent DARF NICHT:
-
-neue Frameworks oder große externe Libraries einführen
-
-Plattform/Board ohne Rücksprache wechseln
-
-Pinbelegung eigenmächtig ändern
-
-Funktionsnamen ändern, die von anderen Modulen (v. a. Web-UI) verwendet werden, ohne alle Call-Sites konsequent anzupassen
-
-Tests entfernen oder „grün patchen“, ohne das eigentliche Problem zu lösen
-
-🧪 Tests
-Alle Tests laufen mit:
-
-pio test -e esp32s3
-Der Fokus liegt auf:
-
-core/ (State, Utils, Config, WLAN-Logik)
-
-integration_connectivity/ (geplant für BLE/WLAN/Webserver)
-
-stabiler Webserver-/WLAN-Interaktion (insbesondere beim Wechsel auf die Einstellungsseite und beim WLAN-Scan)
-
-📌 Wann soll der Agent Rückfragen stellen?
-Wenn Hardwareverhalten unklar ist (z. B. bestimmte OBD-Werte, LED-Verhalten)
-
-Wenn Logs fehlen, um einen Fehler nachzuvollziehen
-
-Wenn für die Lösung Netzwerkzugriff im FULL-ACCESS-Modus notwendig ist
-
-Wenn sicherheitsrelevante Aktionen außerhalb des Workspaces erforderlich wären
+      └─ (geplant)       # Tests für Access-Point-/WLAN-Logik
 ```
+
+---
+
+## 🔁 Workflow
+
+1. Änderungen vornehmen
+2. Build ausführen
+3. Falls betroffen → Tests ausführen
+4. Bei Fehlern → korrigieren und erneut bauen/testen
+5. Erfolgreichen Stand dokumentieren (Dateien, Fehler vorher/nachher, Befehle)
+
+---
+
+## 📌 Regeln für Änderungen (Architektur, keine Aufgaben)
+
+### Der Agent MUSS:
+
+- ST7789-Pfad (`display.cpp`) nicht löschen oder brechen
+- S3-Pfad (`display_s3.cpp`) ohne ST7789-Code halten
+- QSPI-AMOLED-Pfad konsistent halten
+- LVGL-Auflösung auf 280×456 einhalten
+- PowerShell-Regeln strikt befolgen
+- Architektur (core/hardware/ui/web) einhalten
+- non-blocking bleiben
+- Konfigurationssystem (Preferences/NVS) weiter nutzen, nicht umgehen
+
+### Der Agent DARF:
+
+- interne Struktur verbessern
+- S3-Displaytreiber refaktorisieren
+- neue Testcases hinzufügen
+- Logging verbessern
+
+### Der Agent DARF NICHT:
+
+- `display.cpp` löschen
+- ST7789 in `display_s3.cpp` aktivieren
+- Board oder Pinout ändern, ohne Konsistenz sicherzustellen
+- Tests entfernen oder „grün patchen“
+
+---
+
+## 📌 Rückfragenpflicht
+
+Der Agent soll Fragen stellen, wenn:
+
+- Hardwareverhalten unklar oder widersprüchlich ist
+- relevante Logs fehlen
+- Netzwerkzugriff nötig wäre
+- Eingriffe außerhalb des Workspaces nötig wären
+````

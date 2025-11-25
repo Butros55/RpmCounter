@@ -39,6 +39,5 @@ void loop()
     bleObdLoop();
     ledBarLoop();
     logoAnimLoop();
-    display_s3_loop();
 }
 #endif // UNIT_TEST
