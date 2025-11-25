@@ -16,7 +16,6 @@ static lv_obj_t *g_speedLabel = nullptr;
 static lv_obj_t *g_footerLabel = nullptr;
 static lv_obj_t *g_activityBar = nullptr;
 static lv_obj_t *g_logoOverlay = nullptr;
-static uint32_t g_lastUiTick = 0;
 static uint32_t g_lastAnimTick = 0;
 static uint32_t g_logoHideDeadline = 0;
 static int g_barDirection = 1;
@@ -97,8 +96,8 @@ void ui_main_init(lv_disp_t *disp)
     lv_obj_set_style_text_color(g_footerLabel, lv_palette_main(LV_PALETTE_LIGHT_BLUE), 0);
 
     lv_disp_load_scr(g_screen);
-    g_lastUiTick = millis();
-    g_lastAnimTick = g_lastUiTick;
+    const uint32_t now = millis();
+    g_lastAnimTick = now;
     g_logoHideDeadline = 0;
     g_lastGear = -1;
     g_shiftActive = false;
@@ -221,12 +220,6 @@ void ui_main_loop()
         return;
 
     uint32_t now = millis();
-    if (now - g_lastUiTick >= 5)
-    {
-        lv_timer_handler();
-        g_lastUiTick = now;
-    }
-
     if (g_activityBar && now - g_lastAnimTick >= 40)
     {
         int32_t val = lv_bar_get_value(g_activityBar);
