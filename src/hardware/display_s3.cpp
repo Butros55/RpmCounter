@@ -2,7 +2,6 @@
 
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
 
-#include <Wire.h>
 #include <esp_err.h>
 #include <lvgl.h>
 #include <esp_heap_caps.h>
@@ -10,6 +9,9 @@
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_vendor.h>
 #include <esp_log.h>
+#include <esp_timer.h>
+#include <driver/gpio.h>
+#include <driver/i2c.h>
 #include <driver/spi_master.h>
 
 #include "core/wifi.h"
@@ -23,7 +25,9 @@ namespace
     constexpr int LCD_H_RES = 280;
     constexpr int LCD_V_RES = 456;
     constexpr int LCD_X_OFFSET = 0x14;
-    constexpr int LVGL_BUFFER_LINES = 40;
+    constexpr int LCD_BIT_PER_PIXEL = 16;
+    constexpr int LVGL_BUFFER_LINES = LCD_V_RES / 4;
+    constexpr int LVGL_TICK_PERIOD_MS = 2;
 
     constexpr int PIN_LCD_CS = 9;
     constexpr int PIN_LCD_CLK = 10;
@@ -35,6 +39,10 @@ namespace
     constexpr int PIN_TOUCH_SDA = 47;
     constexpr int PIN_TOUCH_SCL = 48;
     constexpr uint8_t TOUCH_ADDR = 0x38;
+    constexpr i2c_port_t TOUCH_PORT = I2C_NUM_0;
+
+    // Enable to show a minimal debug UI instead of the full application UI
+    #define DISPLAY_DEBUG_SIMPLE_UI 1
 
     static const char *TAG = "display_s3";
 
@@ -48,9 +56,10 @@ namespace
     static int g_cachedGear = 0;
     static bool g_cachedShift = false;
     static bool g_logoRequested = false;
-    static uint32_t g_lastTick = 0;
+    static uint32_t g_lastLvglRun = 0;
     static esp_lcd_panel_handle_t g_panel = nullptr;
     static esp_lcd_panel_io_handle_t g_panelIo = nullptr;
+    static esp_timer_handle_t g_lvglTickTimer = nullptr;
 
     void lv_rounder_cb(lv_disp_drv_t *disp_drv, lv_area_t *area)
     {
@@ -82,35 +91,50 @@ namespace
 
     bool i2c_write_reg(uint8_t addr, uint8_t reg, const uint8_t *data, size_t len)
     {
-        Wire.beginTransmission(addr);
-        Wire.write(reg);
+        const size_t bufSize = len + 1;
+        uint8_t *buf = static_cast<uint8_t *>(malloc(bufSize));
+        if (!buf)
+        {
+            return false;
+        }
+        buf[0] = reg;
         for (size_t i = 0; i < len; ++i)
         {
-            Wire.write(data[i]);
+            buf[i + 1] = data[i];
         }
-        return Wire.endTransmission() == 0;
+        esp_err_t ret = i2c_master_write_to_device(TOUCH_PORT, addr, buf, bufSize, 1000);
+        free(buf);
+        return ret == ESP_OK;
     }
 
     bool i2c_read_reg(uint8_t addr, uint8_t reg, uint8_t *out, size_t len)
     {
-        Wire.beginTransmission(addr);
-        Wire.write(reg);
-        if (Wire.endTransmission(false) != 0)
-        {
-            return false;
-        }
-        size_t read = Wire.requestFrom(addr, static_cast<uint8_t>(len));
-        if (read != len)
-            return false;
-        for (size_t i = 0; i < len; ++i)
-        {
-            out[i] = Wire.read();
-        }
-        return true;
+        esp_err_t ret = i2c_master_write_read_device(TOUCH_PORT, addr, &reg, 1, out, len, 1000);
+        return ret == ESP_OK;
     }
 
     bool ft3168_init()
     {
+        i2c_config_t conf = {};
+        conf.mode = I2C_MODE_MASTER;
+        conf.sda_io_num = PIN_TOUCH_SDA;
+        conf.scl_io_num = PIN_TOUCH_SCL;
+        conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
+        conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
+        conf.master.clk_speed = 300 * 1000;
+        conf.clk_flags = 0;
+
+        if (i2c_param_config(TOUCH_PORT, &conf) != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Failed to configure I2C for touch");
+            return false;
+        }
+        if (i2c_driver_install(TOUCH_PORT, conf.mode, 0, 0, 0) != ESP_OK)
+        {
+            ESP_LOGE(TAG, "Failed to install I2C driver for touch");
+            return false;
+        }
+
         uint8_t mode = 0x00;
         bool ok = i2c_write_reg(TOUCH_ADDR, 0x00, &mode, 1);
         if (!ok)
@@ -118,39 +142,6 @@ namespace
             ESP_LOGW(TAG, "FT3168 init failed");
         }
         return ok;
-    }
-
-    void panel_self_test()
-    {
-        if (!g_panel)
-        {
-            ESP_LOGE(TAG, "panel_self_test: panel handle is null");
-            return;
-        }
-
-        // Einfacher Streifen über die ganze Breite, 40 Zeilen hoch
-        static lv_color_t test_buf[LCD_H_RES * 40];
-
-        // Komplett in Rot füllen
-        for (int i = 0; i < LCD_H_RES * 40; ++i)
-        {
-            test_buf[i] = lv_color_hex(0xFF0000); // knallrot
-        }
-
-        esp_err_t err = esp_lcd_panel_draw_bitmap(
-            g_panel,
-            0, 0,
-            LCD_H_RES, 40,
-            test_buf);
-
-        if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "panel_self_test: draw_bitmap failed: %d", (int)err);
-        }
-        else
-        {
-            ESP_LOGI(TAG, "panel_self_test: draw_bitmap ok");
-        }
     }
 
     TouchPoint ft3168_read_touch()
@@ -176,15 +167,14 @@ namespace
         uint16_t x = static_cast<uint16_t>(((buf[0] & 0x0F) << 8) | buf[1]);
         uint16_t y = static_cast<uint16_t>(((buf[2] & 0x0F) << 8) | buf[3]);
 
-        // Swap to match screen orientation (portrait)
-        p.x = y;
-        p.y = x;
+        p.x = x;
+        p.y = y;
         p.touched = true;
 
-        if (p.x >= LCD_H_RES)
-            p.x = LCD_H_RES - 1;
-        if (p.y >= LCD_V_RES)
-            p.y = LCD_V_RES - 1;
+        if (p.x > LCD_H_RES)
+            p.x = LCD_H_RES;
+        if (p.y > LCD_V_RES)
+            p.y = LCD_V_RES;
 
         return p;
     }
@@ -205,16 +195,13 @@ namespace
             return;
         }
 
-        if (area->x2 < 0 || area->y2 < 0 || area->x1 >= LCD_H_RES || area->y1 >= LCD_V_RES)
-        {
-            lv_disp_flush_ready(disp);
-            return;
-        }
-
-        ESP_LOGD(TAG, "flush_cb: area x1=%d y1=%d x2=%d y2=%d", area->x1, area->y1, area->x2, area->y2);
+        const int offsetx1 = area->x1 + LCD_X_OFFSET;
+        const int offsetx2 = area->x2 + LCD_X_OFFSET;
+        const int offsety1 = area->y1;
+        const int offsety2 = area->y2;
 
         esp_lcd_panel_handle_t panel = static_cast<esp_lcd_panel_handle_t>(disp->user_data);
-        esp_err_t err = esp_lcd_panel_draw_bitmap(panel, area->x1, area->y1, area->x2 + 1, area->y2 + 1, color_p);
+        esp_err_t err = esp_lcd_panel_draw_bitmap(panel, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1, color_p);
         if (err != ESP_OK)
         {
             ESP_LOGE(TAG, "panel_draw_bitmap failed: %d", static_cast<int>(err));
@@ -320,7 +307,7 @@ void display_s3_init()
         PIN_LCD_D1,
         PIN_LCD_D2,
         PIN_LCD_D3,
-        LCD_H_RES * LVGL_BUFFER_LINES * sizeof(lv_color_t));
+        LCD_H_RES * LCD_V_RES * LCD_BIT_PER_PIXEL / 8);
     esp_err_t err = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
     if (err != ESP_OK)
     {
@@ -363,8 +350,8 @@ void display_s3_init()
 
     esp_lcd_panel_dev_config_t panel_config = {
         .reset_gpio_num = PIN_LCD_RST,
-        .color_space = ESP_LCD_COLOR_SPACE_BGR,
-        .bits_per_pixel = 16,
+        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
+        .bits_per_pixel = LCD_BIT_PER_PIXEL,
         .vendor_config = &vendor_config,
     };
     err = esp_lcd_new_panel_sh8601(g_panelIo, &panel_config, &g_panel);
@@ -381,11 +368,6 @@ void display_s3_init()
     if (esp_lcd_panel_init(g_panel) != ESP_OK)
     {
         ESP_LOGE(TAG, "panel_init failed");
-        return;
-    }
-    if (esp_lcd_panel_set_gap(g_panel, 0, 0) != ESP_OK)
-    {
-        ESP_LOGE(TAG, "panel_set_gap failed");
         return;
     }
     if (esp_lcd_panel_disp_on_off(g_panel, true) != ESP_OK)
@@ -406,7 +388,7 @@ void display_s3_init()
 
     g_disp = lv_disp_drv_register(&g_dispDrv);
 
-    g_touchReady = Wire.begin(PIN_TOUCH_SDA, PIN_TOUCH_SCL, 400000U) && ft3168_init();
+    g_touchReady = ft3168_init();
     if (g_touchReady)
     {
         lv_indev_drv_t indev_drv;
@@ -421,6 +403,28 @@ void display_s3_init()
         ESP_LOGW(TAG, "Touch controller not ready");
     }
 
+    const esp_timer_create_args_t tick_args = {
+        .callback = [](void *) { lv_tick_inc(LVGL_TICK_PERIOD_MS); },
+        .name = "lvgl_tick"
+    };
+    if (esp_timer_create(&tick_args, &g_lvglTickTimer) == ESP_OK)
+    {
+        esp_timer_start_periodic(g_lvglTickTimer, LVGL_TICK_PERIOD_MS * 1000);
+    }
+
+#if DISPLAY_DEBUG_SIMPLE_UI
+    lv_obj_t *dbg = lv_obj_create(nullptr);
+    lv_obj_set_style_bg_color(dbg, lv_color_hex(0x101820), 0);
+    lv_obj_set_style_text_color(dbg, lv_color_white(), 0);
+    lv_obj_clear_flag(dbg, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *label = lv_label_create(dbg);
+    lv_label_set_text(label, "HELLO AMOLED");
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_24, 0);
+    lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
+
+    lv_disp_load_scr(dbg);
+#else
     ui_main_init(g_disp);
     ui_main_set_gear(g_cachedGear);
     ui_main_set_shiftlight(g_cachedShift);
@@ -428,12 +432,11 @@ void display_s3_init()
     {
         ui_main_show_test_logo();
     }
-
-    panel_self_test();
+#endif
 
     g_displayReady = true;
-    g_lastTick = millis();
-    ESP_LOGI(TAG, "Display + touch initialized");
+    g_lastLvglRun = millis();
+    ESP_LOGI(TAG, "Display + LVGL init done (S3 AMOLED)");
 }
 
 bool display_s3_ready()
@@ -446,16 +449,19 @@ void display_s3_loop()
     if (!g_displayReady)
         return;
 
-    uint32_t now = millis();
-    uint32_t elapsed = now - g_lastTick;
-    lv_tick_inc(elapsed);
-    g_lastTick = now;
-
     WifiStatus wifiStatus = getWifiStatus();
     const bool wifiConnected = wifiStatus.staConnected || wifiStatus.apActive;
     const bool wifiConnecting = wifiStatus.staConnecting || wifiStatus.scanRunning;
 
     ui_main_update_status(wifiConnected, wifiConnecting, g_connected, g_bleConnectInProgress);
+
+    const uint32_t now = millis();
+    if (now - g_lastLvglRun >= 5)
+    {
+        lv_timer_handler();
+        g_lastLvglRun = now;
+    }
+
     ui_main_loop();
 }
 
