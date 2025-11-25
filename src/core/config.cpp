@@ -57,7 +57,16 @@ void loadConfig()
     Preferences prefs;
     if (!prefs.begin(PREF_NAMESPACE, true))
     {
-        return;
+        // Namespace missing yet – open writable once to create it so future reads don't fail
+        if (prefs.begin(PREF_NAMESPACE, false))
+        {
+            prefs.end();
+            prefs.begin(PREF_NAMESPACE, true);
+        }
+        else
+        {
+            return;
+        }
     }
 
     cfg.autoScaleMaxRpm = prefs.getBool("autoscale", cfg.autoScaleMaxRpm);
