@@ -281,25 +281,40 @@ void display_s3_init()
 
     lv_init();
 
-    size_t bufSize = LCD_H_RES * LVGL_BUFFER_LINES * sizeof(lv_color_t);
-    g_buf1 = static_cast<lv_color_t *>(heap_caps_malloc(bufSize, MALLOC_CAP_DMA));
-    g_buf2 = static_cast<lv_color_t *>(heap_caps_malloc(bufSize, MALLOC_CAP_DMA));
-    if (!g_buf1 || !g_buf2)
+    // Allocate DMA-capable draw buffers. If the default height is too large for internal RAM,
+    // progressively reduce the line count until DMA allocation succeeds.
+    int bufLines = LVGL_BUFFER_LINES;
+    auto try_alloc_buffers = [&](int lines) {
+        const size_t bufSize = LCD_H_RES * lines * sizeof(lv_color_t);
+        g_buf1 = static_cast<lv_color_t *>(heap_caps_malloc(bufSize, MALLOC_CAP_DMA));
+        g_buf2 = static_cast<lv_color_t *>(heap_caps_malloc(bufSize, MALLOC_CAP_DMA));
+        return g_buf1 && g_buf2;
+    };
+
+    while (bufLines >= 16 && !try_alloc_buffers(bufLines))
     {
-        // fallback to non-DMA heap if necessary
-        if (!g_buf1)
-            g_buf1 = new lv_color_t[LCD_H_RES * LVGL_BUFFER_LINES];
-        if (!g_buf2)
-            g_buf2 = new lv_color_t[LCD_H_RES * LVGL_BUFFER_LINES];
+        ESP_LOGW(TAG, "LVGL DMA buffer alloc failed for %d lines, retrying with half the height", bufLines);
+        if (g_buf1)
+        {
+            heap_caps_free(g_buf1);
+            g_buf1 = nullptr;
+        }
+        if (g_buf2)
+        {
+            heap_caps_free(g_buf2);
+            g_buf2 = nullptr;
+        }
+        bufLines /= 2;
     }
 
     if (!g_buf1 || !g_buf2)
     {
-        ESP_LOGE(TAG, "Failed to allocate LVGL buffers");
+        ESP_LOGE(TAG, "Failed to allocate LVGL DMA buffers");
         return;
     }
 
-    lv_disp_draw_buf_init(&g_drawBuf, g_buf1, g_buf2, LCD_H_RES * LVGL_BUFFER_LINES);
+    ESP_LOGI(TAG, "LVGL draw buffers: %d lines (%zu bytes each)", bufLines, static_cast<size_t>(LCD_H_RES * bufLines * sizeof(lv_color_t)));
+    lv_disp_draw_buf_init(&g_drawBuf, g_buf1, g_buf2, LCD_H_RES * bufLines);
 
     spi_bus_config_t buscfg = SH8601_PANEL_BUS_QSPI_CONFIG(
         PIN_LCD_CLK,
@@ -375,6 +390,11 @@ void display_s3_init()
         ESP_LOGE(TAG, "panel_disp_on failed");
         return;
     }
+
+    esp_lcd_panel_io_callbacks_t cbs = {
+        .on_color_trans_done = notify_flush_ready,
+    };
+    esp_lcd_panel_io_register_event_callbacks(g_panelIo, &cbs, &g_dispDrv);
 
     lv_disp_drv_init(&g_dispDrv);
     g_dispDrv.hor_res = LCD_H_RES;
