@@ -52,6 +52,24 @@ namespace
     static esp_lcd_panel_handle_t g_panel = nullptr;
     static esp_lcd_panel_io_handle_t g_panelIo = nullptr;
 
+    void lv_rounder_cb(lv_disp_drv_t *disp_drv, lv_area_t *area)
+    {
+        (void)disp_drv;
+
+        uint16_t x1 = area->x1;
+        uint16_t x2 = area->x2;
+        uint16_t y1 = area->y1;
+        uint16_t y2 = area->y2;
+
+        // Startkoordinaten auf gerade Werte runden
+        area->x1 = (x1 >> 1) << 1;
+        area->y1 = (y1 >> 1) << 1;
+
+        // Endkoordinaten auf „2N+1“ runden
+        area->x2 = ((x2 >> 1) << 1) + 1;
+        area->y2 = ((y2 >> 1) << 1) + 1;
+    }
+
     struct TouchPoint
     {
         bool touched = false;
@@ -102,6 +120,39 @@ namespace
         return ok;
     }
 
+    void panel_self_test()
+    {
+        if (!g_panel)
+        {
+            ESP_LOGE(TAG, "panel_self_test: panel handle is null");
+            return;
+        }
+
+        // Einfacher Streifen über die ganze Breite, 40 Zeilen hoch
+        static lv_color_t test_buf[LCD_H_RES * 40];
+
+        // Komplett in Rot füllen
+        for (int i = 0; i < LCD_H_RES * 40; ++i)
+        {
+            test_buf[i] = lv_color_hex(0xFF0000); // knallrot
+        }
+
+        esp_err_t err = esp_lcd_panel_draw_bitmap(
+            g_panel,
+            0, 0,
+            LCD_H_RES, 40,
+            test_buf);
+
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "panel_self_test: draw_bitmap failed: %d", (int)err);
+        }
+        else
+        {
+            ESP_LOGI(TAG, "panel_self_test: draw_bitmap ok");
+        }
+    }
+
     TouchPoint ft3168_read_touch()
     {
         TouchPoint p{false, 0, 0};
@@ -149,6 +200,7 @@ namespace
     {
         if (!g_panel)
         {
+            ESP_LOGW(TAG, "flush_cb: no panel");
             lv_disp_flush_ready(disp);
             return;
         }
@@ -158,6 +210,8 @@ namespace
             lv_disp_flush_ready(disp);
             return;
         }
+
+        ESP_LOGD(TAG, "flush_cb: area x1=%d y1=%d x2=%d y2=%d", area->x1, area->y1, area->x2, area->y2);
 
         esp_lcd_panel_handle_t panel = static_cast<esp_lcd_panel_handle_t>(disp->user_data);
         esp_err_t err = esp_lcd_panel_draw_bitmap(panel, area->x1, area->y1, area->x2 + 1, area->y2 + 1, color_p);
@@ -309,7 +363,7 @@ void display_s3_init()
 
     esp_lcd_panel_dev_config_t panel_config = {
         .reset_gpio_num = PIN_LCD_RST,
-        .color_space = ESP_LCD_COLOR_SPACE_RGB,
+        .color_space = ESP_LCD_COLOR_SPACE_BGR,
         .bits_per_pixel = 16,
         .vendor_config = &vendor_config,
     };
@@ -329,7 +383,7 @@ void display_s3_init()
         ESP_LOGE(TAG, "panel_init failed");
         return;
     }
-    if (esp_lcd_panel_set_gap(g_panel, LCD_X_OFFSET, 0) != ESP_OK)
+    if (esp_lcd_panel_set_gap(g_panel, 0, 0) != ESP_OK)
     {
         ESP_LOGE(TAG, "panel_set_gap failed");
         return;
@@ -346,6 +400,10 @@ void display_s3_init()
     g_dispDrv.flush_cb = display_flush_cb;
     g_dispDrv.draw_buf = &g_drawBuf;
     g_dispDrv.user_data = g_panel;
+
+    // WICHTIG: Rounder wie im offiziellen Beispiel
+    g_dispDrv.rounder_cb = lv_rounder_cb;
+
     g_disp = lv_disp_drv_register(&g_dispDrv);
 
     g_touchReady = Wire.begin(PIN_TOUCH_SDA, PIN_TOUCH_SCL, 400000U) && ft3168_init();
@@ -370,6 +428,8 @@ void display_s3_init()
     {
         ui_main_show_test_logo();
     }
+
+    panel_self_test();
 
     g_displayReady = true;
     g_lastTick = millis();
