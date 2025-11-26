@@ -215,4 +215,54 @@ void displaySetShiftBlink(bool active)
     renderGearDisplay();
 }
 
+DisplayDebugInfo displayGetDebugInfo()
+{
+    DisplayDebugInfo info{};
+    info.initAttempted = g_displayInitialized;
+    info.ready = g_displayInitialized;
+    info.buffersAllocated = g_displayInitialized;
+    info.panelInitialized = g_displayInitialized;
+    info.touchReady = false;
+    info.tickFallback = false;
+    info.debugSimpleUi = false;
+    info.lastLvglRunMs = 0;
+    info.lastError = g_displayInitialized ? "" : "display-not-initialized";
+    return info;
+}
+
+void displayShowDebugPattern(DisplayDebugPattern pattern)
+{
+    if (!g_displayInitialized)
+        return;
+
+    switch (pattern)
+    {
+    case DisplayDebugPattern::ColorBars:
+        tft.fillScreen(ST77XX_RED);
+        delay(150);
+        tft.fillScreen(ST77XX_GREEN);
+        delay(150);
+        tft.fillScreen(ST77XX_BLUE);
+        delay(150);
+        tft.fillScreen(ST77XX_WHITE);
+        delay(150);
+        break;
+    case DisplayDebugPattern::Grid:
+        tft.fillScreen(ST77XX_BLACK);
+        for (int y = 0; y < tft.height(); y += 20)
+        {
+            for (int x = 0; x < tft.width(); x += 20)
+            {
+                uint16_t color = ((x / 20 + y / 20) % 2 == 0) ? ST77XX_WHITE : ST77XX_BLUE;
+                tft.fillRect(x, y, 18, 18, color);
+            }
+        }
+        break;
+    case DisplayDebugPattern::UiLabel:
+    default:
+        displayShowTestLogo();
+        break;
+    }
+}
+
 #endif // !defined(CONFIG_IDF_TARGET_ESP32S3)
