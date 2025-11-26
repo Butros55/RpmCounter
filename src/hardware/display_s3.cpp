@@ -2,30 +2,25 @@
 
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
 
+#include <Arduino.h>
 #include <esp_err.h>
 #include <lvgl.h>
 #include <esp_heap_caps.h>
-#include <esp_lcd_panel_io.h>
-#include <esp_lcd_panel_ops.h>
-#include <esp_lcd_panel_vendor.h>
-#include <esp_lcd_types.h>
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <driver/gpio.h>
 #include <driver/i2c.h>
-#include <driver/spi_master.h>
+#include <Arduino_GFX_Library.h>
 
 #include "core/wifi.h"
 #include "core/state.h"
 #include "hardware/display.h"
 #include "ui/ui_main.h"
-#include "esp_lcd_sh8601.h"
 
 namespace
 {
     constexpr int LCD_H_RES = 280;
     constexpr int LCD_V_RES = 456;
-    constexpr int LCD_X_OFFSET = 0x14;
     constexpr int LCD_BIT_PER_PIXEL = 16;
     constexpr int LVGL_BUFFER_LINES = LCD_V_RES / 4;
     constexpr int LVGL_TICK_PERIOD_MS = 2;
@@ -43,7 +38,7 @@ namespace
     constexpr i2c_port_t TOUCH_PORT = I2C_NUM_0;
 
 // Enable to show a minimal debug UI instead of the full application UI
-#define DISPLAY_DEBUG_SIMPLE_UI 1
+#define DISPLAY_DEBUG_SIMPLE_UI 0
 
     static const char *TAG = "display_s3";
 
@@ -58,8 +53,8 @@ namespace
     static bool g_cachedShift = false;
     static bool g_logoRequested = false;
     static uint32_t g_lastLvglRun = 0;
-    static esp_lcd_panel_handle_t g_panel = nullptr;
-    static esp_lcd_panel_io_handle_t g_panelIo = nullptr;
+    static Arduino_DataBus *g_bus = nullptr;
+    static Arduino_GFX *g_gfx = nullptr;
     static esp_timer_handle_t g_lvglTickTimer = nullptr;
     static bool g_tickFallback = false;
     static bool g_buffersAllocated = false;
@@ -193,34 +188,18 @@ namespace
 
     void display_flush_cb(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p)
     {
-        if (!g_panel)
+        if (!g_gfx)
         {
             ESP_LOGW(TAG, "flush_cb: no panel");
             lv_disp_flush_ready(disp_drv);
             return;
         }
 
-        const int offsetx1 = area->x1 + LCD_X_OFFSET;
-        const int offsetx2 = area->x2 + LCD_X_OFFSET;
-        const int offsety1 = area->y1;
-        const int offsety2 = area->y2;
+        const int width = area->x2 - area->x1 + 1;
+        const int height = area->y2 - area->y1 + 1;
 
-        esp_lcd_panel_handle_t panel = static_cast<esp_lcd_panel_handle_t>(disp_drv->user_data);
-        esp_err_t err = esp_lcd_panel_draw_bitmap(panel, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1, color_p);
-        if (err != ESP_OK)
-        {
-            ESP_LOGE(TAG, "panel_draw_bitmap failed: %d", static_cast<int>(err));
-            lv_disp_flush_ready(disp_drv);
-        }
-    }
-
-    bool handle_color_trans_done(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_t *, void *user_ctx)
-    {
-        if (user_ctx)
-        {
-            lv_disp_flush_ready(static_cast<lv_disp_drv_t *>(user_ctx));
-        }
-        return false;
+        g_gfx->draw16bitRGBBitmap(area->x1, area->y1, reinterpret_cast<const uint16_t *>(color_p), width, height);
+        lv_disp_flush_ready(disp_drv);
     }
 
     void touch_read_cb(lv_indev_drv_t *, lv_indev_data_t *data)
@@ -331,100 +310,18 @@ void display_s3_init()
 
     lv_disp_draw_buf_init(&g_drawBuf, g_buf1, g_buf2, LCD_H_RES * LVGL_BUFFER_LINES);
 
-    spi_bus_config_t buscfg = SH8601_PANEL_BUS_QSPI_CONFIG(
-        PIN_LCD_CLK,
-        PIN_LCD_D0,
-        PIN_LCD_D1,
-        PIN_LCD_D2,
-        PIN_LCD_D3,
-        LCD_H_RES * LCD_V_RES * LCD_BIT_PER_PIXEL / 8);
-    esp_err_t err = spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO);
-    if (err != ESP_OK)
+    g_bus = new Arduino_ESP32QSPI(PIN_LCD_CS, PIN_LCD_CLK, PIN_LCD_D0, PIN_LCD_D1, PIN_LCD_D2, PIN_LCD_D3);
+    g_gfx = new Arduino_CO5300(g_bus, PIN_LCD_RST, 0, LCD_H_RES, LCD_V_RES);
+
+    if (!g_gfx->begin())
     {
-        ESP_LOGE(TAG, "spi_bus_initialize failed: %d", static_cast<int>(err));
-        setLastError("spi-bus-init-failed");
+        ESP_LOGE(TAG, "Arduino_GFX begin failed");
+        setLastError("gfx-begin-failed");
         return;
     }
 
-    esp_lcd_panel_io_spi_config_t io_config = {
-        .cs_gpio_num = PIN_LCD_CS,
-        .dc_gpio_num = -1,
-        .spi_mode = 0,
-        .pclk_hz = 40 * 1000 * 1000,
-        .trans_queue_depth = 10,
-        .on_color_trans_done = handle_color_trans_done,
-        .user_ctx = &g_dispDrv,
-        .lcd_cmd_bits = 32,
-        .lcd_param_bits = 8,
-    };
-    err = esp_lcd_new_panel_io_spi(reinterpret_cast<esp_lcd_spi_bus_handle_t>(SPI2_HOST), &io_config, &g_panelIo);
-    if (err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "new_panel_io_spi failed: %d", static_cast<int>(err));
-        setLastError("panel-io-init-failed");
-        return;
-    }
-
-    static const uint8_t cmd_11[] = {0x00};
-    static const uint8_t cmd_c4[] = {0x80};
-    static const uint8_t cmd_35[] = {0x00};
-    static const uint8_t cmd_53[] = {0x20};
-    static const uint8_t cmd_63[] = {0xFF};
-    static const uint8_t cmd_51_0[] = {0x00};
-    static const uint8_t cmd_29[] = {0x00};
-    static const uint8_t cmd_51_ff[] = {0xFF};
-    static const sh8601_lcd_init_cmd_t lcd_init_cmds[] = {
-        {0x11, cmd_11, sizeof(cmd_11), 80},
-        {0xC4, cmd_c4, sizeof(cmd_c4), 0},
-        {0x35, cmd_35, sizeof(cmd_35), 0},
-        {0x53, cmd_53, sizeof(cmd_53), 1},
-        {0x63, cmd_63, sizeof(cmd_63), 1},
-        {0x51, cmd_51_0, sizeof(cmd_51_0), 1},
-        {0x29, cmd_29, sizeof(cmd_29), 10},
-        {0x51, cmd_51_ff, sizeof(cmd_51_ff), 0},
-    };
-
-    sh8601_vendor_config_t vendor_config = {
-        .init_cmds = lcd_init_cmds,
-        .init_cmds_size = sizeof(lcd_init_cmds) / sizeof(lcd_init_cmds[0]),
-        .flags = {.use_qspi_interface = 1},
-    };
-
-    esp_lcd_panel_dev_config_t panel_config = {
-        .reset_gpio_num = PIN_LCD_RST,
-        .color_space = ESP_LCD_COLOR_SPACE_RGB,
-        .bits_per_pixel = LCD_BIT_PER_PIXEL,
-        .flags = {
-            .reset_active_high = 0,
-        },
-        .vendor_config = &vendor_config,
-    };
-    err = esp_lcd_new_panel_sh8601(g_panelIo, &panel_config, &g_panel);
-    if (err != ESP_OK)
-    {
-        ESP_LOGE(TAG, "new_panel_sh8601 failed: %d", static_cast<int>(err));
-        setLastError("panel-new-failed");
-        return;
-    }
-    if (esp_lcd_panel_reset(g_panel) != ESP_OK)
-    {
-        ESP_LOGE(TAG, "panel_reset failed");
-        setLastError("panel-reset-failed");
-        return;
-    }
-    if (esp_lcd_panel_init(g_panel) != ESP_OK)
-    {
-        ESP_LOGE(TAG, "panel_init failed");
-        setLastError("panel-init-failed");
-        return;
-    }
-    if (esp_lcd_panel_disp_on_off(g_panel, true) != ESP_OK)
-    {
-        ESP_LOGE(TAG, "panel_disp_on failed");
-        setLastError("panel-disp-on-failed");
-        return;
-    }
-
+    g_gfx->setBrightness(255);
+    g_gfx->fillScreen(BLACK);
     g_panelReady = true;
 
     lv_disp_drv_init(&g_dispDrv);
@@ -432,7 +329,7 @@ void display_s3_init()
     g_dispDrv.ver_res = LCD_V_RES;
     g_dispDrv.flush_cb = display_flush_cb;
     g_dispDrv.draw_buf = &g_drawBuf;
-    g_dispDrv.user_data = g_panel;
+    g_dispDrv.user_data = g_gfx;
 
     // WICHTIG: Rounder wie im offiziellen Beispiel
     g_dispDrv.rounder_cb = lv_rounder_cb;
@@ -475,19 +372,6 @@ void display_s3_init()
         ESP_LOGW(TAG, "Failed to start LVGL tick timer, using loop fallback");
     }
 
-#if DISPLAY_DEBUG_SIMPLE_UI
-    lv_obj_t *dbg = lv_obj_create(nullptr);
-    lv_obj_set_style_bg_color(dbg, lv_color_hex(0x101820), 0);
-    lv_obj_set_style_text_color(dbg, lv_color_white(), 0);
-    lv_obj_clear_flag(dbg, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t *label = lv_label_create(dbg);
-    lv_label_set_text(label, "HELLO AMOLED");
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_24, 0);
-    lv_obj_align(label, LV_ALIGN_CENTER, 0, 0);
-
-    lv_disp_load_scr(dbg);
-#else
     ui_main_init(g_disp);
     ui_main_set_gear(g_cachedGear);
     ui_main_set_shiftlight(g_cachedShift);
@@ -495,7 +379,6 @@ void display_s3_init()
     {
         ui_main_show_test_logo();
     }
-#endif
 
     g_displayReady = true;
     g_lastLvglRun = millis();
