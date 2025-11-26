@@ -62,6 +62,16 @@ namespace
     static esp_lcd_panel_io_handle_t g_panelIo = nullptr;
     static esp_timer_handle_t g_lvglTickTimer = nullptr;
     static bool g_tickFallback = false;
+    static bool g_buffersAllocated = false;
+    static bool g_panelReady = false;
+    static bool g_initAttempted = false;
+    static bool g_debugSimpleUi = DISPLAY_DEBUG_SIMPLE_UI;
+    static String g_lastError = F("init-not-started");
+
+    void setLastError(const char *msg)
+    {
+        g_lastError = msg;
+    }
 
     void lv_rounder_cb(lv_disp_drv_t *disp_drv, lv_area_t *area)
     {
@@ -236,6 +246,9 @@ void displayClear()
     if (!g_displayReady)
         return;
 
+    if (g_debugSimpleUi)
+        return;
+
     g_cachedShift = false;
     ui_main_set_shiftlight(false);
     ui_main_set_gear(g_cachedGear);
@@ -245,6 +258,9 @@ void displayShowTestLogo()
 {
     g_logoRequested = true;
     if (!g_displayReady)
+        return;
+
+    if (g_debugSimpleUi)
         return;
 
     ui_main_show_test_logo();
@@ -259,6 +275,9 @@ void displaySetGear(int gear)
     if (!g_displayReady)
         return;
 
+    if (g_debugSimpleUi)
+        return;
+
     ui_main_set_gear(gear);
 }
 
@@ -268,11 +287,15 @@ void displaySetShiftBlink(bool active)
     if (!g_displayReady)
         return;
 
+    if (g_debugSimpleUi)
+        return;
+
     ui_main_set_shiftlight(active);
 }
 
 void display_s3_init()
 {
+    g_initAttempted = true;
     if (g_displayReady)
         return;
 
@@ -293,8 +316,11 @@ void display_s3_init()
     if (!g_buf1 || !g_buf2)
     {
         ESP_LOGE(TAG, "Failed to allocate LVGL buffers");
+        setLastError("lvgl-buffer-alloc-failed");
         return;
     }
+
+    g_buffersAllocated = true;
 
     lv_disp_draw_buf_init(&g_drawBuf, g_buf1, g_buf2, LCD_H_RES * LVGL_BUFFER_LINES);
 
@@ -309,6 +335,7 @@ void display_s3_init()
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "spi_bus_initialize failed: %d", static_cast<int>(err));
+        setLastError("spi-bus-init-failed");
         return;
     }
 
@@ -327,6 +354,7 @@ void display_s3_init()
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "new_panel_io_spi failed: %d", static_cast<int>(err));
+        setLastError("panel-io-init-failed");
         return;
     }
 
@@ -368,23 +396,29 @@ void display_s3_init()
     if (err != ESP_OK)
     {
         ESP_LOGE(TAG, "new_panel_sh8601 failed: %d", static_cast<int>(err));
+        setLastError("panel-new-failed");
         return;
     }
     if (esp_lcd_panel_reset(g_panel) != ESP_OK)
     {
         ESP_LOGE(TAG, "panel_reset failed");
+        setLastError("panel-reset-failed");
         return;
     }
     if (esp_lcd_panel_init(g_panel) != ESP_OK)
     {
         ESP_LOGE(TAG, "panel_init failed");
+        setLastError("panel-init-failed");
         return;
     }
     if (esp_lcd_panel_disp_on_off(g_panel, true) != ESP_OK)
     {
         ESP_LOGE(TAG, "panel_disp_on failed");
+        setLastError("panel-disp-on-failed");
         return;
     }
+
+    g_panelReady = true;
 
     lv_disp_drv_init(&g_dispDrv);
     g_dispDrv.hor_res = LCD_H_RES;
@@ -397,6 +431,12 @@ void display_s3_init()
     g_dispDrv.rounder_cb = lv_rounder_cb;
 
     g_disp = lv_disp_drv_register(&g_dispDrv);
+
+    if (!g_disp)
+    {
+        setLastError("lvgl-register-failed");
+        return;
+    }
 
     g_touchReady = ft3168_init();
     if (g_touchReady)
@@ -452,6 +492,7 @@ void display_s3_init()
 
     g_displayReady = true;
     g_lastLvglRun = millis();
+    setLastError("");
     ESP_LOGI(TAG, "Display + LVGL init done (S3 AMOLED)");
 }
 
@@ -465,11 +506,14 @@ void display_s3_loop()
     if (!g_displayReady)
         return;
 
-    WifiStatus wifiStatus = getWifiStatus();
-    const bool wifiConnected = wifiStatus.staConnected || wifiStatus.apActive;
-    const bool wifiConnecting = wifiStatus.staConnecting || wifiStatus.scanRunning;
+    if (!g_debugSimpleUi)
+    {
+        WifiStatus wifiStatus = getWifiStatus();
+        const bool wifiConnected = wifiStatus.staConnected || wifiStatus.apActive;
+        const bool wifiConnecting = wifiStatus.staConnecting || wifiStatus.scanRunning;
 
-    ui_main_update_status(wifiConnected, wifiConnecting, g_connected, g_bleConnectInProgress);
+        ui_main_update_status(wifiConnected, wifiConnecting, g_connected, g_bleConnectInProgress);
+    }
 
     const uint32_t now = millis();
     if (g_tickFallback)
@@ -483,7 +527,117 @@ void display_s3_loop()
         g_lastLvglRun = now;
     }
 
-    ui_main_loop();
+    if (!g_debugSimpleUi)
+    {
+        ui_main_loop();
+    }
+}
+
+DisplayDebugInfo displayGetDebugInfo()
+{
+    DisplayDebugInfo info{};
+    info.initAttempted = g_initAttempted;
+    info.ready = g_displayReady;
+    info.buffersAllocated = g_buffersAllocated;
+    info.panelInitialized = g_panelReady;
+    info.touchReady = g_touchReady;
+    info.tickFallback = g_tickFallback;
+    info.debugSimpleUi = g_debugSimpleUi;
+    info.lastLvglRunMs = g_lastLvglRun;
+    info.lastError = g_lastError;
+    return info;
+}
+
+static lv_obj_t *create_base_debug_screen()
+{
+    lv_obj_t *scr = lv_obj_create(nullptr);
+    lv_obj_set_style_bg_color(scr, lv_color_hex(0x0f1114), 0);
+    lv_obj_set_style_text_color(scr, lv_color_white(), 0);
+    lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_pad_all(scr, 8, 0);
+    return scr;
+}
+
+void displayShowDebugPattern(DisplayDebugPattern pattern)
+{
+    if (!g_displayReady)
+    {
+        setLastError("display-not-ready");
+        return;
+    }
+
+    lv_obj_t *scr = create_base_debug_screen();
+
+    switch (pattern)
+    {
+    case DisplayDebugPattern::ColorBars:
+    {
+        const uint32_t colors[] = {0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00};
+        const int barWidth = LCD_H_RES / 4;
+        for (int i = 0; i < 4; ++i)
+        {
+            lv_obj_t *bar = lv_obj_create(scr);
+            lv_obj_set_size(bar, barWidth, LCD_V_RES);
+            lv_obj_set_style_bg_color(bar, lv_color_hex(colors[i]), 0);
+            lv_obj_set_style_border_width(bar, 0, 0);
+            lv_obj_set_style_radius(bar, 0, 0);
+            lv_obj_align(bar, LV_ALIGN_LEFT_MID, i * barWidth, 0);
+        }
+
+        lv_obj_t *label = lv_label_create(scr);
+        lv_label_set_text(label, "Testbild: Farb-Balken");
+        lv_obj_align(label, LV_ALIGN_TOP_MID, 0, 6);
+        break;
+    }
+    case DisplayDebugPattern::Grid:
+    {
+        const int cols = 6;
+        const int rows = 10;
+        const int cellW = LCD_H_RES / cols;
+        const int cellH = LCD_V_RES / rows;
+        for (int y = 0; y < rows; ++y)
+        {
+            for (int x = 0; x < cols; ++x)
+            {
+                lv_obj_t *cell = lv_obj_create(scr);
+                lv_obj_set_size(cell, cellW - 2, cellH - 2);
+                uint32_t shade = (x + y) % 2 == 0 ? 0x303841 : 0x1c1f24;
+                lv_obj_set_style_bg_color(cell, lv_color_hex(shade), 0);
+                lv_obj_set_style_border_width(cell, 1, 0);
+                lv_obj_set_style_border_color(cell, lv_color_hex(0x555555), 0);
+                lv_obj_set_style_radius(cell, 2, 0);
+                lv_obj_align(cell, LV_ALIGN_TOP_LEFT, x * cellW + 1, y * cellH + 1);
+            }
+        }
+
+        lv_obj_t *label = lv_label_create(scr);
+        lv_label_set_text(label, "Testbild: Raster / Helligkeit");
+        lv_obj_align(label, LV_ALIGN_TOP_MID, 0, 6);
+        break;
+    }
+    case DisplayDebugPattern::UiLabel:
+    default:
+    {
+        lv_obj_t *title = lv_label_create(scr);
+        lv_label_set_text(title, "Display-Debug");
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+        lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 10);
+
+        lv_obj_t *lbl = lv_label_create(scr);
+        String msg = String("Ready: ") + (g_displayReady ? "yes" : "no") + "\n";
+        msg += String("Panel: ") + (g_panelReady ? "ok" : "fail") + "\n";
+        msg += String("Touch: ") + (g_touchReady ? "ok" : "fail") + "\n";
+        msg += String("Tick: ") + (g_tickFallback ? "loop" : "timer") + "\n";
+        msg += String("Error: ") + (g_lastError.length() ? g_lastError : "none");
+        lv_label_set_text(lbl, msg.c_str());
+        lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(lbl, LCD_H_RES - 20);
+        lv_obj_align(lbl, LV_ALIGN_TOP_MID, 0, 60);
+        break;
+    }
+    }
+
+    lv_disp_load_scr(scr);
 }
 
 #endif
