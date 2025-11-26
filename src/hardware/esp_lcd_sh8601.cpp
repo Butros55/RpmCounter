@@ -137,7 +137,7 @@ extern "C" esp_err_t esp_lcd_new_panel_sh8601(const esp_lcd_panel_io_handle_t io
     sh8601->base.set_gap = panel_sh8601_set_gap;
     sh8601->base.mirror = panel_sh8601_mirror;
     sh8601->base.swap_xy = panel_sh8601_swap_xy;
-    sh8601->base.disp_off = panel_sh8601_disp_on_off;
+    sh8601->base.disp_on_off = panel_sh8601_disp_on_off;
     *ret_panel = &(sh8601->base);
     ESP_LOGD(TAG, "new sh8601 panel @%p", sh8601);
     ESP_LOGI(TAG, "LCD panel create success, version: %d.%d.%d", ESP_LCD_SH8601_VER_MAJOR, ESP_LCD_SH8601_VER_MINOR, ESP_LCD_SH8601_VER_PATCH);

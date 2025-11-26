@@ -320,8 +320,8 @@ void display_s3_init()
         return;
     }
 
-    g_gfx->setBrightness(255);
-    g_gfx->fillScreen(BLACK);
+    g_gfx->Display_Brightness(255);
+    g_gfx->fillScreen(0x0000);
     g_panelReady = true;
 
     lv_disp_drv_init(&g_dispDrv);
