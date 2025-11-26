@@ -191,12 +191,12 @@ namespace
         return p;
     }
 
-    void display_flush_cb(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *color_p)
+    void display_flush_cb(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p)
     {
         if (!g_panel)
         {
             ESP_LOGW(TAG, "flush_cb: no panel");
-            lv_disp_flush_ready(disp);
+            lv_disp_flush_ready(disp_drv);
             return;
         }
 
@@ -205,15 +205,22 @@ namespace
         const int offsety1 = area->y1;
         const int offsety2 = area->y2;
 
-        esp_lcd_panel_handle_t panel = static_cast<esp_lcd_panel_handle_t>(disp->user_data);
+        esp_lcd_panel_handle_t panel = static_cast<esp_lcd_panel_handle_t>(disp_drv->user_data);
         esp_err_t err = esp_lcd_panel_draw_bitmap(panel, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1, color_p);
         if (err != ESP_OK)
         {
             ESP_LOGE(TAG, "panel_draw_bitmap failed: %d", static_cast<int>(err));
+            lv_disp_flush_ready(disp_drv);
         }
+    }
 
-        // Always unblock LVGL in case the IO callback doesn't fire (e.g., early errors)
-        lv_disp_flush_ready(disp);
+    bool handle_color_trans_done(esp_lcd_panel_io_handle_t, esp_lcd_panel_io_event_data_t *, void *user_ctx)
+    {
+        if (user_ctx)
+        {
+            lv_disp_flush_ready(static_cast<lv_disp_drv_t *>(user_ctx));
+        }
+        return false;
     }
 
     void touch_read_cb(lv_indev_drv_t *, lv_indev_data_t *data)
@@ -345,8 +352,8 @@ void display_s3_init()
         .spi_mode = 0,
         .pclk_hz = 40 * 1000 * 1000,
         .trans_queue_depth = 10,
-        .on_color_trans_done = nullptr,
-        .user_ctx = nullptr,
+        .on_color_trans_done = handle_color_trans_done,
+        .user_ctx = &g_dispDrv,
         .lcd_cmd_bits = 32,
         .lcd_param_bits = 8,
     };
