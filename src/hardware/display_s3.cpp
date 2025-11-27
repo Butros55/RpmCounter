@@ -9,7 +9,7 @@
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <driver/gpio.h>
-#include <driver/i2c.h>
+#include <Wire.h>
 #include <Arduino_GFX_Library.h>
 
 #include "core/wifi.h"
@@ -19,7 +19,7 @@
 
 namespace
 {
-    constexpr int LCD_H_RES = 280;
+    constexpr int LCD_H_RES = 320;
     constexpr int LCD_V_RES = 456;
     constexpr int LCD_BIT_PER_PIXEL = 16;
     constexpr int LVGL_BUFFER_LINES = LCD_V_RES / 4;
@@ -35,7 +35,7 @@ namespace
     constexpr int PIN_TOUCH_SDA = 47;
     constexpr int PIN_TOUCH_SCL = 48;
     constexpr uint8_t TOUCH_ADDR = 0x38;
-    constexpr i2c_port_t TOUCH_PORT = I2C_NUM_0;
+    constexpr uint32_t TOUCH_I2C_SPEED = 400000;
 
 // Enable to show a minimal debug UI instead of the full application UI
 #define DISPLAY_DEBUG_SIMPLE_UI 0
@@ -62,6 +62,13 @@ namespace
     static bool g_initAttempted = false;
     static bool g_debugSimpleUi = DISPLAY_DEBUG_SIMPLE_UI;
     static String g_lastError = F("init-not-started");
+
+    struct TouchPoint;
+
+    bool ft3168_init();
+    TouchPoint ft3168_read_touch();
+    void touch_read_cb(lv_indev_drv_t *, lv_indev_data_t *);
+    void display_flush_cb(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p);
 
     void setLastError(const char *msg)
     {
@@ -134,7 +141,11 @@ namespace
             return false;
         }
 
-        g_gfx->Display_Brightness(255);
+        Arduino_CO5300 *panel = static_cast<Arduino_CO5300 *>(g_gfx);
+        if (panel)
+        {
+            panel->setBrightness(255);
+        }
         g_panelReady = true;
         return true;
     }
@@ -227,55 +238,50 @@ namespace
 
     bool i2c_write_reg(uint8_t addr, uint8_t reg, const uint8_t *data, size_t len)
     {
-        const size_t bufSize = len + 1;
-        uint8_t *buf = static_cast<uint8_t *>(malloc(bufSize));
-        if (!buf)
-        {
-            return false;
-        }
-        buf[0] = reg;
+        Wire.beginTransmission(addr);
+        Wire.write(reg);
         for (size_t i = 0; i < len; ++i)
         {
-            buf[i + 1] = data[i];
+            Wire.write(data[i]);
         }
-        esp_err_t ret = i2c_master_write_to_device(TOUCH_PORT, addr, buf, bufSize, 1000);
-        free(buf);
-        return ret == ESP_OK;
+        return Wire.endTransmission() == 0;
     }
 
     bool i2c_read_reg(uint8_t addr, uint8_t reg, uint8_t *out, size_t len)
     {
-        esp_err_t ret = i2c_master_write_read_device(TOUCH_PORT, addr, &reg, 1, out, len, 1000);
-        return ret == ESP_OK;
+        Wire.beginTransmission(addr);
+        Wire.write(reg);
+        if (Wire.endTransmission(false) != 0)
+        {
+            return false;
+        }
+
+        size_t received = Wire.requestFrom(addr, static_cast<uint8_t>(len));
+        if (received != len)
+        {
+            return false;
+        }
+        for (size_t i = 0; i < len; ++i)
+        {
+            out[i] = Wire.read();
+        }
+        return true;
     }
 
     bool ft3168_init()
     {
-        i2c_config_t conf = {};
-        conf.mode = I2C_MODE_MASTER;
-        conf.sda_io_num = PIN_TOUCH_SDA;
-        conf.scl_io_num = PIN_TOUCH_SCL;
-        conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
-        conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
-        conf.master.clk_speed = 300 * 1000;
-        conf.clk_flags = 0;
-
-        if (i2c_param_config(TOUCH_PORT, &conf) != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to configure I2C for touch");
-            return false;
-        }
-        if (i2c_driver_install(TOUCH_PORT, conf.mode, 0, 0, 0) != ESP_OK)
-        {
-            ESP_LOGE(TAG, "Failed to install I2C driver for touch");
-            return false;
-        }
+        Wire.begin(PIN_TOUCH_SDA, PIN_TOUCH_SCL);
+        Wire.setClock(TOUCH_I2C_SPEED);
 
         uint8_t mode = 0x00;
         bool ok = i2c_write_reg(TOUCH_ADDR, 0x00, &mode, 1);
         if (!ok)
         {
             ESP_LOGW(TAG, "FT3168 init failed");
+        }
+        else
+        {
+            ESP_LOGI(TAG, "FT3168 touch initialized on Wire");
         }
         return ok;
     }

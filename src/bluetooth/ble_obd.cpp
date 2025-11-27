@@ -518,16 +518,25 @@ bool startBleScan(uint32_t durationSeconds)
         pScan->setWindow(60);
         vTaskDelay(pdMS_TO_TICKS(2));
 
-        BleScanResults results = pScan->start(duration, false);
+        BleScanResults *results = pScan->start(duration, false);
+        if (results == nullptr)
+        {
+            g_bleScanFinishedMs = millis();
+            g_bleScanRunning = false;
+            LOG_ERROR("BLE", "BLE_SCAN_NULL", "scan returned no results");
+            vTaskDelete(nullptr);
+            return;
+        }
+
         g_bleScanResults.clear();
-        int count = results.getCount();
+        int count = results->getCount();
         for (int i = 0; i < count; i++)
         {
-            BleAdvertisedDevice dev = results.getDevice(i);
+            BleAdvertisedDevice dev = results->getDevice(i);
             BleDeviceInfo info;
             info.address = String(dev.getAddress().toString().c_str());
-            std::string name = dev.getName();
-            info.name = name.empty() ? info.address : String(name.c_str());
+            String name = dev.getName();
+            info.name = name.length() ? name : info.address;
             if (g_autoReconnectPaused && !g_lastSuccessfulAddr.isEmpty() && info.address == g_lastSuccessfulAddr)
             {
                 g_autoReconnectPaused = false;

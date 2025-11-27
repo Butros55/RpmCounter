@@ -2,17 +2,17 @@
 
 namespace
 {
-    LogLevel g_logLevel = static_cast<LogLevel>(DEFAULT_LOG_LEVEL);
+    LogLevel g_logLevel = DEFAULT_LOG_LEVEL;
 
     const char *levelLabel(LogLevel level)
     {
         switch (level)
         {
-        case LOG_LEVEL_ERROR:
+        case LogLevel::Error:
             return "ERROR";
-        case LOG_LEVEL_INFO:
+        case LogLevel::Info:
             return "INFO";
-        case LOG_LEVEL_DEBUG:
+        case LogLevel::Debug:
             return "DEBUG";
         default:
             return "OFF";
@@ -32,7 +32,7 @@ LogLevel getLogLevel()
 
 bool isLogLevelEnabled(LogLevel level)
 {
-    return static_cast<int>(level) <= static_cast<int>(g_logLevel) && level != LOG_LEVEL_NONE;
+    return static_cast<int>(level) <= static_cast<int>(g_logLevel) && level != LogLevel::None;
 }
 
 void logMessage(LogLevel level, const char *source, const char *code, const String &message)
