@@ -1,231 +1,334 @@
-# ✅ AGENTS.md – RpmCounter / ShiftLight (Architektur, Regeln, Display-Pfade)
+# ✅ AGENTS.md – RpmCounter / ShiftLight (Codex Cloud Version)
 
-## 🌟 Projektüberblick
+## 1. Projektüberblick
 
-Dieses Repository enthält die Firmware für ein ShiftLight-/RPM-Anzeige-System auf Basis eines ESP32 (PlatformIO, Arduino).
+Dieses Repository enthält die Firmware für ein ShiftLight-/RPM-Anzeige-System auf Basis eines ESP32, entwickelt mit PlatformIO und dem Arduino-Framework.
 
-Der Code unterstützt mehrere Hardwarevarianten, insbesondere:
+**Unterstützte Funktionen / Features:**
 
-- ältere Boards mit ST7789-Display (240×240)
-- neue Waveshare ESP32-S3 Boards mit 1.64" QSPI AMOLED (280×456)
-- BLE-OBD Anbindung
-- LED-Bar
-- WLAN-Webserver (AP/STA)
-- LVGL-UI
-- NVS-Konfiguration
+- BLE‑OBD‑Anbindung zu einem OBD-II Dongle
+- LED-Bar als ShiftLight
+- Webserver (AP/STA) mit Web‑UI und Konfiguration
+- LVGL‑UI für RPM, Gang, Status, Footer, etc.
+- Konfiguration via NVS/Preferences
+- Mehrere Displaypfade:
+  - „altes" ST7789‑Display (240×240, SPI)
+  - Waveshare ESP32‑S3 Touch AMOLED 1.64" (280×456, QSPI + I²C‑Touch)
 
-**Ziel:**  
-Eine stabile, nicht-blockierende Firmware, bei der BLE, WLAN/AP/STA, LED-Bar, Webserver und Display parallel funktionieren und der Code gut strukturiert (refaktoriert) bleibt.
+**Zielzustand für den Codex‑Agent:**
 
----
-
-## 🧰 Platform & Libraries (wichtige Rahmenbedingungen)
-
-- Build-Umgebung: **PlatformIO**, Umgebung `[env:esp32s3]`
-- Platform (aktuell, Stand Pro-Setup):  
-  `platform = https://github.com/pioarduino/platform-espressif32/releases/download/stable/platform-espressif32.zip`
-- Framework: `arduino`
-- Board: `esp32s3` mit eigener `boards/esp32s3.json` (z. B. T-DisplayS3-Konfiguration, 16 MB Flash, PSRAM)
-
-### BLE-Bibliothek
-
-- Der Arduino Core (3.x) liefert bereits eine eigene BLE-Implementierung (`BLEDevice`, `BLEClient`, …).
-- **Externe Library `ESP32 BLE Arduino` darf NICHT mehr über `lib_deps` eingebunden werden**, da sie sonst Header wie  
-  `esp_gap_ble_api.h`, `esp_gatt_defs.h`, `esp_bt_main.h` etc. nicht findet.
-- Alle BLE-Funktionen (insb. `src/bluetooth/ble_obd.cpp/.h`) müssen gegen die **Core-eigene BLE-Implementierung** kompilieren.
-
-### Display-/GFX-Library
-
-- Für das ESP32-S3 QSPI-AMOLED-Display wird die **GFX Library for Arduino** (`moononournation/GFX Library for Arduino`) verwendet.
-- QSPI-Pfad: `Arduino_ESP32QSPI` + passender Panel-Treiber (z. B. `Arduino_CO5300`) für das SH8601-basierte AMOLED.
+- Das Waveshare‑AMOLED‑Display zeigt eine funktionierende LVGL‑UI an (inkl. Test‑Overlay / Logo).
+- BLE‑OBD funktioniert stabil, sendet RPM + Speed, Gangschätzung funktioniert.
+- Webserver, WiFi AP/STA, LED‑Bar, Logo‑Animationen und State‑Handling funktionieren wie vorher oder besser.
+- Das Projekt baut im Container mit `pio run -e esp32s3` fehlerfrei.
+- Der Code ist konsistent refaktoriert (Architektur, Lesbarkeit, Fehlerbehandlung), ohne Features zu verlieren.
 
 ---
 
-## 🤖 Agent-Modi
+## 2. Arbeitsumgebung für Codex Cloud
 
-### 🟦 STANDARD-MODUS
+Der Agent läuft in einem **Linux-Container** mit Zugriff auf das Git-Repository.
 
-**Der Agent darf:**
-
-- Dateien im Workspace lesen/schreiben
-- Build-/Test-Befehle in **PowerShell** ausführen
-- Logs (Build, serieller Monitor) analysieren
-- architekturgemäße Änderungen und Refactorings vornehmen (auch größere Umbauten im Code)
-
-**Der Agent darf NICHT:**
-
-- Netzwerkbefehle (curl/wget, HTTP-Tools) ausführen
-- Linux/WSL-Syntax verwenden (nur Windows/PowerShell)
-- Dateien außerhalb des Repositories verändern
-
-### 🟩 NETZWERK-DEBUG („FULL ACCESS")
-
-Nur erlaubt, wenn der Nutzer explizit schreibt:
-
-> „Nutze bitte Netzwerk-Debug / full access"
-
-Dann darf der Agent zusätzlich Netzwerkbefehle im LAN ausführen (z. B. Ping/HTTP im internen Netz).
+- Projekt-Root = Ordner, in dem `platformio.ini` liegt.
+- Shell: Standard‑Shell (bash/sh).
+- `pio` (PlatformIO CLI) soll verwendet werden, um Builds im Container auszuführen.
+- **Keine Hardware** angeschlossen → kein Flash/Upload/Serieller Monitor im Container.
+- Internetzugriff ist i. d. R. deaktiviert → keine externen `curl/wget`/HTTP‑Tests.
 
 ---
 
-## ✔ PowerShell-Befehle (Python 3.11, PlatformIO)
+## 3. Was der Agent darf / nicht darf
 
-### Build
+### 3.1 STANDARD-MODUS
 
-```powershell
-'C:\Program Files\PowerShell\7\pwsh.exe' -Command '
-  Set-Location "c:\dev\RpmCounter";
-  $env:PLATFORMIO_HOME_DIR = "$PWD\.pio-home";
-  pio run -e esp32s3
-'
-```
+**Der Agent DARF:**
 
-### Flash
+- Dateien im Workspace lesen und ändern (innerhalb des Repos).
+- Shell‑Befehle im Container ausführen, insbesondere:
+  - `pio run -e esp32s3`
+  - `pio run -e esp32s3 -t clean`
+- `platformio.ini`, `boards/`, `src/`, `include/`, `lib/`, `test/` anpassen.
+- Code umfassend refaktorisieren, solange Funktionalität erhalten bleibt.
+- Logging, Fehlerbehandlung, Struktur und Lesbarkeit verbessern.
 
-```powershell
-'C:\Program Files\PowerShell\7\pwsh.exe' -Command '
-  Set-Location "c:\dev\RpmCounter";
-  $env:PLATFORMIO_HOME_DIR = "$PWD\.pio-home";
-  pio run -e esp32s3 -t upload
-'
-```
+**Der Agent DARF NICHT:**
 
-### Serieller Monitor
-
-```powershell
-'C:\Program Files\PowerShell\7\pwsh.exe' -Command '
-  Set-Location "c:\dev\RpmCounter";
-  $env:PLATFORMIO_HOME_DIR = "$PWD\.pio-home";
-  pio device monitor
-'
-```
-
-### Clean
-
-```powershell
-'C:\Program Files\PowerShell\7\pwsh.exe' -Command '
-  Set-Location "c:\dev\RpmCounter";
-  $env:PLATFORMIO_HOME_DIR = "$PWD\.pio-home";
-  pio run -e esp32s3 -t clean
-'
-```
-
-### Full-Clean (falls nötig)
-
-```powershell
-'C:\Program Files\PowerShell\7\pwsh.exe' -Command '
-  Set-Location "c:\dev\RpmCounter";
-  $env:PLATFORMIO_HOME_DIR = "$PWD\.pio-home";
-  pio run -e esp32s3 -t fullclean
-'
-```
-
-## 🧹 Build-Clean & .pio-Probleme
-
-### Typische Fehler
-
-- **WinError 5** – Zugriff verweigert
-  → In diesem Fall den Nutzer explizit nach Permission fragen.
-  Nachdem der Nutzer „Allow for this session" bestätigt hat, kann der Agent den Clean erneut versuchen.
-- **„Can not remove temporary directory .pio\build …"**
-
-### Eskalationsstufen
-
-#### 1) Normaler Clean
-
-```powershell
-'C:\Program Files\PowerShell\7\pwsh.exe' -Command '
-  Set-Location "c:\dev\RpmCounter";
-  $env:PLATFORMIO_HOME_DIR = "$PWD\.pio-home";
-  pio run -e esp32s3 -t clean
-'
-```
-
-#### 2) Full-Clean
-
-```powershell
-'C:\Program Files\PowerShell\7\pwsh.exe' -Command '
-  Set-Location "c:\dev\RpmCounter";
-  $env:PLATFORMIO_HOME_DIR = "$PWD\.pio-home";
-  pio run -e esp32s3 -t fullclean
-'
-```
-
-#### 3) .pio\build hart löschen (nur wenn PlatformIO ausdrücklich scheitert!)
-
-````
-
-**Wenn immer noch „Access Denied":**
-Nutzer informieren, dass ein Prozess den Ordner blockiert (VS Code, Monitor, Explorer, PlatformIO Build-Prozess).
+- Dateien außerhalb dieses Repositories verändern.
+- Upload/Flash‑Befehle ausführen, die echte Hardware voraussetzen (`pio run -t upload`, `pio device monitor`) – diese sind im Container nicht notwendig.
+- Netzwerkbefehle wie `curl`, `wget` zu externen Hosts verwenden.
+- Projektarchitektur zerstören (z. B. alles in eine Datei schieben).
 
 ---
 
-## 🖥️ Display- & LVGL-Regeln
+## 4. Build- & Clean-Befehle (Container)
 
-Das Projekt unterstützt zwei klar getrennte Displaypfade:
+Alle Befehle werden vom **Projekt-Root** (dort, wo `platformio.ini` liegt) ausgeführt.
 
-### 1) hardware/display.cpp (ST7789, 240×240)
+### 4.1 Normaler Build (Pflicht)
 
-- ✔ Bleibt erhalten
-- ✔ Wird für ältere Boards verwendet
-- ✔ Darf NICHT gelöscht werden
-- ✔ Darf weiterhin die ST7789-Library nutzen
+```sh
+pio run -e esp32s3
+```
 
-Damit bleibt das komplette bisherige Paket kompatibel.
+Der Agent MUSS diesen Build-Befehl regelmäßig ausführen:
 
-### 2) hardware/display_s3.cpp (Waveshare ESP32-S3 AMOLED)
+- nach wesentlichen Änderungen an Code/Config
+- mindestens einmal, bevor er einen Task als „fertig" betrachtet
 
-- ❗ Dieses Display ist kein ST7789
-- ❗ Dieses Display ist ein QSPI AMOLED (280×456) mit SH8601
-- ❗ Daher darf in display_s3.cpp KEIN ST7789-Code mehr existieren
+**Ziel:** Build ohne Fehler (0 Errors).
 
-#### ✔ Anforderungen an den ESP32-S3-Pfad
+### 4.2 Clean
 
-- **Displaytyp:** Waveshare 1.64" AMOLED
-- **Interface:** QSPI (6-Pin: CLK, CS, D0–D3)
-- **Auflösung:** 280 × 456 Pixel
-- **Farbtiefe:** 16 Bit
-- **Touch:** FT3168, I²C (GPIO 47/48)
+```sh
+pio run -e esp32s3 -t clean
+```
 
-#### ✔ Pinbelegung (laut Waveshare-Pinout)
+### 4.3 Full-Clean (falls nötig)
 
-| AMOLED Pin   | ESP32-S3 GPIO | Verwendung       |
-| ------------ | ------------- | ---------------- |
-| QSPI_CS      | GPIO 9        | CS               |
-| QSPI_CLK     | GPIO 10       | Clock            |
-| QSPI_D0      | GPIO 11       | Data0            |
-| QSPI_D1      | GPIO 12       | Data1            |
-| QSPI_D2      | GPIO 13       | Data2            |
-| QSPI_D3      | GPIO 14       | Data3            |
-| AMOLED_RESET | GPIO 21       | Reset (optional) |
-| TP_SDA       | GPIO 47       | Touch I²C SDA    |
-| TP_SCL       | GPIO 48       | Touch I²C SCL    |
+```sh
+pio run -e esp32s3 -t fullclean
+```
 
-#### ✔ LVGL-Konfiguration
+### 4.4 Verhalten bei Build-Fehlern
 
-`include/lv_conf.h` MUSS für den S3-Pfad diese Werte widerspiegeln:
+1. Build ausführen (`pio run -e esp32s3`).
+2. Alle Fehler im Output analysieren.
+3. Code/Config anpassen, um die Fehler zu beheben.
+4. Erneut `pio run -e esp32s3` ausführen.
+5. Diesen Zyklus wiederholen, bis ein fehlerfreier Build erreicht ist oder keine sinnvollen, sicheren Änderungen mehr möglich sind.
+
+---
+
+## 5. PlatformIO / Toolchain / Libraries
+
+### 5.1 Umgebung in platformio.ini
+
+Die relevante Umgebung ist:
+
+```ini
+[env:esp32s3]
+platform = https://github.com/pioarduino/platform-espressif32/releases/download/stable/platform-espressif32.zip
+framework = arduino
+board = esp32s3
+monitor_speed = 115200
+monitor_filters = esp32_exception_decoder
+test_framework = unity
+test_build_src = yes
+upload_port = COM4
+monitor_port = COM4
+
+lib_deps =
+  Adafruit NeoPixel
+  ESP32 BLE Arduino
+  moononournation/GFX Library for Arduino@1.6.3
+  lvgl@^8.3.11
+
+build_flags =
+  -DLV_LVGL_H_INCLUDE_SIMPLE
+  -DLV_CONF_INCLUDE_SIMPLE
+  -I include
+  -DCONFIG_IDF_TARGET_ESP32S3
+  -DARDUINO_USB_CDC_ON_BOOT=1
+  -DARDUINO_USB_MODE=1
+```
+
+**Hinweis:** COM‑Ports betreffen nur die lokale Entwicklungsumgebung des Nutzers.
+Im Container sind sie für den Build nicht relevant und können ignoriert werden.
+
+### 5.2 BLE-Bibliothek (wichtig)
+
+Der Arduino‑ESP32 Core 3.x bringt selbst eine BLE-Implementierung (`BLEDevice`, `BLEClient`, …) mit.
+
+**Ziel:** BLE‑Code in `src/bluetooth/ble_obd.cpp/.h` soll ohne externe ESP32 BLE Arduino-Lib kompilieren, idealerweise nur mit der BLE‑Library des Cores.
+
+**Der Agent SOLL:**
+
+- prüfen, ob `ESP32 BLE Arduino` in `lib_deps` wirklich nötig ist.
+- wenn diese externe Lib Buildfehler verursacht (fehlende `esp_gap_ble_api.h`, `esp_gatt_defs.h`, …), die BLE‑Nutzung auf die im Core enthaltene BLE‑Library migrieren:
+  - `#include <BLEDevice.h>`, etc. können bleiben,
+  - aber die Includes müssen aus dem Core stammen, nicht aus einer inkompatiblen externen Version.
+- `ESP32 BLE Arduino` aus `lib_deps` entfernen, falls sie inkompatibel ist und die Core‑BLE‑Implementierung ausreicht.
+
+### 5.3 Display-/GFX-Library
+
+Für das ESP32‑S3 QSPI‑AMOLED‑Display wird die **GFX Library for Arduino** verwendet:
+`moononournation/GFX Library for Arduino@1.6.3`
+
+**QSPI-Pfad:**
+
+- Datenbus: `Arduino_ESP32QSPI`
+- Panel: `Arduino_CO5300` (oder anderer geeigneter Treiber für SH8601‑basierte AMOLED‑Panels)
+
+Der Agent darf, falls nötig:
+
+- innerhalb dieser Library die korrekten Panel‑Constructor‑Parameter einsetzen,
+- die Initialisierung anpassen (Brightness, Rotation, etc.), um das Panel lauffähig zu bekommen.
+
+---
+
+## 6. Display- & LVGL-Regeln
+
+### 6.1 ST7789-Pfad (alte Hardware)
+
+**Dateien:**
+
+- `src/hardware/display.cpp`
+- `src/hardware/display.h`
+
+**Typ:**
+
+- ST7789, 240×240, SPI
+
+**MUSS erhalten bleiben.**
+
+- Darf NICHT entfernt oder durch AMOLED‑Code ersetzt werden.
+- Darf weiterhin ST7789/Adafruit‑Libs verwenden.
+
+### 6.2 ESP32-S3 AMOLED Pfad (Waveshare 1.64" QSPI)
+
+**Dateien:**
+
+- `src/hardware/display_s3.cpp`
+- `src/hardware/display_s3.h`
+
+**Board:**
+
+- Waveshare ESP32‑S3 Touch AMOLED 1.64" oder kompatibles Layout
+
+**Display:**
+
+- Typ: QSPI AMOLED (SH8601/CO5300)
+- Auflösung: 280×456
+- Interface: QSPI (CS, CLK, D0–D3), Reset separat
+
+**Touch:**
+
+- Controller: FT3168 (I²C)
+- SDA: GPIO 47
+- SCL: GPIO 48
+
+#### 6.2.1 Pinbelegung (AMOLED)
+
+| AMOLED Pin   | ESP32-S3 GPIO | Verwendung    |
+| ------------ | ------------- | ------------- |
+| QSPI_CS      | 9             | CS            |
+| QSPI_CLK     | 10            | Clock         |
+| QSPI_D0      | 11            | Data0         |
+| QSPI_D1      | 12            | Data1         |
+| QSPI_D2      | 13            | Data2         |
+| QSPI_D3      | 14            | Data3         |
+| AMOLED_RESET | 21            | Reset         |
+| TP_SDA       | 47            | Touch I²C SDA |
+| TP_SCL       | 48            | Touch I²C SCL |
+
+#### 6.2.2 LVGL-Konfiguration
+
+`include/lv_conf.h` MUSS für den S3‑Pfad konsistent sein:
 
 ```c
 #define LV_HOR_RES_MAX 280
 #define LV_VER_RES_MAX 456
 #define LV_COLOR_DEPTH 16
-````
+```
 
-Rotation/Orientierung muss konsistent mit dem Displaytreiber sein.
+Rotation/Orientierung muss mit dem Displaytreiber übereinstimmen.
+
+#### 6.2.3 Treiber-Stack (Sollzustand für display_s3.cpp)
+
+**Datenbus:**
+
+- `Arduino_ESP32QSPI` mit den oben genannten Pins.
+
+**Panel:**
+
+- `Arduino_CO5300` (oder ein anderer, passender Arduino_GFX‑Treiber für SH8601).
+
+**LVGL‑Integration:**
+
+- Zwei DMA‑fähige Buffers (`heap_caps_malloc(..., MALLOC_CAP_DMA)` mit Fallback).
+- `lv_disp_draw_buf_init(...)`.
+- `lv_disp_drv_init(...)` mit:
+  - `flush_cb` → `g_gfx->draw16bitRGBBitmap(...)`
+  - `rounder_cb` zur korrekten Ausrichtung.
+- LVGL‑Tick via `esp_timer` oder Fallback im `display_s3_loop()`.
+
+**Strikte Regel:**
+In `display_s3.cpp` darf KEIN ST7789‑Code mehr enthalten sein und keine parallele `esp_lcd_*`‑Panelimplementation, wenn der Weg über Arduino_GFX genutzt wird.
 
 ---
 
-## 🧩 UI-Struktur (nur Architekturregeln)
+## 7. UI- und Anwendungslogik
 
-- `src/ui/ui_main.cpp` ist die zentrale Stelle für LVGL-Screens.
-- Display-Update-Loop fließt über `display_s3_loop()`.
-- Keine blockierenden Operationen (keine langen `delay()` im Hauptloop).
-- Statusanzeigen (WiFi, BLE) laufen über `state.*`.
-- UI-Logik bleibt von Hardwaredetails getrennt (Display-Treiber in `hardware/*`, State/Logik in `core/*`).
+### 7.1 LVGL-UI
+
+**Zentrale UI-Dateien:**
+
+- `src/ui/ui_main.cpp`
+- `src/ui/ui_main.h`
+
+**Aufgaben:**
+
+- Status-Leiste für WiFi/BLE
+- Labels für RPM, Gang, Speed
+- Activity-Bar
+- Footer für ShiftLight‑Status
+- Overlay „AMOLED TEST / Waveshare 1.64""
+
+**S3‑Display-Datenfluss (Soll):**
+
+`display_s3_init()`:
+
+- LVGL initialisieren.
+- GFX‑Panel initialisieren (QSPI, Panel, Helligkeit, Clear-Screen).
+- LVGL‑Display registrieren (inkl. flush_cb, rounder_cb).
+- Touch‑Eingabegerät (FT3168) registrieren.
+- `ui_main_init(g_disp)` aufrufen.
+
+`display_s3_loop()`:
+
+- LVGL‑Tick aktualisieren (`lv_tick_inc` via Timer oder Fallback).
+- `lv_timer_handler()` aufrufen.
+- `ui_main_update_status(...)` für WiFi/BLE‑Status nutzen.
+- `ui_main_loop()` aufrufen (Activity-Bar, Overlay‑Timer etc.).
+
+### 7.2 BLE, WiFi, Webserver, LED-Bar
+
+**BLE / OBD:**
+
+- `src/bluetooth/ble_obd.cpp`
+- `src/bluetooth/ble_obd.h`
+- Verwendet BLE‑API (`BLEDevice`, `BLEClient`, …).
+- Verarbeitet OBD‑Daten, berechnet Gangschätzung, ruft `displaySetGear(...)` und `displaySetShiftBlink(...)` auf.
+
+**WiFi / Webserver:**
+
+- `src/core/wifi.cpp`, `src/core/wifi.h`
+- `src/web/web_ui.cpp`, `src/web/web_ui.h`
+- `src/web/web_helpers.cpp`, `src/web/web_helpers.h`
+
+**LED-Bar / Logo:**
+
+- `src/hardware/led_bar.cpp`, `src/hardware/led_bar.h`
+- `src/hardware/logo_anim.cpp`, `src/hardware/logo_anim.h`
+
+**Main:**
+`src/main.cpp`:
+
+`setup()`:
+
+- Config laden
+- State initialisieren
+- LED‑Bar, WiFi, WebUI, BLE, Display initialisieren.
+
+`loop()`:
+
+- S3: `display_s3_loop()`
+- `webUiLoop()`, `wifiLoop()`, `bleObdLoop()`, `ledBarLoop()`, `logoAnimLoop()`
+- non‑blocking.
 
 ---
 
-## 📁 Projektstruktur (verbindlich)
+## 8. Projektstruktur
 
 ```
 .
@@ -249,7 +352,7 @@ Rotation/Orientierung muss konsistent mit dem Displaytreiber sein.
 │  │  ├─ utils.h
 │  │  ├─ vehicle_info.cpp
 │  │  ├─ vehicle_info.h
-│  │  ├─ wifi.cpp        # zentrale WLAN-Logik (AP/STA, Scan, Connect)
+│  │  ├─ wifi.cpp
 │  │  └─ wifi.h
 │  ├─ hardware/
 │  │  ├─ display_s3.cpp
@@ -264,73 +367,85 @@ Rotation/Orientierung muss konsistent mit dem Displaytreiber sein.
 │  │  ├─ ui_main.cpp
 │  │  └─ ui_main.h
 │  ├─ web/
-│  │  ├─ web_ui.cpp      # HTML-Generierung & Routen-Handler
+│  │  ├─ web_ui.cpp
 │  │  ├─ web_ui.h
 │  │  ├─ web_helpers.cpp
 │  │  └─ web_helpers.h
 │  └─ main.cpp
-├─ lib/                  # externe / eigene Libraries
-└─ test/                 # PlatformIO-Tests (Unity)
-   ├─ test_main.cpp      # zentrales Unity-Setup (einziges setup()/loop())
+├─ lib/
+│  └─ ...
+└─ test/
+   ├─ test_main.cpp
    ├─ unit_core/
    │  └─ test_clamp_int.cpp
    ├─ unit_bluetooth/
    │  └─ (geplant)
    ├─ integration_connectivity/
-   │  └─ (geplant)       # BLE/WLAN/Webserver-Integration
+   │  └─ (geplant)
    └─ unit_ap/
-      └─ (geplant)       # Tests für Access-Point-/WLAN-Logik
+      └─ (geplant)
 ```
 
 ---
 
-## 🔁 Workflow
+## 9. Konkrete Aufgaben für den Codex-Agenten
 
-1. Änderungen vornehmen (möglichst in kleinen, nachvollziehbaren Schritten).
-2. Build ausführen (`pio run -e esp32s3` via PowerShell-Befehl).
-3. Falls betroffen → Tests ausführen.
-4. Bei Fehlern → Logs analysieren, gezielt korrigieren und erneut bauen/testen.
-5. Erfolgreichen Stand dokumentieren (Dateien, Fehler vorher/nachher, Befehle, beobachtetes Laufzeitverhalten).
+Der Agent soll in iterativen Schritten:
 
----
-
-## 📌 Regeln für Änderungen (Architektur & Refactoring)
-
-### Der Agent MUSS:
-
-- ST7789-Pfad (`hardware/display.cpp`) nicht löschen oder brechen.
-- S3-Pfad (`hardware/display_s3.cpp`) ohne ST7789-Code halten.
-- QSPI-AMOLED-Pfad (SH8601, QSPI) konsistent halten, inkl. LVGL-Flush/Tick/Buffer.
-- LVGL-Auflösung auf 280×456 / 16 Bit einhalten.
-- PowerShell-Build-/Clean-Regeln strikt befolgen.
-- Architektur (`core/hardware/ui/web`) respektieren.
-- non-blocking bleiben (kein Dauersleep in zentralen Loops).
-- Konfigurationssystem (Preferences/NVS) weiter nutzen, nicht umgehen.
-- BLE gegen die eingebaute BLE-Implementierung des Arduino-Cores kompilieren (keine externe ESP32 BLE Arduino Lib).
-
-### Der Agent DARF:
-
-- interne Struktur verbessern (Refactorings, Aufräumen, Umbenennungen)
-- S3-Displaytreiber refaktorisieren, inklusive Debug-Hilfen (Testpattern)
-- neue Testcases hinzufügen (Unit-/Integrationstests)
-- Logging verbessern und vereinheitlichen
-- größere Umbauten durchführen, solange Funktionalität (ShiftLight, BLE-OBD, Web, Display) erhalten bleibt
-
-### Der Agent DARF NICHT:
-
-- `display.cpp` löschen oder unbrauchbar machen.
-- ST7789 in `display_s3.cpp` aktivieren oder mischen.
-- Board oder Pinout ändern, ohne explizite Konsistenz und Dokumentation sicherzustellen.
-- Tests entfernen oder „grün patchen" (z. B. Assertions auskommentieren statt Fehler zu beheben).
-- externe BLE-Libraries in `lib_deps` hinzunehmen, die mit Arduino Core 3.x kollidieren.
+1. `pio run -e esp32s3` im Container ausführen, alle Buildfehler sammeln.
+2. Code/Config anpassen, um:
+   - das S3‑Display (AMOLED, LVGL, QSPI) funktionsfähig zu machen,
+   - BLE‑OBD mit der BLE‑Implementierung des Arduino‑Cores kompatibel zu halten,
+   - Webserver/WiFi/LED‑Bar/Logo‑Animationen beizubehalten.
+3. Nach Änderungen wieder `pio run -e esp32s3` ausführen.
+4. Diesen Zyklus wiederholen, bis der Build fehlerfrei ist.
+5. Parallel dazu refaktorieren:
+   - lange Funktionen aufteilen,
+   - Duplikate entfernen,
+   - klarere Struktur in `display_s3.cpp`, `ble_obd.cpp`, `web_ui.cpp`, etc.
+6. Am Ende einen kurzen Bericht hinterlassen:
+   - Geänderte Dateien,
+   - Ursprüngliche Buildfehler (kurz),
+   - Wie sie gelöst wurden,
+   - Status (Display, BLE, Web, LED‑Bar),
+   - Offene TODOs.
 
 ---
 
-## 📌 Rückfragenpflicht
+## 10. Regeln für Änderungen
 
-Der Agent soll Rückfragen stellen (im Report / Kommentar), wenn:
+### 10.1 Der Agent MUSS
 
-- Hardwareverhalten unklar oder widersprüchlich ist (z. B. unterschiedliche Pinouts).
-- relevante Logs fehlen (z. B. Startlog vom seriellen Monitor).
-- Netzwerkzugriff nötig wäre, der Nutzer aber kein „full access" erlaubt hat.
-- Eingriffe außerhalb des Workspaces nötig wären (z. B. globale Systemkonfiguration).
+- Den ST7789‑Pfad (`src/hardware/display.cpp`) funktionsfähig lassen.
+- Den S3‑Pfad (`src/hardware/display_s3.cpp`) ST7789‑frei halten (AMOLED only).
+- QSPI‑Pfad laut Pinout beibehalten.
+- LVGL‑Auflösung 280×456 / 16 Bit einhalten.
+- `pio run -e esp32s3` regelmäßig ausführen, bis ein fehlerfreier Build erreicht ist (oder keine sinnvollen Änderungen mehr möglich sind).
+- Non‑blocking‑Design respektieren (keine langen Delays in zentralen Loops).
+- NVS/Preferences weiterhin nutzen (Konfigurationssystem nicht umgehen).
+- BLE gegen die BLE‑Implementierung des Arduino‑Cores 3.x kompilieren (keine inkompatiblen externen BLE‑Libs reinziehen).
+
+### 10.2 Der Agent DARF
+
+- Code umfassend refaktorisieren (auch mehrere Dateien).
+- neue Helper-Funktionen/Typen/Namespaces einführen.
+- Logging vereinheitlichen und verbessern.
+- neue Tests hinzufügen.
+
+### 10.3 Der Agent DARF NICHT
+
+- `display.cpp` bzw. den ST7789‑Pfad entfernen oder brechen.
+- das Pinout eigenmächtig ändern, ohne klaren Grund.
+- Tests löschen oder einfach „grün patchen".
+- Funktionen stubben, so dass zwar der Build ok ist, aber das Feature faktisch deaktiviert ist.
+
+---
+
+## 11. Rückfragenpflicht
+
+Der Agent soll (im Kommentar/Report) Rückfragen signalisieren, wenn:
+
+- Hardwareangaben im Code/Boardfile widersprüchlich sind.
+- Crashlogs/Backtraces erwähnt werden, aber der konkrete Log fehlt.
+- ein fundamentaler Wechsel der BLE‑Library oder Plattform nötig wäre.
+- Build‑Fehler nur durch potenziell riskante, nicht-triviale Änderungen lösbar erscheinen.
