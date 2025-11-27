@@ -11,6 +11,7 @@
 #include <driver/gpio.h>
 #include <Wire.h>
 #include <Arduino_GFX_Library.h>
+#include <algorithm>
 
 #include "core/wifi.h"
 #include "core/config.h"
@@ -20,10 +21,16 @@
 
 namespace
 {
+    // Native panel resolution (portrait) for Waveshare ESP32-S3 Touch AMOLED 1.64"
     constexpr int LCD_H_RES = 280;
     constexpr int LCD_V_RES = 456;
+    constexpr int LCD_COL_OFFSET1 = 20;
+    constexpr int LCD_ROW_OFFSET1 = 0;
+    constexpr int LCD_COL_OFFSET2 = 180;
+    constexpr int LCD_ROW_OFFSET2 = 24;
     constexpr int LCD_BIT_PER_PIXEL = 16;
-    constexpr int LVGL_BUFFER_LINES = LCD_V_RES / 4;
+    constexpr int LVGL_BUFFER_LINES = 60;
+    constexpr int LVGL_BUF_WIDTH = std::max(LCD_V_RES, LCD_H_RES);
     constexpr int LVGL_TICK_PERIOD_MS = 2;
 
     constexpr int PIN_LCD_CS = 9;
@@ -37,9 +44,10 @@ namespace
     constexpr int PIN_TOUCH_SCL = 48;
     constexpr uint8_t TOUCH_ADDR = 0x38;
     constexpr uint32_t TOUCH_I2C_SPEED = 400000;
+    constexpr lv_disp_rot_t LCD_ROTATION = LV_DISP_ROT_270;
 
 // Enable to show a minimal debug UI instead of the full application UI
-#define DISPLAY_DEBUG_SIMPLE_UI 0
+#define DISPLAY_DEBUG_SIMPLE_UI 1
 
     static const char *TAG = "display_s3";
 
@@ -61,6 +69,7 @@ namespace
     static bool g_buffersAllocated = false;
     static bool g_panelReady = false;
     static bool g_initAttempted = false;
+    static lv_disp_rot_t g_rotation = LV_DISP_ROT_NONE;
     static bool g_debugSimpleUi = DISPLAY_DEBUG_SIMPLE_UI;
     static String g_lastError = F("init-not-started");
 
@@ -70,6 +79,9 @@ namespace
     TouchPoint ft3168_read_touch();
     void touch_read_cb(lv_indev_drv_t *, lv_indev_data_t *);
     void display_flush_cb(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p);
+    TouchPoint map_touch_to_display(const TouchPoint &raw);
+    void show_display_self_test();
+    lv_obj_t *create_test_ui();
     void applyPanelBrightness(uint8_t value)
     {
         if (!g_gfx)
@@ -108,16 +120,16 @@ namespace
             return true;
         }
 
-        const size_t bufSize = LCD_H_RES * LVGL_BUFFER_LINES * sizeof(lv_color_t);
+        const size_t bufSize = LVGL_BUF_WIDTH * LVGL_BUFFER_LINES * sizeof(lv_color_t);
         g_buf1 = static_cast<lv_color_t *>(heap_caps_malloc(bufSize, MALLOC_CAP_DMA));
         g_buf2 = static_cast<lv_color_t *>(heap_caps_malloc(bufSize, MALLOC_CAP_DMA));
         if (!g_buf1 || !g_buf2)
         {
             // fallback to non-DMA heap if necessary
             if (!g_buf1)
-                g_buf1 = new lv_color_t[LCD_H_RES * LVGL_BUFFER_LINES];
+                g_buf1 = new lv_color_t[LVGL_BUF_WIDTH * LVGL_BUFFER_LINES];
             if (!g_buf2)
-                g_buf2 = new lv_color_t[LCD_H_RES * LVGL_BUFFER_LINES];
+                g_buf2 = new lv_color_t[LVGL_BUF_WIDTH * LVGL_BUFFER_LINES];
         }
 
         if (!g_buf1 || !g_buf2)
@@ -127,7 +139,7 @@ namespace
             return false;
         }
 
-        lv_disp_draw_buf_init(&g_drawBuf, g_buf1, g_buf2, LCD_H_RES * LVGL_BUFFER_LINES);
+        lv_disp_draw_buf_init(&g_drawBuf, g_buf1, g_buf2, LVGL_BUF_WIDTH * LVGL_BUFFER_LINES);
         g_buffersAllocated = true;
         return true;
     }
@@ -140,7 +152,16 @@ namespace
         }
 
         g_bus = new Arduino_ESP32QSPI(PIN_LCD_CS, PIN_LCD_CLK, PIN_LCD_D0, PIN_LCD_D1, PIN_LCD_D2, PIN_LCD_D3);
-        g_gfx = new Arduino_CO5300(g_bus, PIN_LCD_RST, 0, LCD_H_RES, LCD_V_RES);
+        g_gfx = new Arduino_CO5300(
+            g_bus,
+            PIN_LCD_RST,
+            0,
+            LCD_H_RES,
+            LCD_V_RES,
+            LCD_COL_OFFSET1,
+            LCD_ROW_OFFSET1,
+            LCD_COL_OFFSET2,
+            LCD_ROW_OFFSET2);
 
         if (!g_gfx->begin())
         {
@@ -155,6 +176,7 @@ namespace
             panel->setBrightness(static_cast<uint8_t>(cfg.displayBrightness));
         }
         g_panelReady = true;
+        ESP_LOGI(TAG, "Panel ready: %dx%d offsets L%d/R%d/T%d/B%d", LCD_H_RES, LCD_V_RES, LCD_COL_OFFSET1, LCD_COL_OFFSET2, LCD_ROW_OFFSET1, LCD_ROW_OFFSET2);
         return true;
     }
 
@@ -215,7 +237,8 @@ namespace
             return false;
         }
 
-        lv_disp_set_rotation(g_disp, LV_DISP_ROT_90);
+        g_rotation = LCD_ROTATION;
+        lv_disp_set_rotation(g_disp, g_rotation);
         return true;
     }
 
@@ -246,6 +269,11 @@ namespace
         TouchPoint() = default;
         TouchPoint(bool t, uint16_t px, uint16_t py) : touched(t), x(px), y(py) {}
     };
+
+    uint16_t clamp_to(uint16_t value, uint16_t maxValue)
+    {
+        return static_cast<uint16_t>(std::min<uint32_t>(value, maxValue));
+    }
 
     bool i2c_write_reg(uint8_t addr, uint8_t reg, const uint8_t *data, size_t len)
     {
@@ -306,7 +334,13 @@ namespace
         }
 
         uint8_t points = 0;
-        if (!i2c_read_reg(TOUCH_ADDR, 0x02, &points, 1) || points == 0)
+        if (!i2c_read_reg(TOUCH_ADDR, 0x02, &points, 1))
+        {
+            return p;
+        }
+
+        points &= 0x0F;
+        if (points == 0)
         {
             return p;
         }
@@ -320,16 +354,49 @@ namespace
         uint16_t x = static_cast<uint16_t>(((buf[0] & 0x0F) << 8) | buf[1]);
         uint16_t y = static_cast<uint16_t>(((buf[2] & 0x0F) << 8) | buf[3]);
 
-        p.x = x;
-        p.y = y;
+        p.x = clamp_to(x, LCD_H_RES - 1);
+        p.y = clamp_to(y, LCD_V_RES - 1);
         p.touched = true;
 
-        if (p.x > LCD_H_RES)
-            p.x = LCD_H_RES;
-        if (p.y > LCD_V_RES)
-            p.y = LCD_V_RES;
-
         return p;
+    }
+
+    TouchPoint map_touch_to_display(const TouchPoint &raw)
+    {
+        TouchPoint mapped = raw;
+        if (!g_disp)
+        {
+            return mapped;
+        }
+
+        switch (g_rotation)
+        {
+        case LV_DISP_ROT_90:
+            mapped.x = raw.y;
+            mapped.y = (raw.x < LCD_H_RES) ? static_cast<uint16_t>(LCD_H_RES - 1 - raw.x) : 0;
+            break;
+        case LV_DISP_ROT_270:
+            mapped.x = (raw.y < LCD_V_RES) ? static_cast<uint16_t>(LCD_V_RES - 1 - raw.y) : 0;
+            mapped.y = raw.x;
+            break;
+        case LV_DISP_ROT_NONE:
+        case LV_DISP_ROT_180:
+        default:
+            mapped = raw;
+            break;
+        }
+
+        const uint16_t maxX = lv_disp_get_hor_res(g_disp);
+        const uint16_t maxY = lv_disp_get_ver_res(g_disp);
+        if (maxX > 0 && mapped.x >= maxX)
+        {
+            mapped.x = maxX - 1;
+        }
+        if (maxY > 0 && mapped.y >= maxY)
+        {
+            mapped.y = maxY - 1;
+        }
+        return mapped;
     }
 
     void display_flush_cb(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p)
@@ -354,10 +421,17 @@ namespace
         TouchPoint p = ft3168_read_touch();
         if (p.touched)
         {
+            TouchPoint mapped = map_touch_to_display(p);
             data->state = LV_INDEV_STATE_PRESSED;
-            data->point.x = p.x;
-            data->point.y = p.y;
-            lastPoint = p;
+            data->point.x = mapped.x;
+            data->point.y = mapped.y;
+            lastPoint = mapped;
+            static bool logged = false;
+            if (!logged)
+            {
+                ESP_LOGI(TAG, "touch raw=(%u,%u) mapped=(%u,%u)", p.x, p.y, mapped.x, mapped.y);
+                logged = true;
+            }
         }
         else
         {
@@ -365,6 +439,62 @@ namespace
             data->point.x = lastPoint.x;
             data->point.y = lastPoint.y;
         }
+    }
+
+    lv_obj_t *create_test_ui()
+    {
+        lv_obj_t *scr = lv_obj_create(nullptr);
+        lv_obj_remove_style_all(scr);
+        lv_obj_set_size(scr, lv_disp_get_hor_res(g_disp), lv_disp_get_ver_res(g_disp));
+        lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(scr, 1, 0);
+        lv_obj_set_style_border_color(scr, lv_color_white(), 0);
+        lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+
+        lv_obj_t *label = lv_label_create(scr);
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_32, 0);
+        lv_obj_set_style_text_color(label, lv_color_white(), 0);
+        lv_label_set_text(label, "ShiftLight S3 TEST");
+        lv_obj_center(label);
+
+        lv_obj_t *btn = lv_btn_create(scr);
+        lv_obj_set_size(btn, LV_PCT(60), 48);
+        lv_obj_align(btn, LV_ALIGN_BOTTOM_MID, 0, -8);
+        lv_obj_set_style_bg_color(btn, lv_color_hex(0x303030), 0);
+        lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(btn, 6, 0);
+        lv_obj_set_style_border_width(btn, 1, 0);
+        lv_obj_set_style_border_color(btn, lv_color_white(), 0);
+        lv_obj_t *btnLbl = lv_label_create(btn);
+        lv_obj_set_style_text_color(btnLbl, lv_color_white(), 0);
+        lv_label_set_text(btnLbl, "Tap me");
+        lv_obj_center(btnLbl);
+
+        lv_obj_add_event_cb(
+            btn,
+            [](lv_event_t *e) {
+                lv_obj_t *lbl = static_cast<lv_obj_t *>(lv_event_get_user_data(e));
+                static bool toggled = false;
+                if (!lbl)
+                    return;
+                toggled = !toggled;
+                lv_label_set_text(lbl, toggled ? "Tapped!" : "ShiftLight S3 TEST");
+            },
+            LV_EVENT_CLICKED,
+            label);
+
+        return scr;
+    }
+
+    void show_display_self_test()
+    {
+        if (!g_disp)
+            return;
+
+        lv_obj_t *scr = create_test_ui();
+        lv_disp_load_scr(scr);
+        lv_timer_handler();
     }
 } // namespace
 
@@ -456,21 +586,25 @@ void display_s3_init()
 
     initTouch();
     startLvglTick();
+    show_display_self_test();
 
-    UiDisplayHooks hooks{};
-    hooks.setBrightness = applyPanelBrightness;
-    ui_manager_init(g_disp, hooks);
-    ui_manager_set_gear(g_cachedGear);
-    ui_manager_set_shiftlight(g_cachedShift);
-    if (g_logoRequested)
+    if (!g_debugSimpleUi)
     {
-        ui_manager_show_logo();
+        UiDisplayHooks hooks{};
+        hooks.setBrightness = applyPanelBrightness;
+        ui_manager_init(g_disp, hooks);
+        ui_manager_set_gear(g_cachedGear);
+        ui_manager_set_shiftlight(g_cachedShift);
+        if (g_logoRequested)
+        {
+            ui_manager_show_logo();
+        }
     }
 
     g_displayReady = true;
     g_lastLvglRun = millis();
     setLastError("");
-    ESP_LOGI(TAG, "Display + LVGL init done (S3 AMOLED)");
+    ESP_LOGI(TAG, "Display + LVGL init done (S3 AMOLED) res=%dx%d rot=%d simpleUI=%s", LCD_H_RES, LCD_V_RES, static_cast<int>(g_rotation), g_debugSimpleUi ? "on" : "off");
 }
 
 bool display_s3_ready()

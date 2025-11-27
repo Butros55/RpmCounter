@@ -96,6 +96,11 @@ namespace
         {
             if (!previewSnapshotValid)
             {
+                g_brightnessPreviewActive = false;
+                if (!g_testActive)
+                {
+                    updateRpmBar(g_currentRpm);
+                }
                 return;
             }
 
@@ -285,12 +290,17 @@ void updateRpmBar(int rpm)
     strip.show();
     displaySetShiftBlink(displayBlink);
 
-    Serial.print("[LED] rpm=");
-    Serial.print(rpm);
-    Serial.print(" fraction=");
-    Serial.print(fraction, 2);
-    Serial.print(" ledsOn=");
-    Serial.println(ledsOn);
+    static unsigned long lastLogMs = 0;
+    if (now - lastLogMs > 500)
+    {
+        lastLogMs = now;
+        Serial.print("[LED] rpm=");
+        Serial.print(rpm);
+        Serial.print(" fraction=");
+        Serial.print(fraction, 2);
+        Serial.print(" ledsOn=");
+        Serial.println(ledsOn);
+    }
 }
 
 void ledBarLoop()

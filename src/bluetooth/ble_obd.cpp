@@ -422,6 +422,13 @@ bool startConnectTask(bool manualAttempt)
         return false;
     }
 
+    if (g_bleScanRunning)
+    {
+        BleDeviceClass::getScan()->stop();
+        g_bleScanRunning = false;
+        g_bleScanFinishedMs = millis();
+    }
+
     g_connectTaskRunning = true;
     g_connectTaskWasManual = manualAttempt;
     g_connectTaskResult = false;
@@ -497,7 +504,7 @@ bool startConnectTask(bool manualAttempt)
 
 bool startBleScan(uint32_t durationSeconds)
 {
-    if (g_bleScanRunning || g_connectTaskRunning)
+    if (g_bleScanRunning || g_connectTaskRunning || g_manualConnectActive || g_bleConnectInProgress)
     {
         LOG_DEBUG("BLE", "BLE_SCAN_SKIP", "Scan skipped because another task is active");
         return false;

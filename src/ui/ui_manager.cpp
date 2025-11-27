@@ -334,7 +334,7 @@ namespace
 
     void on_led_changed(lv_event_t *e)
     {
-        LV_UNUSED(e);
+        bool userTriggered = (e != nullptr);
         if (!g_ui.ledSlider)
             return;
         int val = lv_slider_get_value(g_ui.ledSlider);
@@ -345,8 +345,12 @@ namespace
         cfg.brightness = clampInt(val, 0, 255);
         strip.setBrightness(cfg.brightness);
         strip.show();
-        g_brightnessPreviewActive = true;
-        g_lastBrightnessChangeMs = millis();
+        if (userTriggered)
+        {
+            rememberPreviewPixels();
+            g_brightnessPreviewActive = true;
+            g_lastBrightnessChangeMs = millis();
+        }
     }
 
     void on_led_released(lv_event_t *e)

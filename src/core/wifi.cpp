@@ -128,6 +128,7 @@ namespace
         if (ok)
         {
             LOG_INFO("WIFI", "WIFI_AP_READY", String("mode=fallback ssid=") + ssid + " ip=" + WiFi.softAPIP().toString());
+            LOG_INFO("WIFI", "AP_READY", String("ssid=") + ssid + " ip=" + g_wifi.apIp);
         }
         else
         {
@@ -179,6 +180,7 @@ bool startApMode(const AppConfig &config)
     if (ok)
     {
         LOG_INFO("WIFI", "WIFI_AP_START", String("ssid=") + ssid + " ip=" + WiFi.softAPIP().toString());
+        LOG_INFO("WIFI", "AP_READY", String("ssid=") + ssid + " ip=" + g_wifi.apIp);
     }
     else
     {
