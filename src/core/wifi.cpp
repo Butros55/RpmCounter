@@ -1,6 +1,7 @@
 #include "wifi.h"
 
 #include <WiFi.h>
+#include <esp_wifi.h>
 
 #include "config.h"
 #include "logging.h"
@@ -112,6 +113,17 @@ namespace
         g_wifi.apActive = ok;
         g_wifi.apClients = ok ? WiFi.softAPgetStationNum() : 0;
         g_wifi.apIp = ok ? WiFi.softAPIP().toString() : "";
+        if (ok)
+        {
+            wifi_config_t conf{};
+            if (esp_wifi_get_config(WIFI_IF_AP, &conf) == ESP_OK)
+            {
+                conf.ap.authmode = WIFI_AUTH_WPA2_PSK;
+                conf.ap.channel = (conf.ap.channel == 0) ? 6 : conf.ap.channel;
+                conf.ap.pmf_cfg.required = false;
+                esp_wifi_set_config(WIFI_IF_AP, &conf);
+            }
+        }
         updateIp();
         if (ok)
         {
@@ -143,6 +155,18 @@ bool startApMode(const AppConfig &config)
     WiFi.disconnect(true);
     WiFi.mode(pickApMode());
     bool ok = WiFi.softAP(ssid.c_str(), pass.c_str());
+
+    if (ok)
+    {
+        wifi_config_t conf{};
+        if (esp_wifi_get_config(WIFI_IF_AP, &conf) == ESP_OK)
+        {
+            conf.ap.authmode = WIFI_AUTH_WPA2_PSK;
+            conf.ap.channel = (conf.ap.channel == 0) ? 6 : conf.ap.channel;
+            conf.ap.pmf_cfg.required = false;
+            esp_wifi_set_config(WIFI_IF_AP, &conf);
+        }
+    }
 
     g_wifi.configuredMode = config.wifiMode;
     g_wifi.activeMode = AP_ONLY;
@@ -216,6 +240,7 @@ bool startStaMode(const AppConfig &config, uint32_t timeoutMs)
 
 void setupWifiFromConfig(const AppConfig &config)
 {
+    WiFi.setSleep(false);
     g_wifi.configuredMode = config.wifiMode;
     g_wifi.staLastError = "";
 

@@ -32,11 +32,15 @@
 
 #define LV_FONT_MONTSERRAT_16 1
 #define LV_FONT_MONTSERRAT_24 1
+#define LV_FONT_MONTSERRAT_32 1
+#define LV_FONT_MONTSERRAT_48 1
 
 #define LV_FONT_DEFAULT &lv_font_montserrat_16
 
 #define LV_THEME_DEFAULT_DARK 0
 #define LV_THEME_DEFAULT_LIGHT 1
+
+#define LV_USE_GESTURE 1
 
 #endif /*LV_CONF_H*/
 

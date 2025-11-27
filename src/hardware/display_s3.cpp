@@ -13,13 +13,14 @@
 #include <Arduino_GFX_Library.h>
 
 #include "core/wifi.h"
+#include "core/config.h"
 #include "core/state.h"
 #include "hardware/display.h"
-#include "ui/ui_main.h"
+#include "ui/ui_manager.h"
 
 namespace
 {
-    constexpr int LCD_H_RES = 320;
+    constexpr int LCD_H_RES = 280;
     constexpr int LCD_V_RES = 456;
     constexpr int LCD_BIT_PER_PIXEL = 16;
     constexpr int LVGL_BUFFER_LINES = LCD_V_RES / 4;
@@ -69,6 +70,13 @@ namespace
     TouchPoint ft3168_read_touch();
     void touch_read_cb(lv_indev_drv_t *, lv_indev_data_t *);
     void display_flush_cb(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p);
+    void applyPanelBrightness(uint8_t value)
+    {
+        if (!g_gfx)
+            return;
+        Arduino_CO5300 *panel = static_cast<Arduino_CO5300 *>(g_gfx);
+        panel->setBrightness(value);
+    }
 
     void setLastError(const char *msg)
     {
@@ -144,7 +152,7 @@ namespace
         Arduino_CO5300 *panel = static_cast<Arduino_CO5300 *>(g_gfx);
         if (panel)
         {
-            panel->setBrightness(255);
+            panel->setBrightness(static_cast<uint8_t>(cfg.displayBrightness));
         }
         g_panelReady = true;
         return true;
@@ -198,6 +206,7 @@ namespace
         g_dispDrv.draw_buf = &g_drawBuf;
         g_dispDrv.user_data = g_gfx;
         g_dispDrv.rounder_cb = lv_rounder_cb;
+        g_dispDrv.sw_rotate = 1;
 
         g_disp = lv_disp_drv_register(&g_dispDrv);
         if (!g_disp)
@@ -205,6 +214,8 @@ namespace
             setLastError("lvgl-register-failed");
             return false;
         }
+
+        lv_disp_set_rotation(g_disp, LV_DISP_ROT_90);
         return true;
     }
 
@@ -371,8 +382,8 @@ void displayClear()
         return;
 
     g_cachedShift = false;
-    ui_main_set_shiftlight(false);
-    ui_main_set_gear(g_cachedGear);
+    ui_manager_set_shiftlight(false);
+    ui_manager_set_gear(g_cachedGear);
 }
 
 void displayShowTestLogo()
@@ -384,7 +395,7 @@ void displayShowTestLogo()
     if (g_debugSimpleUi)
         return;
 
-    ui_main_show_test_logo();
+    ui_manager_show_logo();
 }
 
 void displaySetGear(int gear)
@@ -399,7 +410,7 @@ void displaySetGear(int gear)
     if (g_debugSimpleUi)
         return;
 
-    ui_main_set_gear(gear);
+    ui_manager_set_gear(gear);
 }
 
 void displaySetShiftBlink(bool active)
@@ -411,7 +422,7 @@ void displaySetShiftBlink(bool active)
     if (g_debugSimpleUi)
         return;
 
-    ui_main_set_shiftlight(active);
+    ui_manager_set_shiftlight(active);
 }
 
 void display_s3_init()
@@ -446,12 +457,14 @@ void display_s3_init()
     initTouch();
     startLvglTick();
 
-    ui_main_init(g_disp);
-    ui_main_set_gear(g_cachedGear);
-    ui_main_set_shiftlight(g_cachedShift);
+    UiDisplayHooks hooks{};
+    hooks.setBrightness = applyPanelBrightness;
+    ui_manager_init(g_disp, hooks);
+    ui_manager_set_gear(g_cachedGear);
+    ui_manager_set_shiftlight(g_cachedShift);
     if (g_logoRequested)
     {
-        ui_main_show_test_logo();
+        ui_manager_show_logo();
     }
 
     g_displayReady = true;
@@ -470,14 +483,7 @@ void display_s3_loop()
     if (!g_displayReady)
         return;
 
-    if (!g_debugSimpleUi)
-    {
-        WifiStatus wifiStatus = getWifiStatus();
-        const bool wifiConnected = wifiStatus.staConnected || wifiStatus.apActive;
-        const bool wifiConnecting = wifiStatus.staConnecting || wifiStatus.scanRunning;
-
-        ui_main_update_status(wifiConnected, wifiConnecting, g_connected, g_bleConnectInProgress);
-    }
+    WifiStatus wifiStatus = getWifiStatus();
 
     const uint32_t now = millis();
     if (g_tickFallback)
@@ -493,7 +499,7 @@ void display_s3_loop()
 
     if (!g_debugSimpleUi)
     {
-        ui_main_loop();
+        ui_manager_loop(wifiStatus, g_connected, g_bleConnectInProgress);
     }
 }
 
