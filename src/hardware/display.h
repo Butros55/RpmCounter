@@ -12,7 +12,8 @@ enum class DisplayDebugPattern
 {
     ColorBars,
     Grid,
-    UiLabel
+    UiLabel,
+    Frame
 };
 
 struct DisplayDebugInfo

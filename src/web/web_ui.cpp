@@ -2430,6 +2430,8 @@ namespace
             p.toLowerCase();
             if (p == "grid")
                 pattern = DisplayDebugPattern::Grid;
+            else if (p == "frame")
+                pattern = DisplayDebugPattern::Frame;
             else if (p == "ui")
                 pattern = DisplayDebugPattern::UiLabel;
             else

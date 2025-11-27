@@ -258,6 +258,12 @@ void displayShowDebugPattern(DisplayDebugPattern pattern)
             }
         }
         break;
+    case DisplayDebugPattern::Frame:
+        tft.fillScreen(ST77XX_BLACK);
+        tft.drawRect(0, 0, tft.width(), tft.height(), ST77XX_GREEN);
+        tft.drawFastHLine(0, tft.height() / 2, tft.width(), ST77XX_YELLOW);
+        tft.drawFastVLine(tft.width() / 2, 0, tft.height(), ST77XX_YELLOW);
+        break;
     case DisplayDebugPattern::UiLabel:
     default:
         displayShowTestLogo();

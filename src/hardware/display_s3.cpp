@@ -20,10 +20,12 @@
 
 namespace
 {
-    constexpr int LCD_H_RES = 280;
-    constexpr int LCD_V_RES = 456;
+    constexpr int LCD_NATIVE_WIDTH = 280;  // Panel in portrait orientation
+    constexpr int LCD_NATIVE_HEIGHT = 456;
+    constexpr int LCD_LANDSCAPE_WIDTH = LCD_NATIVE_HEIGHT;
+    constexpr int LCD_LANDSCAPE_HEIGHT = LCD_NATIVE_WIDTH;
     constexpr int LCD_BIT_PER_PIXEL = 16;
-    constexpr int LVGL_BUFFER_LINES = LCD_V_RES / 4;
+    constexpr int LVGL_BUFFER_LINES = LCD_LANDSCAPE_HEIGHT / 4;
     constexpr int LVGL_TICK_PERIOD_MS = 2;
 
     constexpr int PIN_LCD_CS = 9;
@@ -40,6 +42,7 @@ namespace
 
 // Enable to show a minimal debug UI instead of the full application UI
 #define DISPLAY_DEBUG_SIMPLE_UI 0
+    constexpr bool TOUCH_DEBUG_LOG = false;
 
     static const char *TAG = "display_s3";
 
@@ -108,16 +111,16 @@ namespace
             return true;
         }
 
-        const size_t bufSize = LCD_H_RES * LVGL_BUFFER_LINES * sizeof(lv_color_t);
+        const size_t bufSize = LCD_LANDSCAPE_WIDTH * LVGL_BUFFER_LINES * sizeof(lv_color_t);
         g_buf1 = static_cast<lv_color_t *>(heap_caps_malloc(bufSize, MALLOC_CAP_DMA));
         g_buf2 = static_cast<lv_color_t *>(heap_caps_malloc(bufSize, MALLOC_CAP_DMA));
         if (!g_buf1 || !g_buf2)
         {
             // fallback to non-DMA heap if necessary
             if (!g_buf1)
-                g_buf1 = new lv_color_t[LCD_H_RES * LVGL_BUFFER_LINES];
+                g_buf1 = new lv_color_t[LCD_LANDSCAPE_WIDTH * LVGL_BUFFER_LINES];
             if (!g_buf2)
-                g_buf2 = new lv_color_t[LCD_H_RES * LVGL_BUFFER_LINES];
+                g_buf2 = new lv_color_t[LCD_LANDSCAPE_WIDTH * LVGL_BUFFER_LINES];
         }
 
         if (!g_buf1 || !g_buf2)
@@ -127,7 +130,7 @@ namespace
             return false;
         }
 
-        lv_disp_draw_buf_init(&g_drawBuf, g_buf1, g_buf2, LCD_H_RES * LVGL_BUFFER_LINES);
+        lv_disp_draw_buf_init(&g_drawBuf, g_buf1, g_buf2, LCD_LANDSCAPE_WIDTH * LVGL_BUFFER_LINES);
         g_buffersAllocated = true;
         return true;
     }
@@ -140,7 +143,7 @@ namespace
         }
 
         g_bus = new Arduino_ESP32QSPI(PIN_LCD_CS, PIN_LCD_CLK, PIN_LCD_D0, PIN_LCD_D1, PIN_LCD_D2, PIN_LCD_D3);
-        g_gfx = new Arduino_CO5300(g_bus, PIN_LCD_RST, 0, LCD_H_RES, LCD_V_RES);
+        g_gfx = new Arduino_CO5300(g_bus, PIN_LCD_RST, 0, LCD_NATIVE_WIDTH, LCD_NATIVE_HEIGHT);
 
         if (!g_gfx->begin())
         {
@@ -148,6 +151,8 @@ namespace
             setLastError("gfx-begin-failed");
             return false;
         }
+
+        g_gfx->setRotation(1); // Landscape, 456x280
 
         Arduino_CO5300 *panel = static_cast<Arduino_CO5300 *>(g_gfx);
         if (panel)
@@ -166,13 +171,13 @@ namespace
         }
 
         const uint16_t colors[] = {0xF800, 0x07E0, 0x001F, 0xFFE0};
-        const int barWidth = LCD_H_RES / 4;
+        const int barWidth = LCD_LANDSCAPE_WIDTH / 4;
         for (int i = 0; i < 4; ++i)
         {
-            g_gfx->fillRect(i * barWidth, 0, barWidth, LCD_V_RES, colors[i]);
+            g_gfx->fillRect(i * barWidth, 0, barWidth, LCD_LANDSCAPE_HEIGHT, colors[i]);
         }
-        g_gfx->fillRect(0, LCD_V_RES - 40, LCD_H_RES, 40, 0x0000);
-        g_gfx->setCursor(10, LCD_V_RES - 30);
+        g_gfx->fillRect(0, LCD_LANDSCAPE_HEIGHT - 40, LCD_LANDSCAPE_WIDTH, 40, 0x0000);
+        g_gfx->setCursor(10, LCD_LANDSCAPE_HEIGHT - 30);
         g_gfx->setTextSize(2);
         g_gfx->setTextColor(0xFFFF);
         g_gfx->println(F("AMOLED init..."));
@@ -200,13 +205,13 @@ namespace
     bool initLvglDriver()
     {
         lv_disp_drv_init(&g_dispDrv);
-        g_dispDrv.hor_res = LCD_H_RES;
-        g_dispDrv.ver_res = LCD_V_RES;
+        g_dispDrv.hor_res = LCD_LANDSCAPE_WIDTH;
+        g_dispDrv.ver_res = LCD_LANDSCAPE_HEIGHT;
         g_dispDrv.flush_cb = display_flush_cb;
         g_dispDrv.draw_buf = &g_drawBuf;
         g_dispDrv.user_data = g_gfx;
         g_dispDrv.rounder_cb = lv_rounder_cb;
-        g_dispDrv.sw_rotate = 1;
+        g_dispDrv.sw_rotate = 0;
 
         g_disp = lv_disp_drv_register(&g_dispDrv);
         if (!g_disp)
@@ -214,8 +219,6 @@ namespace
             setLastError("lvgl-register-failed");
             return false;
         }
-
-        lv_disp_set_rotation(g_disp, LV_DISP_ROT_90);
         return true;
     }
 
@@ -317,17 +320,28 @@ namespace
             return p;
         }
 
-        uint16_t x = static_cast<uint16_t>(((buf[0] & 0x0F) << 8) | buf[1]);
-        uint16_t y = static_cast<uint16_t>(((buf[2] & 0x0F) << 8) | buf[3]);
+        uint16_t rawX = static_cast<uint16_t>(((buf[0] & 0x0F) << 8) | buf[1]);
+        uint16_t rawY = static_cast<uint16_t>(((buf[2] & 0x0F) << 8) | buf[3]);
 
-        p.x = x;
-        p.y = y;
+        if (rawX >= LCD_NATIVE_WIDTH)
+            rawX = LCD_NATIVE_WIDTH - 1;
+        if (rawY >= LCD_NATIVE_HEIGHT)
+            rawY = LCD_NATIVE_HEIGHT - 1;
+
+        // Panel is mounted in portrait; we render in landscape (rotation 90° CW)
+        p.x = rawY;
+        p.y = LCD_NATIVE_WIDTH - rawX - 1;
         p.touched = true;
 
-        if (p.x > LCD_H_RES)
-            p.x = LCD_H_RES;
-        if (p.y > LCD_V_RES)
-            p.y = LCD_V_RES;
+        if (p.x >= LCD_LANDSCAPE_WIDTH)
+            p.x = LCD_LANDSCAPE_WIDTH - 1;
+        if (p.y >= LCD_LANDSCAPE_HEIGHT)
+            p.y = LCD_LANDSCAPE_HEIGHT - 1;
+
+        if (TOUCH_DEBUG_LOG)
+        {
+            ESP_LOGI(TAG, "touch raw=(%u,%u) mapped=(%u,%u)", rawX, rawY, p.x, p.y);
+        }
 
         return p;
     }
@@ -544,11 +558,11 @@ void displayShowDebugPattern(DisplayDebugPattern pattern)
     case DisplayDebugPattern::ColorBars:
     {
         const uint32_t colors[] = {0xFF0000, 0x00FF00, 0x0000FF, 0xFFFF00};
-        const int barWidth = LCD_H_RES / 4;
+        const int barWidth = LCD_LANDSCAPE_WIDTH / 4;
         for (int i = 0; i < 4; ++i)
         {
             lv_obj_t *bar = lv_obj_create(scr);
-            lv_obj_set_size(bar, barWidth, LCD_V_RES);
+            lv_obj_set_size(bar, barWidth, LCD_LANDSCAPE_HEIGHT);
             lv_obj_set_style_bg_color(bar, lv_color_hex(colors[i]), 0);
             lv_obj_set_style_border_width(bar, 0, 0);
             lv_obj_set_style_radius(bar, 0, 0);
@@ -564,8 +578,8 @@ void displayShowDebugPattern(DisplayDebugPattern pattern)
     {
         const int cols = 6;
         const int rows = 10;
-        const int cellW = LCD_H_RES / cols;
-        const int cellH = LCD_V_RES / rows;
+        const int cellW = LCD_LANDSCAPE_WIDTH / cols;
+        const int cellH = LCD_LANDSCAPE_HEIGHT / rows;
         for (int y = 0; y < rows; ++y)
         {
             for (int x = 0; x < cols; ++x)
@@ -586,6 +600,33 @@ void displayShowDebugPattern(DisplayDebugPattern pattern)
         lv_obj_align(label, LV_ALIGN_TOP_MID, 0, 6);
         break;
     }
+    case DisplayDebugPattern::Frame:
+    {
+        lv_obj_t *frame = lv_obj_create(scr);
+        lv_obj_remove_style_all(frame);
+        lv_obj_set_size(frame, LV_PCT(100), LV_PCT(100));
+        lv_obj_set_style_border_width(frame, 1, 0);
+        lv_obj_set_style_border_color(frame, lv_color_hex(0x27AE60), 0);
+        lv_obj_set_style_pad_all(frame, 0, 0);
+        lv_obj_align(frame, LV_ALIGN_CENTER, 0, 0);
+
+        lv_obj_t *hLine = lv_obj_create(scr);
+        lv_obj_remove_style_all(hLine);
+        lv_obj_set_size(hLine, LV_PCT(100), 1);
+        lv_obj_set_style_bg_color(hLine, lv_color_hex(0xF2C94C), 0);
+        lv_obj_align(hLine, LV_ALIGN_CENTER, 0, 0);
+
+        lv_obj_t *vLine = lv_obj_create(scr);
+        lv_obj_remove_style_all(vLine);
+        lv_obj_set_size(vLine, 1, LV_PCT(100));
+        lv_obj_set_style_bg_color(vLine, lv_color_hex(0xF2C94C), 0);
+        lv_obj_align(vLine, LV_ALIGN_CENTER, 0, 0);
+
+        lv_obj_t *label = lv_label_create(scr);
+        lv_label_set_text(label, "Frame + crosshair test");
+        lv_obj_align(label, LV_ALIGN_TOP_MID, 0, 6);
+        break;
+    }
     case DisplayDebugPattern::UiLabel:
     default:
     {
@@ -602,7 +643,7 @@ void displayShowDebugPattern(DisplayDebugPattern pattern)
         msg += String("Error: ") + (g_lastError.length() ? g_lastError : "none");
         lv_label_set_text(lbl, msg.c_str());
         lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(lbl, LCD_H_RES - 20);
+        lv_obj_set_width(lbl, LCD_LANDSCAPE_WIDTH - 20);
         lv_obj_align(lbl, LV_ALIGN_TOP_MID, 0, 60);
         break;
     }

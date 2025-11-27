@@ -9,6 +9,11 @@
 namespace
 {
     constexpr unsigned long WIFI_SCAN_MAX_DURATION_MS = 15000;
+    constexpr uint8_t WIFI_AP_CHANNEL = 6;
+    constexpr uint8_t WIFI_AP_MAX_CLIENTS = 4;
+    const IPAddress WIFI_AP_IP(192, 168, 4, 1);
+    const IPAddress WIFI_AP_GATEWAY(192, 168, 4, 1);
+    const IPAddress WIFI_AP_SUBNET(255, 255, 255, 0);
 
     struct WifiRuntimeState
     {
@@ -39,6 +44,36 @@ namespace
         String out = value;
         out.trim();
         return out;
+    }
+
+    bool configureAccessPoint(const String &ssid, const String &pass, wifi_mode_t mode)
+    {
+        WiFi.softAPdisconnect(true);
+        WiFi.mode(mode);
+        WiFi.persistent(false);
+
+        WiFi.softAPConfig(WIFI_AP_IP, WIFI_AP_GATEWAY, WIFI_AP_SUBNET);
+        bool ok = WiFi.softAP(ssid.c_str(), pass.c_str(), WIFI_AP_CHANNEL, 0, WIFI_AP_MAX_CLIENTS);
+        if (ok)
+        {
+            wifi_config_t conf{};
+            if (esp_wifi_get_config(WIFI_IF_AP, &conf) == ESP_OK)
+            {
+                conf.ap.authmode = WIFI_AUTH_WPA2_PSK;
+                conf.ap.channel = WIFI_AP_CHANNEL;
+                conf.ap.max_connection = WIFI_AP_MAX_CLIENTS;
+                conf.ap.ssid_hidden = 0;
+                conf.ap.pmf_cfg.capable = true;
+                conf.ap.pmf_cfg.required = false;
+                esp_wifi_set_config(WIFI_IF_AP, &conf);
+            }
+            esp_wifi_set_bandwidth(WIFI_IF_AP, WIFI_BW_HT20);
+            esp_wifi_set_protocol(WIFI_IF_AP, WIFI_PROTOCOL_11B | WIFI_PROTOCOL_11G | WIFI_PROTOCOL_11N);
+        }
+
+        refreshApState();
+        updateIp();
+        return ok;
     }
 
     void refreshApState()
@@ -108,26 +143,14 @@ namespace
             pass = AP_PASS;
 
         wifi_mode_t mode = keepSta ? WIFI_AP_STA : pickApMode();
-        WiFi.mode(mode);
-        bool ok = WiFi.softAP(ssid.c_str(), pass.c_str());
+        bool ok = configureAccessPoint(ssid, pass, mode);
         g_wifi.apActive = ok;
         g_wifi.apClients = ok ? WiFi.softAPgetStationNum() : 0;
         g_wifi.apIp = ok ? WiFi.softAPIP().toString() : "";
+        g_wifi.activeMode = keepSta ? STA_WITH_AP_FALLBACK : AP_ONLY;
         if (ok)
         {
-            wifi_config_t conf{};
-            if (esp_wifi_get_config(WIFI_IF_AP, &conf) == ESP_OK)
-            {
-                conf.ap.authmode = WIFI_AUTH_WPA2_PSK;
-                conf.ap.channel = (conf.ap.channel == 0) ? 6 : conf.ap.channel;
-                conf.ap.pmf_cfg.required = false;
-                esp_wifi_set_config(WIFI_IF_AP, &conf);
-            }
-        }
-        updateIp();
-        if (ok)
-        {
-            LOG_INFO("WIFI", "WIFI_AP_READY", String("mode=fallback ssid=") + ssid + " ip=" + WiFi.softAPIP().toString());
+            LOG_INFO("WIFI", "WIFI_AP_READY", String("mode=fallback ssid=") + ssid + " ip=" + WiFi.softAPIP().toString() + " channel=" + String(WIFI_AP_CHANNEL));
         }
         else
         {
@@ -153,20 +176,7 @@ bool startApMode(const AppConfig &config)
         pass = AP_PASS;
 
     WiFi.disconnect(true);
-    WiFi.mode(pickApMode());
-    bool ok = WiFi.softAP(ssid.c_str(), pass.c_str());
-
-    if (ok)
-    {
-        wifi_config_t conf{};
-        if (esp_wifi_get_config(WIFI_IF_AP, &conf) == ESP_OK)
-        {
-            conf.ap.authmode = WIFI_AUTH_WPA2_PSK;
-            conf.ap.channel = (conf.ap.channel == 0) ? 6 : conf.ap.channel;
-            conf.ap.pmf_cfg.required = false;
-            esp_wifi_set_config(WIFI_IF_AP, &conf);
-        }
-    }
+    bool ok = configureAccessPoint(ssid, pass, pickApMode());
 
     g_wifi.configuredMode = config.wifiMode;
     g_wifi.activeMode = AP_ONLY;
@@ -178,7 +188,7 @@ bool startApMode(const AppConfig &config)
 
     if (ok)
     {
-        LOG_INFO("WIFI", "WIFI_AP_START", String("ssid=") + ssid + " ip=" + WiFi.softAPIP().toString());
+        LOG_INFO("WIFI", "WIFI_AP_START", String("ssid=") + ssid + " ip=" + WiFi.softAPIP().toString() + " channel=" + String(WIFI_AP_CHANNEL));
     }
     else
     {
