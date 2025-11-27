@@ -86,6 +86,135 @@ namespace
         area->y2 = ((y2 >> 1) << 1) + 1;
     }
 
+    bool allocateLvglBuffers()
+    {
+        if (g_buffersAllocated)
+        {
+            return true;
+        }
+
+        const size_t bufSize = LCD_H_RES * LVGL_BUFFER_LINES * sizeof(lv_color_t);
+        g_buf1 = static_cast<lv_color_t *>(heap_caps_malloc(bufSize, MALLOC_CAP_DMA));
+        g_buf2 = static_cast<lv_color_t *>(heap_caps_malloc(bufSize, MALLOC_CAP_DMA));
+        if (!g_buf1 || !g_buf2)
+        {
+            // fallback to non-DMA heap if necessary
+            if (!g_buf1)
+                g_buf1 = new lv_color_t[LCD_H_RES * LVGL_BUFFER_LINES];
+            if (!g_buf2)
+                g_buf2 = new lv_color_t[LCD_H_RES * LVGL_BUFFER_LINES];
+        }
+
+        if (!g_buf1 || !g_buf2)
+        {
+            ESP_LOGE(TAG, "Failed to allocate LVGL buffers");
+            setLastError("lvgl-buffer-alloc-failed");
+            return false;
+        }
+
+        lv_disp_draw_buf_init(&g_drawBuf, g_buf1, g_buf2, LCD_H_RES * LVGL_BUFFER_LINES);
+        g_buffersAllocated = true;
+        return true;
+    }
+
+    bool initPanel()
+    {
+        if (g_panelReady)
+        {
+            return true;
+        }
+
+        g_bus = new Arduino_ESP32QSPI(PIN_LCD_CS, PIN_LCD_CLK, PIN_LCD_D0, PIN_LCD_D1, PIN_LCD_D2, PIN_LCD_D3);
+        g_gfx = new Arduino_CO5300(g_bus, PIN_LCD_RST, 0, LCD_H_RES, LCD_V_RES);
+
+        if (!g_gfx->begin())
+        {
+            ESP_LOGE(TAG, "Arduino_GFX begin failed");
+            setLastError("gfx-begin-failed");
+            return false;
+        }
+
+        g_gfx->Display_Brightness(255);
+        g_panelReady = true;
+        return true;
+    }
+
+    void drawStartupPattern()
+    {
+        if (!g_gfx)
+        {
+            return;
+        }
+
+        const uint16_t colors[] = {0xF800, 0x07E0, 0x001F, 0xFFE0};
+        const int barWidth = LCD_H_RES / 4;
+        for (int i = 0; i < 4; ++i)
+        {
+            g_gfx->fillRect(i * barWidth, 0, barWidth, LCD_V_RES, colors[i]);
+        }
+        g_gfx->fillRect(0, LCD_V_RES - 40, LCD_H_RES, 40, 0x0000);
+        g_gfx->setCursor(10, LCD_V_RES - 30);
+        g_gfx->setTextSize(2);
+        g_gfx->setTextColor(0xFFFF);
+        g_gfx->println(F("AMOLED init..."));
+    }
+
+    void initTouch()
+    {
+        g_touchReady = ft3168_init();
+        if (g_touchReady)
+        {
+            lv_indev_drv_t indev_drv;
+            lv_indev_drv_init(&indev_drv);
+            indev_drv.type = LV_INDEV_TYPE_POINTER;
+            indev_drv.read_cb = touch_read_cb;
+            indev_drv.disp = g_disp;
+            lv_indev_drv_register(&indev_drv);
+            ESP_LOGI(TAG, "FT3168 touch ready");
+        }
+        else
+        {
+            ESP_LOGW(TAG, "Touch controller not ready");
+        }
+    }
+
+    bool initLvglDriver()
+    {
+        lv_disp_drv_init(&g_dispDrv);
+        g_dispDrv.hor_res = LCD_H_RES;
+        g_dispDrv.ver_res = LCD_V_RES;
+        g_dispDrv.flush_cb = display_flush_cb;
+        g_dispDrv.draw_buf = &g_drawBuf;
+        g_dispDrv.user_data = g_gfx;
+        g_dispDrv.rounder_cb = lv_rounder_cb;
+
+        g_disp = lv_disp_drv_register(&g_dispDrv);
+        if (!g_disp)
+        {
+            setLastError("lvgl-register-failed");
+            return false;
+        }
+        return true;
+    }
+
+    void startLvglTick()
+    {
+        const esp_timer_create_args_t tick_args = {
+            .callback = [](void *)
+            { lv_tick_inc(LVGL_TICK_PERIOD_MS); },
+            .name = "lvgl_tick"};
+        if (esp_timer_create(&tick_args, &g_lvglTickTimer) == ESP_OK &&
+            esp_timer_start_periodic(g_lvglTickTimer, LVGL_TICK_PERIOD_MS * 1000) == ESP_OK)
+        {
+            g_tickFallback = false;
+        }
+        else
+        {
+            g_tickFallback = true;
+            ESP_LOGW(TAG, "Failed to start LVGL tick timer, using loop fallback");
+        }
+    }
+
     struct TouchPoint
     {
         bool touched = false;
@@ -287,90 +416,29 @@ void display_s3_init()
 
     lv_init();
 
-    size_t bufSize = LCD_H_RES * LVGL_BUFFER_LINES * sizeof(lv_color_t);
-    g_buf1 = static_cast<lv_color_t *>(heap_caps_malloc(bufSize, MALLOC_CAP_DMA));
-    g_buf2 = static_cast<lv_color_t *>(heap_caps_malloc(bufSize, MALLOC_CAP_DMA));
-    if (!g_buf1 || !g_buf2)
+    if (!allocateLvglBuffers())
     {
-        // fallback to non-DMA heap if necessary
-        if (!g_buf1)
-            g_buf1 = new lv_color_t[LCD_H_RES * LVGL_BUFFER_LINES];
-        if (!g_buf2)
-            g_buf2 = new lv_color_t[LCD_H_RES * LVGL_BUFFER_LINES];
-    }
-
-    if (!g_buf1 || !g_buf2)
-    {
-        ESP_LOGE(TAG, "Failed to allocate LVGL buffers");
-        setLastError("lvgl-buffer-alloc-failed");
         return;
     }
 
-    g_buffersAllocated = true;
-
-    lv_disp_draw_buf_init(&g_drawBuf, g_buf1, g_buf2, LCD_H_RES * LVGL_BUFFER_LINES);
-
-    g_bus = new Arduino_ESP32QSPI(PIN_LCD_CS, PIN_LCD_CLK, PIN_LCD_D0, PIN_LCD_D1, PIN_LCD_D2, PIN_LCD_D3);
-    g_gfx = new Arduino_CO5300(g_bus, PIN_LCD_RST, 0, LCD_H_RES, LCD_V_RES);
-
-    if (!g_gfx->begin())
+    if (!initPanel())
     {
-        ESP_LOGE(TAG, "Arduino_GFX begin failed");
-        setLastError("gfx-begin-failed");
         return;
     }
 
-    g_gfx->Display_Brightness(255);
+    drawStartupPattern();
+
     g_gfx->fillScreen(0x0000);
-    g_panelReady = true;
 
-    lv_disp_drv_init(&g_dispDrv);
-    g_dispDrv.hor_res = LCD_H_RES;
-    g_dispDrv.ver_res = LCD_V_RES;
-    g_dispDrv.flush_cb = display_flush_cb;
-    g_dispDrv.draw_buf = &g_drawBuf;
-    g_dispDrv.user_data = g_gfx;
-
-    // WICHTIG: Rounder wie im offiziellen Beispiel
-    g_dispDrv.rounder_cb = lv_rounder_cb;
-
-    g_disp = lv_disp_drv_register(&g_dispDrv);
-
-    if (!g_disp)
+    if (!initLvglDriver())
     {
-        setLastError("lvgl-register-failed");
         return;
     }
 
-    g_touchReady = ft3168_init();
-    if (g_touchReady)
-    {
-        lv_indev_drv_t indev_drv;
-        lv_indev_drv_init(&indev_drv);
-        indev_drv.type = LV_INDEV_TYPE_POINTER;
-        indev_drv.read_cb = touch_read_cb;
-        indev_drv.disp = g_disp;
-        lv_indev_drv_register(&indev_drv);
-        ESP_LOGI(TAG, "FT3168 touch ready");
-    }
-    else
-    {
-        ESP_LOGW(TAG, "Touch controller not ready");
-    }
+    lv_disp_set_default(g_disp);
 
-    const esp_timer_create_args_t tick_args = {
-        .callback = [](void *)
-        { lv_tick_inc(LVGL_TICK_PERIOD_MS); },
-        .name = "lvgl_tick"};
-    if (esp_timer_create(&tick_args, &g_lvglTickTimer) == ESP_OK)
-    {
-        esp_timer_start_periodic(g_lvglTickTimer, LVGL_TICK_PERIOD_MS * 1000);
-    }
-    else
-    {
-        g_tickFallback = true;
-        ESP_LOGW(TAG, "Failed to start LVGL tick timer, using loop fallback");
-    }
+    initTouch();
+    startLvglTick();
 
     ui_main_init(g_disp);
     ui_main_set_gear(g_cachedGear);
@@ -457,6 +525,7 @@ void displayShowDebugPattern(DisplayDebugPattern pattern)
     }
 
     lv_obj_t *scr = create_base_debug_screen();
+    lv_disp_set_default(g_disp);
 
     switch (pattern)
     {
