@@ -75,7 +75,12 @@ Wesentliche Bibliotheken:
 
 - ESP32 BLE Arduino
 - Adafruit NeoPixel
-- LVGL 8.3.11
+  <<<<<<< HEAD
+- # LVGL 8.3.11
+- Adafruit ST7789
+- LVGL 8.4
+- Preferences (NVS)
+  > > > > > > > c32e70ef33f73e1dbabd93dfd9739b96ba443544
 - WebServer (esp32)
 
 ---
