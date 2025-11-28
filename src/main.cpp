@@ -23,6 +23,8 @@ void setup()
     initWebUi();
     initBle();
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
+    Serial.begin(115200);
+    Serial.println("[S3] display_s3_init() called");
     display_s3_init();
     displayShowTestLogo();
 #else

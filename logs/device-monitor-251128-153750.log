@@ -1,0 +1,53 @@
+
+=== ESP32 BLE-OBD ShiftLight + WebUI ===
+[   257][E][STA.cpp:530] disconnect(): STA disconnect failed! 0x3001: ESP_ERR_WIFI_NOT_INIT
+[317][INFO][WIFI][WIFI_AP_START] ssid=ShiftLight ip=192.168.4.1
+[318][INFO][WIFI][AP_READY] ssid=ShiftLight ip=192.168.4.1
+[319][INFO][WEB][WEB_INIT] Web UI routes registered
+[529][INFO][BLE][BLE_CONNECT_TASK_AUTO] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[529][INFO][BLE][BLE_CONNECT_START] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[  1113][E][esp32-hal-i2c-ng.c:275] i2cWrite(): i2c_master_transmit failed: [259] ESP_ERR_INVALID_STATE
+FT3168 init failed
+[ 30533][E][BLEClient.cpp:854] connect(): Connection failed; status=13 
+[30539]
+[30540][fail duration_ms=30010
+[30546][INFO][BLE][BLE_AUTORECONNECT] attempt=2 interval_ms=5000
+[30546][INFO][BLE][BLE_CONNECT_TASK_AUTO] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[30546][INFO][BLE][BLE_CONNECT_START] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[ 60550][E][BLEClient.cpp:854] connect(): Connection failed; status=13 
+[60557][ERROR][BLE][BLBLE][BLE_CONNECT_DONE_AUTO] fail duration_ms=30011
+[60571][INFO][BLE][BLE_AUTORECONNECT] attempt=3 interval_ms=5000
+[60571][INFO][BLE][BLE_CONNECT_TASK_AUTO] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[60571][INFO][BLE][BLE_CONNECT_START] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[ 90575][E][BLEClient.cpp:854] connect(): Connection failed; status=13 
+[90582][INFO][BLE][BLE_CONNECT_DONE_AUTO] fail duration_ms=30011
+[90595][INFO][BLE][BLE_AUTORECONNECT] attempt=4 interval_ms=12000
+[90595][INFO][BLE][BLE_CONNECT_TASK_AUTO] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[90595][INFO][BLE][BLE_CONNECT_START] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[120599][E][BLEClient.cpp:854] connect(): Connection failed; status=13 
+[120606][ERROR][BLE][BLE_CONNECT_FAIL] connect() returned false
+[120606] fail duration_ms=30011
+[120627][INFO][BLE][BLE_AUTORECONNECT] attempt=5 interval_ms=12000
+[120627][INFO][BLE][BLE_CONNECT_TASK_AUTO] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[120627][INFO][BLE][BLE_CONNECT_START] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[150631][E][BLEClient.cpp:854] connect(): Connection failed; status=13 
+150638][ERROR][BLE][B
+[150638][INFO][BLE][BLE_CONNECT_DONE_AUTO] fail duration_ms=30011
+[150651][INFO][BLE][BLE_AUTORECONNECT] attempt=6 interval_ms=12000
+[150651][INFO][BLE][BLE_CONNECT_TASK_AUTO] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[150651][INFO][BLE][BLE_CONNECT_START] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[180655][E][BLEClient.cpp:854] connect(): Connection failed; status=13 
+[180662connect() returned false
+[180662][INFO][BLE][BLE_CONNECT_DONE_AUTO] fail duration_ms=30011
+[180681][INFO][BLE][BLE_AUTORECONNECT] attempt=7 interval_ms=12000
+[180681][INFO][BLE][BLE_CONNECT_TASK_AUTO] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[180681][INFO][BLE][BLE_CONNECT_START] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[210685][E][BLEClient.cpp:854] connect(): Connection failed; status=13 
+[210692][BLE][BLE_CONNECT_FAIL] connect() returned false
+[210692][INFO][BLE][BLE_CONNECT_DONE_AUTO] fail duration_ms=30011
+[210732][INFO][BLE][BLE_AUTORECONNECT] attempt=8 interval_ms=12000
+[210733][INFO][BLE][BLE_CONNECT_TASK_AUTO] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[210733][INFO][BLE][BLE_CONNECT_START] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[240742][E][BLEClient.cpp:854] connect(): Connection failed; status=13 
+[240749][ERROR][BLE][BLE_CONNECT_FAIL] connect() returned false
+[240749][INFO][BLE][BLE_CONNECT_DONE_AUTO] fail duration_ms=30017

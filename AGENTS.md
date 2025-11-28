@@ -7,7 +7,7 @@ Dieses Repository enthält die Firmware für ein ShiftLight-/RPM-Anzeige-System 
 Der Code unterstützt mehrere Hardwarevarianten, insbesondere:
 
 - ältere Boards mit ST7789-Display (240×240)
-- neue Waveshare ESP32-S3 Boards mit 1.64" QSPI AMOLED (320×456)
+- neue Waveshare ESP32-S3 Boards mit 1.64" QSPI AMOLED (2800×456)
 - BLE-OBD Anbindung
 - LED-Bar
 - WLAN-Webserver (AP/STA)
@@ -209,6 +209,7 @@ Damit bleibt das komplette bisherige Paket kompatibel.
 #define LV_HOR_RES_MAX 280
 #define LV_VER_RES_MAX 456
 #define LV_COLOR_DEPTH 16
+#define LV_COLOR_16_SWAP 1
 ````
 
 Rotation/Orientierung muss konsistent mit dem Displaytreiber sein.

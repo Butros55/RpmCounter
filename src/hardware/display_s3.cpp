@@ -1,6 +1,7 @@
 #include "display_s3.h"
 
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
+#warning "ESP32S3 display path is active"
 
 #include <Arduino.h>
 #include <esp_err.h>
@@ -46,8 +47,6 @@ namespace
     constexpr uint8_t TOUCH_ADDR = 0x38;
     constexpr uint32_t TOUCH_I2C_SPEED = 400000;
     constexpr lv_disp_rot_t LCD_ROTATION = LV_DISP_ROT_NONE;
-
-    // Enable to show a minimal debug UI instead of the full application UI
 
     static const char *TAG = "display_s3";
 
@@ -332,21 +331,28 @@ namespace
         {
             ESP_LOGW(TAG, "FT3168 init failed");
         }
-        printf("FT3168 init %s\n", ok ? "ok: " + ok : "failed: " + ok);
+        printf("FT3168 init %s\n", ok ? "ok" : "failed");
         return ok;
     }
 
     TouchPoint ft3168_read_touch()
     {
         TouchPoint p{false, 0, 0};
-        uint8_t buf[5] = {0};
-        if (!i2c_read_reg(TOUCH_ADDR, 0x02, buf, sizeof(buf)))
+
+        uint8_t status = 0;
+        if (!i2c_read_reg(TOUCH_ADDR, 0x02, &status, 1))
             return p;
-        uint8_t points = buf[0] & 0x0F;
-        if (points == 0)
+
+        if ((status & 0x0F) == 0)
             return p;
-        uint16_t x = ((buf[1] & 0x0F) << 8) | buf[2];
-        uint16_t y = ((buf[3] & 0x0F) << 8) | buf[4];
+
+        uint8_t buf[4] = {0};
+        if (!i2c_read_reg(TOUCH_ADDR, 0x03, buf, 4))
+            return p;
+
+        uint16_t x = (((uint16_t)buf[0] & 0x0F) << 8) | buf[1];
+        uint16_t y = (((uint16_t)buf[2] & 0x0F) << 8) | buf[3];
+
         p.x = clamp_to(x, LCD_H_RES - 1);
         p.y = clamp_to(y, LCD_V_RES - 1);
         p.touched = true;
@@ -381,6 +387,7 @@ namespace
     {
         static TouchPoint lastPoint{false, 0, 0};
         TouchPoint p = ft3168_read_touch();
+        Serial.println("[S3] touch_read_cb tick");
         if (p.touched)
         {
             TouchPoint mapped = map_touch_to_display(p);
@@ -567,7 +574,7 @@ void display_s3_init()
     g_displayReady = true;
     g_lastLvglRun = millis();
     setLastError("");
-    ESP_LOGI(TAG, "Display + LVGL init done (S3 AMOLED) res=%dx%d rot=%d simpleUI=%s", LCD_H_RES, LCD_V_RES, static_cast<int>(g_rotation), g_debugSimpleUi ? "on" : "off");
+    ESP_LOGI(TAG, "Display + LVGL init done (S3 AMOLED) res=%dx%d rot=%d simpleUI=%s", LCD_H_RES, LCD_V_RES, static_cast<int>(g_rotation));
 }
 
 bool display_s3_ready()
