@@ -35,19 +35,19 @@ namespace
     constexpr int LVGL_BUF_WIDTH = LCD_H_RES;
     constexpr int LVGL_TICK_PERIOD_MS = 2;
 
-    constexpr int PIN_LCD_CS = 9;
-    constexpr int PIN_LCD_CLK = 10;
-    constexpr int PIN_LCD_D0 = 11;
-    constexpr int PIN_LCD_D1 = 12;
-    constexpr int PIN_LCD_D2 = 13;
-    constexpr int PIN_LCD_D3 = 14;
-    constexpr int PIN_LCD_RST = 21;
+    constexpr gpio_num_t PIN_LCD_CS = GPIO_NUM_9;
+    constexpr gpio_num_t PIN_LCD_CLK = GPIO_NUM_10;
+    constexpr gpio_num_t PIN_LCD_D0 = GPIO_NUM_11;
+    constexpr gpio_num_t PIN_LCD_D1 = GPIO_NUM_12;
+    constexpr gpio_num_t PIN_LCD_D2 = GPIO_NUM_13;
+    constexpr gpio_num_t PIN_LCD_D3 = GPIO_NUM_14;
+    constexpr gpio_num_t PIN_LCD_RST = GPIO_NUM_21;
 
-    constexpr int PIN_TOUCH_SDA = 47;
-    constexpr int PIN_TOUCH_SCL = 48;
+    constexpr gpio_num_t PIN_TOUCH_SDA = GPIO_NUM_47;
+    constexpr gpio_num_t PIN_TOUCH_SCL = GPIO_NUM_48;
     constexpr uint8_t TOUCH_ADDR = 0x38;
     constexpr uint32_t TOUCH_I2C_SPEED = 300000;
-    constexpr i2c_port_t TOUCH_I2C_PORT = I2C_NUM_0;
+    constexpr i2c_port_num_t TOUCH_I2C_PORT = I2C_NUM_0;
     constexpr lv_disp_rot_t LCD_ROTATION = LV_DISP_ROT_NONE;
 
     static const char *TAG = "display_s3";
@@ -298,7 +298,8 @@ namespace
             bus_cfg.i2c_port = TOUCH_I2C_PORT;
             bus_cfg.scl_io_num = PIN_TOUCH_SCL;
             bus_cfg.sda_io_num = PIN_TOUCH_SDA;
-            bus_cfg.glitch_filter_cycles = 0;
+            bus_cfg.glitch_ignore_cnt = 7;
+            bus_cfg.trans_queue_depth = 0;
             bus_cfg.flags.enable_internal_pullup = true;
 
             esp_err_t err = i2c_new_master_bus(&bus_cfg, &g_touchBus);
@@ -310,6 +311,7 @@ namespace
         }
 
         i2c_device_config_t dev_cfg = {};
+        dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
         dev_cfg.device_address = TOUCH_ADDR;
         dev_cfg.scl_speed_hz = TOUCH_I2C_SPEED;
         dev_cfg.scl_wait_us = 0;
