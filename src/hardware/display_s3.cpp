@@ -26,9 +26,9 @@ namespace
     constexpr int LCD_V_RES = 456;
     constexpr int LCD_COL_OFFSET1 = 20;
     constexpr int LCD_ROW_OFFSET1 = 0;
-    constexpr int LCD_COL_OFFSET2 = 180;
+    constexpr int LCD_COL_OFFSET2 = 0;
     constexpr int LCD_ROW_OFFSET2 = 0;
-    constexpr int LCD_BIT_PER_PIXEL = 0;
+    constexpr int LCD_BIT_PER_PIXEL = 16;
     constexpr int LVGL_BUFFER_LINES = 60;
     constexpr int LVGL_BUF_WIDTH = LCD_H_RES;
     constexpr int LVGL_TICK_PERIOD_MS = 2;
@@ -41,8 +41,8 @@ namespace
     constexpr int PIN_LCD_D3 = 14;
     constexpr int PIN_LCD_RST = 21;
 
-    constexpr int PIN_TOUCH_SDA = 8;  // tested 47
-    constexpr int PIN_TOUCH_SCL = 18; // tested 48
+    constexpr int PIN_TOUCH_SDA = 47;
+    constexpr int PIN_TOUCH_SCL = 48;
     constexpr uint8_t TOUCH_ADDR = 0x38;
     constexpr uint32_t TOUCH_I2C_SPEED = 400000;
     constexpr lv_disp_rot_t LCD_ROTATION = LV_DISP_ROT_NONE;
@@ -332,74 +332,32 @@ namespace
         {
             ESP_LOGW(TAG, "FT3168 init failed");
         }
+        printf("FT3168 init %s\n", ok ? "ok: " + ok : "failed: " + ok);
         return ok;
     }
 
     TouchPoint ft3168_read_touch()
     {
         TouchPoint p{false, 0, 0};
-        if (!g_touchReady)
-        {
-            return p;
-        }
-
         uint8_t buf[5] = {0};
         if (!i2c_read_reg(TOUCH_ADDR, 0x02, buf, sizeof(buf)))
-        {
             return p;
-        }
-
         uint8_t points = buf[0] & 0x0F;
         if (points == 0)
-        {
             return p;
-        }
-
-        uint16_t x = static_cast<uint16_t>(((buf[1] & 0x0F) << 8) | buf[2]);
-        uint16_t y = static_cast<uint16_t>(((buf[3] & 0x0F) << 8) | buf[4]);
-
+        uint16_t x = ((buf[1] & 0x0F) << 8) | buf[2];
+        uint16_t y = ((buf[3] & 0x0F) << 8) | buf[4];
         p.x = clamp_to(x, LCD_H_RES - 1);
         p.y = clamp_to(y, LCD_V_RES - 1);
         p.touched = true;
-
         return p;
     }
 
     TouchPoint map_touch_to_display(const TouchPoint &raw)
     {
         TouchPoint mapped = raw;
-        if (!g_disp)
-        {
-            return mapped;
-        }
-
-        switch (g_rotation)
-        {
-        case LV_DISP_ROT_90:
-            mapped.x = raw.y;
-            mapped.y = (raw.x < LCD_H_RES) ? static_cast<uint16_t>(LCD_H_RES - 1 - raw.x) : 0;
-            break;
-        case LV_DISP_ROT_270:
-            mapped.x = (raw.y < LCD_V_RES) ? static_cast<uint16_t>(LCD_V_RES - 1 - raw.y) : 0;
-            mapped.y = raw.x;
-            break;
-        case LV_DISP_ROT_NONE:
-        case LV_DISP_ROT_180:
-        default:
-            mapped = raw;
-            break;
-        }
-
-        const uint16_t maxX = lv_disp_get_hor_res(g_disp);
-        const uint16_t maxY = lv_disp_get_ver_res(g_disp);
-        if (maxX > 0 && mapped.x >= maxX)
-        {
-            mapped.x = maxX - 1;
-        }
-        if (maxY > 0 && mapped.y >= maxY)
-        {
-            mapped.y = maxY - 1;
-        }
+        mapped.x = min(mapped.x, (uint16_t)(lv_disp_get_hor_res(g_disp) - 1));
+        mapped.y = min(mapped.y, (uint16_t)(lv_disp_get_ver_res(g_disp) - 1));
         return mapped;
     }
 
