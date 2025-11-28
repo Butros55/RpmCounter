@@ -138,7 +138,10 @@ namespace
 
     void handleStaFailure(const String &reason)
     {
-        WiFi.disconnect(true);
+        if (WiFi.getMode() != WIFI_MODE_NULL)
+        {
+            WiFi.disconnect(true);
+        }
         g_wifi.staLastError = reason;
         clearStaState();
     }
@@ -153,7 +156,10 @@ bool startApMode(const AppConfig &config)
     if (pass.length() < 8)
         pass = AP_PASS;
 
-    WiFi.disconnect(true);
+    if (WiFi.getMode() != WIFI_MODE_NULL)
+    {
+        WiFi.disconnect(true);
+    }
     WiFi.mode(pickApMode());
     bool ok = WiFi.softAP(ssid.c_str(), pass.c_str());
 
@@ -217,7 +223,10 @@ bool startStaMode(const AppConfig &config, uint32_t timeoutMs)
         g_wifi.apActive = false;
     }
 
-    WiFi.disconnect(true);
+    if (WiFi.getMode() != WIFI_MODE_NULL)
+    {
+        WiFi.disconnect(true);
+    }
     if (config.wifiMode == STA_WITH_AP_FALLBACK)
     {
         if (!g_wifi.apActive)

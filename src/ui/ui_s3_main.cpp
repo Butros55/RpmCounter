@@ -147,14 +147,14 @@ namespace
         lv_obj_set_size(circle, focus ? 86 : 72, focus ? 86 : 72);
         lv_obj_clear_flag(circle, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_t *icon = lv_label_create(circle);
-        lv_obj_set_style_text_font(icon, LV_FONT_MONTSERRAT_36, 0);
+        lv_obj_set_style_text_font(icon, &lv_font_montserrat_32, 0);
         lv_label_set_text(icon, def.symbol);
         lv_obj_center(icon);
 
         lv_obj_t *label = lv_label_create(card);
         lv_label_set_text(label, def.title);
         lv_obj_add_style(label, &styleMuted, 0);
-        lv_obj_set_style_text_font(label, LV_FONT_MONTSERRAT_20, 0);
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_16, 0);
 
         return card;
     }
@@ -219,7 +219,7 @@ namespace
 
         lv_obj_t *titleLbl = lv_label_create(header);
         lv_label_set_text(titleLbl, title);
-        lv_obj_set_style_text_font(titleLbl, LV_FONT_MONTSERRAT_22, 0);
+        lv_obj_set_style_text_font(titleLbl, &lv_font_montserrat_24, 0);
 
         lv_obj_t *back = lv_label_create(header);
         lv_label_set_text(back, LV_SYMBOL_LEFT " Back");
@@ -462,7 +462,7 @@ namespace
 
         g_ui.title = lv_label_create(g_ui.root);
         lv_obj_align(g_ui.title, LV_ALIGN_BOTTOM_MID, 0, -46);
-        lv_obj_set_style_text_font(g_ui.title, LV_FONT_MONTSERRAT_22, 0);
+        lv_obj_set_style_text_font(g_ui.title, &lv_font_montserrat_24, 0);
 
         g_ui.gearBadge = lv_label_create(g_ui.root);
         lv_obj_add_style(g_ui.gearBadge, &styleBadge, 0);
@@ -558,7 +558,7 @@ void ui_s3_show_logo()
     {
         g_ui.logoOverlay = lv_label_create(g_ui.root);
         lv_label_set_text(g_ui.logoOverlay, "ShiftLight");
-        lv_obj_set_style_text_font(g_ui.logoOverlay, LV_FONT_MONTSERRAT_28, 0);
+        lv_obj_set_style_text_font(g_ui.logoOverlay, &lv_font_montserrat_32, 0);
         lv_obj_align(g_ui.logoOverlay, LV_ALIGN_CENTER, 0, 0);
     }
     lv_obj_clear_flag(g_ui.logoOverlay, LV_OBJ_FLAG_HIDDEN);

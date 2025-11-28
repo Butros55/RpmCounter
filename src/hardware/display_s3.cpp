@@ -10,9 +10,10 @@
 #include <esp_log.h>
 #include <esp_timer.h>
 #include <driver/gpio.h>
-#include <Wire.h>
+#include <driver/i2c_master.h>
 #include <Arduino_GFX_Library.h>
 #include <algorithm>
+#include <cstring>
 
 #include "core/wifi.h"
 #include "core/config.h"
@@ -45,7 +46,8 @@ namespace
     constexpr int PIN_TOUCH_SDA = 47;
     constexpr int PIN_TOUCH_SCL = 48;
     constexpr uint8_t TOUCH_ADDR = 0x38;
-    constexpr uint32_t TOUCH_I2C_SPEED = 400000;
+    constexpr uint32_t TOUCH_I2C_SPEED = 300000;
+    constexpr i2c_port_t TOUCH_I2C_PORT = I2C_NUM_0;
     constexpr lv_disp_rot_t LCD_ROTATION = LV_DISP_ROT_NONE;
 
     static const char *TAG = "display_s3";
@@ -268,71 +270,136 @@ namespace
         TouchPoint(bool t, uint16_t px, uint16_t py) : touched(t), x(px), y(py) {}
     };
 
+    // letzter Touch + Debug-Dot
     static TouchPoint g_lastTouch{};
     static lv_obj_t *g_touchDot = nullptr;
+
+    // Neuer I2C-Treiber (driver_ng)
+    static i2c_master_bus_handle_t g_touchBus = nullptr;
+    static i2c_master_dev_handle_t g_touchDev = nullptr;
 
     uint16_t clamp_to(uint16_t value, uint16_t maxValue)
     {
         return static_cast<uint16_t>(std::min<uint32_t>(value, maxValue));
     }
 
-    bool i2c_write_reg(uint8_t addr, uint8_t reg, const uint8_t *data, size_t len)
+    // Low‑Level Init: Bus + Device (nur EINMAL)
+    static bool ft3168_ll_init()
     {
-        Wire.beginTransmission(addr);
-        Wire.write(reg);
-        for (size_t i = 0; i < len; ++i)
+        if (g_touchDev)
         {
-            Wire.write(data[i]);
+            return true; // schon fertig
         }
-        return Wire.endTransmission() == 0;
+
+        if (!g_touchBus)
+        {
+            i2c_master_bus_config_t bus_cfg = {};
+            bus_cfg.clk_source = I2C_CLK_SRC_DEFAULT;
+            bus_cfg.i2c_port = TOUCH_I2C_PORT;
+            bus_cfg.scl_io_num = PIN_TOUCH_SCL;
+            bus_cfg.sda_io_num = PIN_TOUCH_SDA;
+            bus_cfg.glitch_filter_cycles = 0;
+            bus_cfg.flags.enable_internal_pullup = true;
+
+            esp_err_t err = i2c_new_master_bus(&bus_cfg, &g_touchBus);
+            if (err != ESP_OK)
+            {
+                ESP_LOGE(TAG, "i2c_new_master_bus failed: %s", esp_err_to_name(err));
+                return false;
+            }
+        }
+
+        i2c_device_config_t dev_cfg = {};
+        dev_cfg.device_address = TOUCH_ADDR;
+        dev_cfg.scl_speed_hz = TOUCH_I2C_SPEED;
+        dev_cfg.scl_wait_us = 0;
+        dev_cfg.flags.disable_ack_check = false;
+
+        esp_err_t err = i2c_master_bus_add_device(g_touchBus, &dev_cfg, &g_touchDev);
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "i2c_master_bus_add_device failed: %s", esp_err_to_name(err));
+            g_touchDev = nullptr;
+            return false;
+        }
+
+        return true;
     }
 
-    bool i2c_read_reg(uint8_t addr, uint8_t reg, uint8_t *out, size_t len)
+    static bool ft3168_write_reg(uint8_t reg, const uint8_t *data, size_t len)
     {
-        Wire.beginTransmission(addr);
-        Wire.write(reg);
-        if (Wire.endTransmission(false) != 0)
-        {
+        if (!ft3168_ll_init())
             return false;
+
+        if (len > 7)
+            len = 7; // Sicherheit, wir brauchen max. 1 Byte
+
+        uint8_t buf[8];
+        buf[0] = reg;
+        if (data && len)
+        {
+            memcpy(&buf[1], data, len);
         }
 
-        size_t received = Wire.requestFrom(addr, static_cast<uint8_t>(len));
-        if (received != len)
+        esp_err_t err = i2c_master_transmit(
+            g_touchDev,
+            buf,
+            len + 1,
+            pdMS_TO_TICKS(50));
+
+        if (err != ESP_OK)
         {
+            ESP_LOGW(TAG, "FT3168 write reg=0x%02X len=%u err=%s",
+                     reg, (unsigned)len, esp_err_to_name(err));
             return false;
         }
-        for (size_t i = 0; i < len; ++i)
+        return true;
+    }
+
+    static bool ft3168_read_reg(uint8_t reg, uint8_t *data, size_t len)
+    {
+        if (!ft3168_ll_init() || !data || len == 0)
+            return false;
+
+        esp_err_t err = i2c_master_transmit_receive(
+            g_touchDev,
+            &reg,
+            1,
+            data,
+            len,
+            pdMS_TO_TICKS(50));
+
+        if (err != ESP_OK)
         {
-            out[i] = Wire.read();
+            ESP_LOGW(TAG, "FT3168 read reg=0x%02X len=%u err=%s",
+                     reg, (unsigned)len, esp_err_to_name(err));
+            return false;
         }
         return true;
     }
 
     bool ft3168_init()
     {
-        Wire.begin(PIN_TOUCH_SDA, PIN_TOUCH_SCL);
-        Wire.setClock(TOUCH_I2C_SPEED);
+        uint8_t mode = 0x00; // normal mode
+        if (!ft3168_write_reg(0x00, &mode, 1))
+        {
+            ESP_LOGW(TAG, "FT3168: write mode failed");
+            printf("FT3168 init failed (write)\n");
+            return false;
+        }
 
-        uint8_t mode = 0x00;
-        uint8_t id = 0x00;
-        bool ok = i2c_write_reg(TOUCH_ADDR, 0x00, &mode, 1);
-        if (ok)
+        uint8_t id = 0;
+        if (!ft3168_read_reg(0xA3, &id, 1))
         {
-            if (i2c_read_reg(TOUCH_ADDR, 0xA3, &id, 1))
-            {
-                ESP_LOGI(TAG, "FT3168 touch initialized (ID=0x%02X) sda=%d scl=%d", id, PIN_TOUCH_SDA, PIN_TOUCH_SCL);
-            }
-            else
-            {
-                ESP_LOGW(TAG, "FT3168 init ok but ID read failed");
-            }
+            ESP_LOGW(TAG, "FT3168: read ID failed");
+            printf("FT3168 init failed (id)\n");
+            return false;
         }
-        else
-        {
-            ESP_LOGW(TAG, "FT3168 init failed");
-        }
-        printf("FT3168 init %s\n", ok ? "ok" : "failed");
-        return ok;
+
+        ESP_LOGI(TAG, "FT3168 touch initialized (ID=0x%02X) sda=%d scl=%d",
+                 id, PIN_TOUCH_SDA, PIN_TOUCH_SCL);
+        printf("FT3168 init ok (ID=0x%02X)\n", id);
+        return true;
     }
 
     TouchPoint ft3168_read_touch()
@@ -340,14 +407,15 @@ namespace
         TouchPoint p{false, 0, 0};
 
         uint8_t status = 0;
-        if (!i2c_read_reg(TOUCH_ADDR, 0x02, &status, 1))
+        if (!ft3168_read_reg(0x02, &status, 1))
             return p;
 
-        if ((status & 0x0F) == 0)
+        uint8_t touchCount = status & 0x0F;
+        if (touchCount == 0)
             return p;
 
-        uint8_t buf[4] = {0};
-        if (!i2c_read_reg(TOUCH_ADDR, 0x03, buf, 4))
+        uint8_t buf[4] = {};
+        if (!ft3168_read_reg(0x03, buf, sizeof(buf)))
             return p;
 
         uint16_t x = (((uint16_t)buf[0] & 0x0F) << 8) | buf[1];
@@ -574,7 +642,9 @@ void display_s3_init()
     g_displayReady = true;
     g_lastLvglRun = millis();
     setLastError("");
-    ESP_LOGI(TAG, "Display + LVGL init done (S3 AMOLED) res=%dx%d rot=%d simpleUI=%s", LCD_H_RES, LCD_V_RES, static_cast<int>(g_rotation));
+    ESP_LOGI(TAG,
+             "Display + LVGL init done (S3 AMOLED) res=%dx%d rot=%d",
+             LCD_H_RES, LCD_V_RES, static_cast<int>(g_rotation));
 }
 
 bool display_s3_ready()
