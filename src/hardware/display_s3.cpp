@@ -18,19 +18,21 @@
 #include "core/state.h"
 #include "hardware/display.h"
 #include "ui/ui_manager.h"
+#include "ui/ui_s3_main.h"
 
 namespace
 {
     // Native panel resolution (portrait) for Waveshare ESP32-S3 Touch AMOLED 1.64"
+    // Active window: 280x456 with a 20px left offset, no other gaps
     constexpr int LCD_H_RES = 280;
     constexpr int LCD_V_RES = 456;
     constexpr int LCD_COL_OFFSET1 = 20;
     constexpr int LCD_ROW_OFFSET1 = 0;
-    constexpr int LCD_COL_OFFSET2 = 180;
-    constexpr int LCD_ROW_OFFSET2 = 24;
+    constexpr int LCD_COL_OFFSET2 = 0;
+    constexpr int LCD_ROW_OFFSET2 = 0;
     constexpr int LCD_BIT_PER_PIXEL = 16;
     constexpr int LVGL_BUFFER_LINES = 60;
-    constexpr int LVGL_BUF_WIDTH = std::max(LCD_V_RES, LCD_H_RES);
+    constexpr int LVGL_BUF_WIDTH = LCD_H_RES;
     constexpr int LVGL_TICK_PERIOD_MS = 2;
 
     constexpr int PIN_LCD_CS = 9;
@@ -40,11 +42,12 @@ namespace
     constexpr int PIN_LCD_D2 = 13;
     constexpr int PIN_LCD_D3 = 14;
     constexpr int PIN_LCD_RST = 21;
-    constexpr int PIN_TOUCH_SDA = 47;
-    constexpr int PIN_TOUCH_SCL = 48;
+    // Waveshare ESP32-S3 Touch AMOLED 1.64 touch (FT3168) I2C pins
+    constexpr int PIN_TOUCH_SDA = 8;
+    constexpr int PIN_TOUCH_SCL = 18;
     constexpr uint8_t TOUCH_ADDR = 0x38;
     constexpr uint32_t TOUCH_I2C_SPEED = 400000;
-    constexpr lv_disp_rot_t LCD_ROTATION = LV_DISP_ROT_270;
+    constexpr lv_disp_rot_t LCD_ROTATION = LV_DISP_ROT_NONE;
 
 // Enable to show a minimal debug UI instead of the full application UI
 #define DISPLAY_DEBUG_SIMPLE_UI 1
@@ -228,7 +231,7 @@ namespace
         g_dispDrv.draw_buf = &g_drawBuf;
         g_dispDrv.user_data = g_gfx;
         g_dispDrv.rounder_cb = lv_rounder_cb;
-        g_dispDrv.sw_rotate = 1;
+        g_dispDrv.sw_rotate = 0;
 
         g_disp = lv_disp_drv_register(&g_dispDrv);
         if (!g_disp)
@@ -269,6 +272,9 @@ namespace
         TouchPoint() = default;
         TouchPoint(bool t, uint16_t px, uint16_t py) : touched(t), x(px), y(py) {}
     };
+
+    static TouchPoint g_lastTouch{};
+    static lv_obj_t *g_touchDot = nullptr;
 
     uint16_t clamp_to(uint16_t value, uint16_t maxValue)
     {
@@ -313,14 +319,23 @@ namespace
         Wire.setClock(TOUCH_I2C_SPEED);
 
         uint8_t mode = 0x00;
+        uint8_t id = 0x00;
+
         bool ok = i2c_write_reg(TOUCH_ADDR, 0x00, &mode, 1);
-        if (!ok)
+        if (ok)
         {
-            ESP_LOGW(TAG, "FT3168 init failed");
+            if (i2c_read_reg(TOUCH_ADDR, 0xA3, &id, 1))
+            {
+                ESP_LOGI(TAG, "FT3168 touch initialized (ID=0x%02X) sda=%d scl=%d", id, PIN_TOUCH_SDA, PIN_TOUCH_SCL);
+            }
+            else
+            {
+                ESP_LOGW(TAG, "FT3168 init ok but ID read failed");
+            }
         }
         else
         {
-            ESP_LOGI(TAG, "FT3168 touch initialized on Wire");
+            ESP_LOGW(TAG, "FT3168 init failed");
         }
         return ok;
     }
@@ -333,26 +348,20 @@ namespace
             return p;
         }
 
-        uint8_t points = 0;
-        if (!i2c_read_reg(TOUCH_ADDR, 0x02, &points, 1))
+        uint8_t buf[5] = {0};
+        if (!i2c_read_reg(TOUCH_ADDR, 0x02, buf, sizeof(buf)))
         {
             return p;
         }
 
-        points &= 0x0F;
+        uint8_t points = buf[0] & 0x0F;
         if (points == 0)
         {
             return p;
         }
 
-        uint8_t buf[4] = {0};
-        if (!i2c_read_reg(TOUCH_ADDR, 0x03, buf, sizeof(buf)))
-        {
-            return p;
-        }
-
-        uint16_t x = static_cast<uint16_t>(((buf[0] & 0x0F) << 8) | buf[1]);
-        uint16_t y = static_cast<uint16_t>(((buf[2] & 0x0F) << 8) | buf[3]);
+        uint16_t x = static_cast<uint16_t>(((buf[1] & 0x0F) << 8) | buf[2]);
+        uint16_t y = static_cast<uint16_t>(((buf[3] & 0x0F) << 8) | buf[4]);
 
         p.x = clamp_to(x, LCD_H_RES - 1);
         p.y = clamp_to(y, LCD_V_RES - 1);
@@ -426,6 +435,12 @@ namespace
             data->point.x = mapped.x;
             data->point.y = mapped.y;
             lastPoint = mapped;
+            g_lastTouch = mapped;
+            if (g_touchDot)
+            {
+                lv_obj_set_pos(g_touchDot, mapped.x - lv_obj_get_width(g_touchDot) / 2, mapped.y - lv_obj_get_height(g_touchDot) / 2);
+                lv_obj_clear_flag(g_touchDot, LV_OBJ_FLAG_HIDDEN);
+            }
             static bool logged = false;
             if (!logged)
             {
@@ -451,6 +466,14 @@ namespace
         lv_obj_set_style_border_width(scr, 1, 0);
         lv_obj_set_style_border_color(scr, lv_color_white(), 0);
         lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+
+        g_touchDot = lv_obj_create(scr);
+        lv_obj_remove_style_all(g_touchDot);
+        lv_obj_set_size(g_touchDot, 12, 12);
+        lv_obj_set_style_bg_color(g_touchDot, lv_color_hex(0x00FF7F), 0);
+        lv_obj_set_style_bg_opa(g_touchDot, LV_OPA_70, 0);
+        lv_obj_set_style_radius(g_touchDot, 6, 0);
+        lv_obj_add_flag(g_touchDot, LV_OBJ_FLAG_HIDDEN);
 
         lv_obj_t *label = lv_label_create(scr);
         lv_obj_set_style_text_font(label, &lv_font_montserrat_32, 0);
@@ -480,6 +503,7 @@ namespace
                     return;
                 toggled = !toggled;
                 lv_label_set_text(lbl, toggled ? "Tapped!" : "ShiftLight S3 TEST");
+                ESP_LOGI(TAG, "Button clicked at x=%d y=%d", g_lastTouch.x, g_lastTouch.y);
             },
             LV_EVENT_CLICKED,
             label);
@@ -512,8 +536,8 @@ void displayClear()
         return;
 
     g_cachedShift = false;
-    ui_manager_set_shiftlight(false);
-    ui_manager_set_gear(g_cachedGear);
+    ui_s3_set_shiftlight(false);
+    ui_s3_set_gear(g_cachedGear);
 }
 
 void displayShowTestLogo()
@@ -525,7 +549,7 @@ void displayShowTestLogo()
     if (g_debugSimpleUi)
         return;
 
-    ui_manager_show_logo();
+    ui_s3_show_logo();
 }
 
 void displaySetGear(int gear)
@@ -540,7 +564,7 @@ void displaySetGear(int gear)
     if (g_debugSimpleUi)
         return;
 
-    ui_manager_set_gear(gear);
+    ui_s3_set_gear(gear);
 }
 
 void displaySetShiftBlink(bool active)
@@ -552,7 +576,7 @@ void displaySetShiftBlink(bool active)
     if (g_debugSimpleUi)
         return;
 
-    ui_manager_set_shiftlight(active);
+    ui_s3_set_shiftlight(active);
 }
 
 void display_s3_init()
@@ -592,12 +616,12 @@ void display_s3_init()
     {
         UiDisplayHooks hooks{};
         hooks.setBrightness = applyPanelBrightness;
-        ui_manager_init(g_disp, hooks);
-        ui_manager_set_gear(g_cachedGear);
-        ui_manager_set_shiftlight(g_cachedShift);
+        ui_s3_init(g_disp, hooks);
+        ui_s3_set_gear(g_cachedGear);
+        ui_s3_set_shiftlight(g_cachedShift);
         if (g_logoRequested)
         {
-            ui_manager_show_logo();
+            ui_s3_show_logo();
         }
     }
 
@@ -633,7 +657,7 @@ void display_s3_loop()
 
     if (!g_debugSimpleUi)
     {
-        ui_manager_loop(wifiStatus, g_connected, g_bleConnectInProgress);
+        ui_s3_loop(wifiStatus, g_connected, g_bleConnectInProgress);
     }
 }
 
