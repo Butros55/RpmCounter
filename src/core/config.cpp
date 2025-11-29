@@ -38,6 +38,11 @@ void initConfig()
     cfg.logoOnIgnitionOn = true;
     cfg.logoOnEngineStart = true;
     cfg.logoOnIgnitionOff = true;
+    cfg.displayBrightness = 220;
+    cfg.uiTutorialSeen = false;
+    cfg.uiLastMenuIndex = 0;
+    cfg.uiNightMode = true;
+    cfg.useMph = false;
     cfg.greenColor = {0, 255, 0};
     cfg.yellowColor = {255, 180, 0};
     cfg.redColor = {255, 0, 0};
@@ -45,9 +50,9 @@ void initConfig()
     cfg.yellowLabel = "Yellow";
     cfg.redLabel = "Red";
 
-    cfg.wifiMode = AP_ONLY;
-    cfg.staSsid = "";
-    cfg.staPassword = "";
+    cfg.wifiMode = STA_WITH_AP_FALLBACK;
+    cfg.staSsid = "Larry-LAN";
+    cfg.staPassword = "R4di0C0ntroll3d";
     cfg.apSsid = AP_SSID;
     cfg.apPassword = AP_PASS;
 }
@@ -57,7 +62,16 @@ void loadConfig()
     Preferences prefs;
     if (!prefs.begin(PREF_NAMESPACE, true))
     {
-        return;
+        // Namespace missing yet – open writable once to create it so future reads don't fail
+        if (prefs.begin(PREF_NAMESPACE, false))
+        {
+            prefs.end();
+            prefs.begin(PREF_NAMESPACE, true);
+        }
+        else
+        {
+            return;
+        }
     }
 
     cfg.autoScaleMaxRpm = prefs.getBool("autoscale", cfg.autoScaleMaxRpm);
@@ -71,6 +85,11 @@ void loadConfig()
         cfg.blinkStartPct = cfg.yellowEndPct;
     cfg.brightness = clampInt(prefs.getInt("brightness", cfg.brightness), 0, 255);
     cfg.mode = clampInt(prefs.getInt("mode", cfg.mode), 0, 2);
+    cfg.displayBrightness = clampInt(prefs.getInt("dispBright", cfg.displayBrightness), 10, 255);
+    cfg.uiTutorialSeen = prefs.getBool("uiTutSeen", cfg.uiTutorialSeen);
+    cfg.uiLastMenuIndex = clampInt(prefs.getInt("uiMenuIdx", cfg.uiLastMenuIndex), 0, 5);
+    cfg.uiNightMode = prefs.getBool("uiNight", cfg.uiNightMode);
+    cfg.useMph = prefs.getBool("useMph", cfg.useMph);
 
     cfg.logoOnIgnitionOn = prefs.getBool("logoIgnOn", cfg.logoOnIgnitionOn);
     cfg.logoOnEngineStart = prefs.getBool("logoEngStart", cfg.logoOnEngineStart);
@@ -116,6 +135,11 @@ void saveConfig()
     prefs.putInt("blinkStart", cfg.blinkStartPct);
     prefs.putInt("brightness", cfg.brightness);
     prefs.putInt("mode", cfg.mode);
+    prefs.putInt("dispBright", cfg.displayBrightness);
+    prefs.putBool("uiTutSeen", cfg.uiTutorialSeen);
+    prefs.putInt("uiMenuIdx", cfg.uiLastMenuIndex);
+    prefs.putBool("uiNight", cfg.uiNightMode);
+    prefs.putBool("useMph", cfg.useMph);
 
     prefs.putBool("logoIgnOn", cfg.logoOnIgnitionOn);
     prefs.putBool("logoEngStart", cfg.logoOnEngineStart);

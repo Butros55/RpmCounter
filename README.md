@@ -6,12 +6,13 @@ Perfekt geeignet für OBD‑II‑Live-Daten, LED‑RPM‑Indikatoren (F1‑Style
 
 ---
 
+hju
+
 # 🌟 Features
 
 ## 🔧 **Hardware‑Features**
 
-- ESP32‑S3 mit 16 MB Flash
-- LVGL Display (ST7789, Touch)
+- ESP32‑S3 mit 16 MB Flash(LVGL Display)
 - RGB‑LED‑Bar (NeoPixel)
 - Bluetooth BLE (OBD‑II Dongle)
 - WLAN AP/STA für Web‑Konfiguration
@@ -76,9 +77,11 @@ Wesentliche Bibliotheken:
 
 - ESP32 BLE Arduino
 - Adafruit NeoPixel
+  <<<<<<< HEAD
+- # LVGL 8.3.11
 - Adafruit ST7789
-- LVGL 8.4
 - Preferences (NVS)
+  > > > > > > > c32e70ef33f73e1dbabd93dfd9739b96ba443544
 - WebServer (esp32)
 
 ---
@@ -111,12 +114,6 @@ pwsh -Command "cd 'C:\dev\RpmCounter'; pio device monitor"
 Unit‑Tests laufen unter WSL:
 
 ```bash
-pio test -e native
-```
-
-Für Board‑nahe Tests:
-
-```bash
 pio test -e esp32s3
 ```
 
@@ -131,7 +128,7 @@ _(Platzhalter – kann später ergänzt werden)_
 # 🛣️ Roadmap
 
 - 🔜 Performance-Optimierung LVGL
-- 🔜 Neues UI‑Layout (Dark Mode)
+- 🔜 Neues UI‑Layout
 - 🔜 OBD‑Datencaching für schnellere Anzeige
 - 🔜 Fahrzeugprofile
 - 🔜 Logging-System über WLAN
@@ -147,8 +144,6 @@ Bitte beachte die Struktur unter `src/` und halte dich an non-blocking Patterns.
 ---
 
 # 📄 Lizenz
-
-MIT License – frei nutzbar für alle Projekte.
 
 ---
 

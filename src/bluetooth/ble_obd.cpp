@@ -1,9 +1,16 @@
 #include "ble_obd.h"
 
+#if __has_include(<NimBLEDevice.h>)
+#ifndef RPMCOUNTER_USE_NIMBLE
+#define RPMCOUNTER_USE_NIMBLE 1
+#endif
+#include <NimBLEDevice.h>
+#else
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEScan.h>
 #include <BLEAdvertisedDevice.h>
+#endif
 #include <math.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -19,6 +26,27 @@
 
 namespace
 {
+#if RPMCOUNTER_USE_NIMBLE
+    using BleDeviceClass = NimBLEDevice;
+    using BleScan = NimBLEScan;
+    using BleScanResults = NimBLEScanResults;
+    using BleAdvertisedDevice = NimBLEAdvertisedDevice;
+    using BleClient = NimBLEClient;
+    using BleClientCallbacks = NimBLEClientCallbacks;
+    using BleAddress = NimBLEAddress;
+    using BleRemoteService = NimBLERemoteService;
+    using BleRemoteCharacteristic = NimBLERemoteCharacteristic;
+#else
+    using BleDeviceClass = BLEDevice;
+    using BleScan = BLEScan;
+    using BleScanResults = BLEScanResults;
+    using BleAdvertisedDevice = BLEAdvertisedDevice;
+    using BleClient = BLEClient;
+    using BleClientCallbacks = BLEClientCallbacks;
+    using BleAddress = BLEAddress;
+    using BleRemoteService = BLERemoteService;
+    using BleRemoteCharacteristic = BLERemoteCharacteristic;
+#endif
     constexpr float GEAR_RATIO_TABLE[] = {0.f, 95.f, 65.f, 48.f, 36.f, 28.f, 23.f, 19.f, 16.f};
     constexpr size_t GEAR_RATIO_COUNT = sizeof(GEAR_RATIO_TABLE) / sizeof(GEAR_RATIO_TABLE[0]);
     unsigned long lastGearDecisionMs = 0;
@@ -114,11 +142,7 @@ namespace
                 }
 
                 g_currentRpm = rpm;
-                Serial.print("=> RPM: ");
-                Serial.print(rpm);
-                Serial.print("   (max: ");
-                Serial.print(g_maxSeenRpm);
-                Serial.println(")");
+                // Only log RPM changes (skip if same as before to reduce spam)\n                static int lastLoggedRpm = -1;\n                if (abs(rpm - lastLoggedRpm) >= 100)  // Log if RPM changed by 100+\n                {\n                    Serial.printf(\"[OBD] RPM: %d  (max: %d)\\n\", rpm, g_maxSeenRpm);\n                    lastLoggedRpm = rpm;\n                }
 
                 unsigned long nowMs = millis();
                 g_lastObdMs = nowMs;
@@ -134,7 +158,7 @@ namespace
                     g_engineStartLogoShown = false;
                     if (cfg.logoOnIgnitionOn && nowMs - g_lastLogoMs > LOGO_COOLDOWN_MS && !g_ignitionLogoShown)
                     {
-                        Serial.println("[MLOGO] Zündung an – Animation");
+                        Serial.println("[LOGO] Ignition ON - Playing M-Logo Animation");
                         g_logoPlayedThisCycle = true;
                         g_leavingPlayedThisCycle = false;
                         g_lastLogoMs = nowMs;
@@ -146,7 +170,7 @@ namespace
                 {
                     if (cfg.logoOnEngineStart && !g_engineStartLogoShown && nowMs - g_lastLogoMs > LOGO_COOLDOWN_MS)
                     {
-                        Serial.println("[MLOGO] Motorstart – Animation");
+                        Serial.println("[LOGO] Engine START - Playing M-Logo Animation");
                         g_logoPlayedThisCycle = true;
                         g_leavingPlayedThisCycle = false;
                         g_lastLogoMs = nowMs;
@@ -175,7 +199,7 @@ namespace
         updateGearEstimate();
     }
 
-    static void notifyCallback(BLERemoteCharacteristic * /*characteristic*/, uint8_t *pData, size_t length, bool /*isNotify*/)
+    static void notifyCallback(BleRemoteCharacteristic * /*characteristic*/, uint8_t *pData, size_t length, bool /*isNotify*/)
     {
         for (size_t i = 0; i < length; i++)
         {
@@ -200,9 +224,36 @@ namespace
         }
     }
 
-    class MyClientCallback : public BLEClientCallbacks
+    bool subscribeToNotifications(BleRemoteCharacteristic *characteristic)
     {
-        void onConnect(BLEClient * /*pclient*/) override
+        if (!characteristic)
+        {
+            return false;
+        }
+
+#if RPMCOUNTER_USE_NIMBLE
+        if (characteristic->canNotify())
+        {
+            return characteristic->subscribe(true, notifyCallback);
+        }
+        if (characteristic->canIndicate())
+        {
+            return characteristic->subscribe(false, notifyCallback);
+        }
+        return false;
+#else
+        if (characteristic->canNotify())
+        {
+            characteristic->registerForNotify(notifyCallback);
+            return true;
+        }
+        return false;
+#endif
+    }
+
+    class MyClientCallback : public BleClientCallbacks
+    {
+        void onConnect(BleClient * /*pclient*/) override
         {
             LOG_INFO("BLE", "BLE_CONNECTED", "BLE client connected");
             g_connected = true;
@@ -212,7 +263,7 @@ namespace
             g_manualConnectFailed = false;
         }
 
-        void onDisconnect(BLEClient * /*pclient*/) override
+        void onDisconnect(BleClient * /*pclient*/) override
         {
             LOG_INFO("BLE", "BLE_DISCONNECTED", "BLE client disconnected");
             bool wasIgnition = g_ignitionOn;
@@ -261,12 +312,12 @@ bool connectToObd(const String &address, const String &name)
     unsigned long startMs = millis();
     LOG_INFO("BLE", "BLE_CONNECT_START", String("target=") + targetAddr + " name=" + g_currentTargetName);
 
-    BLEAddress obdAddress(targetAddr.c_str());
+    BleAddress obdAddress(targetAddr.c_str());
 
-    g_client = BLEDevice::createClient();
+    g_client = BleDeviceClass::createClient();
     if (!g_client)
     {
-        LOG_ERROR("BLE", "BLE_CLIENT_NULL", "BLEDevice::createClient() returned nullptr");
+        LOG_ERROR("BLE", "BLE_CLIENT_NULL", "BLE device client allocation failed");
         return false;
     }
     delay(1);
@@ -283,7 +334,7 @@ bool connectToObd(const String &address, const String &name)
 
     LOG_INFO("BLE", "BLE_CONNECT_LINK", "Connected, discovering service FFF0");
 
-    BLERemoteService *pService = g_client->getService(SERVICE_UUID);
+    BleRemoteService *pService = g_client->getService(SERVICE_UUID);
     if (pService == nullptr)
     {
         LOG_ERROR("BLE", "BLE_SERVICE_MISSING", "Service FFF0 not found, disconnecting");
@@ -303,11 +354,7 @@ bool connectToObd(const String &address, const String &name)
 
     LOG_INFO("BLE", "BLE_CONNECT_CHARS", "Characteristics found");
 
-    if (g_charNotify->canNotify())
-    {
-        g_charNotify->registerForNotify(notifyCallback);
-    }
-    else
+    if (!subscribeToNotifications(g_charNotify))
     {
         LOG_ERROR("BLE", "BLE_NOTIFY_DISABLED", "Notify characteristic cannot notify");
     }
@@ -369,6 +416,13 @@ bool startConnectTask(bool manualAttempt)
     if (g_connectTaskRunning)
     {
         return false;
+    }
+
+    if (g_bleScanRunning)
+    {
+        BleDeviceClass::getScan()->stop();
+        g_bleScanRunning = false;
+        g_bleScanFinishedMs = millis();
     }
 
     g_connectTaskRunning = true;
@@ -446,7 +500,7 @@ bool startConnectTask(bool manualAttempt)
 
 bool startBleScan(uint32_t durationSeconds)
 {
-    if (g_bleScanRunning || g_connectTaskRunning)
+    if (g_bleScanRunning || g_connectTaskRunning || g_manualConnectActive || g_bleConnectInProgress)
     {
         LOG_DEBUG("BLE", "BLE_SCAN_SKIP", "Scan skipped because another task is active");
         return false;
@@ -460,23 +514,32 @@ bool startBleScan(uint32_t durationSeconds)
     auto task = [](void *param)
     {
         uint32_t duration = (uint32_t)(uintptr_t)param;
-        BLEScan *pScan = BLEDevice::getScan();
+        BleScan *pScan = BleDeviceClass::getScan();
         pScan->setActiveScan(true);
         // Slightly reduce duty cycle to keep WiFi/AP responsive during scans.
         pScan->setInterval(140);
         pScan->setWindow(60);
         vTaskDelay(pdMS_TO_TICKS(2));
 
-        BLEScanResults results = pScan->start(duration, false);
+        BleScanResults *results = pScan->start(duration, false);
+        if (results == nullptr)
+        {
+            g_bleScanFinishedMs = millis();
+            g_bleScanRunning = false;
+            LOG_ERROR("BLE", "BLE_SCAN_NULL", "scan returned no results");
+            vTaskDelete(nullptr);
+            return;
+        }
+
         g_bleScanResults.clear();
-        int count = results.getCount();
+        int count = results->getCount();
         for (int i = 0; i < count; i++)
         {
-            BLEAdvertisedDevice dev = results.getDevice(i);
+            BleAdvertisedDevice dev = results->getDevice(i);
             BleDeviceInfo info;
             info.address = String(dev.getAddress().toString().c_str());
-            std::string name = dev.getName();
-            info.name = name.empty() ? info.address : String(name.c_str());
+            String name = dev.getName();
+            info.name = name.length() ? name : info.address;
             if (g_autoReconnectPaused && !g_lastSuccessfulAddr.isEmpty() && info.address == g_lastSuccessfulAddr)
             {
                 g_autoReconnectPaused = false;
@@ -512,11 +575,11 @@ const std::vector<BleDeviceInfo> &getBleScanResults()
 
 void initBle()
 {
-    BLEDevice::init("ESP32-OBD-BLE");
+    BleDeviceClass::init("ESP32-OBD-BLE");
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
-    BLEDevice::setPower(ESP_PWR_LVL_P9); // S3
+    BleDeviceClass::setPower(ESP_PWR_LVL_P9); // S3
 #else
-    BLEDevice::setPower(ESP_PWR_LVL_P7); // „normaler“ ESP32
+    BleDeviceClass::setPower(ESP_PWR_LVL_P7); // „normaler“ ESP32
 #endif
 
     if (g_autoReconnect)

@@ -2,9 +2,22 @@
 #define STATE_H
 
 #include <Arduino.h>
+#include <vector>
+
+#if !defined(RPMCOUNTER_USE_NIMBLE) && __has_include(<NimBLEDevice.h>)
+#define RPMCOUNTER_USE_NIMBLE 1
+#endif
+
+#if RPMCOUNTER_USE_NIMBLE
+#include <NimBLEDevice.h>
+using BleClientHandle = NimBLEClient;
+using BleRemoteCharacteristicHandle = NimBLERemoteCharacteristic;
+#else
 #include <BLEClient.h>
 #include <BLERemoteCharacteristic.h>
-#include <vector>
+using BleClientHandle = BLEClient;
+using BleRemoteCharacteristicHandle = BLERemoteCharacteristic;
+#endif
 
 struct BleDeviceInfo
 {
@@ -12,9 +25,9 @@ struct BleDeviceInfo
     String address;
 };
 
-extern BLEClient *g_client;
-extern BLERemoteCharacteristic *g_charWrite;
-extern BLERemoteCharacteristic *g_charNotify;
+extern BleClientHandle *g_client;
+extern BleRemoteCharacteristicHandle *g_charWrite;
+extern BleRemoteCharacteristicHandle *g_charNotify;
 
 extern bool g_connected;
 extern String g_serialLine;

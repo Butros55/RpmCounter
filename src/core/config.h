@@ -5,7 +5,7 @@
 #include <BLEDevice.h>
 
 constexpr int LED_PIN = 5;
-constexpr int NUM_LEDS = 8;
+constexpr int NUM_LEDS = 30;
 constexpr int DEFAULT_BRIGHTNESS = 80;
 constexpr int STATUS_LED_PIN = 2;
 
@@ -42,6 +42,11 @@ struct AppConfig
     bool logoOnIgnitionOn;
     bool logoOnEngineStart;
     bool logoOnIgnitionOff;
+    int displayBrightness;
+    bool uiTutorialSeen;
+    int uiLastMenuIndex;
+    bool uiNightMode;
+    bool useMph;
     RgbColor greenColor;
     RgbColor yellowColor;
     RgbColor redColor;

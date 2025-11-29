@@ -415,9 +415,17 @@ namespace
             page += F("</div>");
 
             // --- Display ---
-            page += F("<div class='section'><div class='section-title'>Display</div>");
+            page += F("<div class='section' id='displayStatusBlock'><div class='section-title'>Display <span id='displaySpinner' class='spinner hidden'></span></div>");
+            page += F("<div class='row small'>Init versucht: <span id='dispInit'>-</span> | Ready: <span id='dispReady'>-</span></div>");
+            page += F("<div class='row small'>Panel/Buffer: <span id='dispPanel'>-</span> / <span id='dispBuf'>-</span> | Touch: <span id='dispTouch'>-</span></div>");
+            page += F("<div class='row small'>LVGL Tick: <span id='dispTickMode'>-</span> | Debug-UI: <span id='dispDebugUi'>-</span></div>");
+            page += F("<div class='row small'>Letzte LVGL-Ausführung (ms): <span id='dispLvgl'>-</span></div>");
+            page += F("<div class='row small'>Fehler: <span id='dispError'>-</span></div>");
+            page += F("<button type='button' id='btnDisplayStatus'>Status aktualisieren</button>");
+            page += F("<button type='button' id='btnDisplayBars'>Testbild: Farb-Balken</button>");
+            page += F("<button type='button' id='btnDisplayGrid'>Testbild: Raster/Helligkeit</button>");
             page += F("<button type='button' id='btnDisplayLogo'>BMW Logo auf Display anzeigen</button>");
-            page += F("<div class='small'>Zeigt kurz das BMW-Logo auf dem Display (nur im Entwicklermodus).</div></div>");
+            page += F("<div class='small'>Zeigt Debug-Testbilder, um Panel und Treiber zu prüfen (hilft wenn nichts angezeigt wird).</div></div>");
 
             // --- Debug ---
             page += F("<div class='section'><div class='section-title'>Debug<span id='debugSpinner' class='spinner hidden'></span></div>");
@@ -832,6 +840,42 @@ namespace
                   " });"
                   "}"
 
+                  "function boolText(v){return v?'ja':'nein';}"
+
+                  "function updateDisplayStatusUi(s){"
+                  " const map=["
+                  "   ['dispInit',boolText(s.initAttempted)],"
+                  "   ['dispReady',boolText(s.ready)],"
+                  "   ['dispPanel',boolText(s.panelInitialized)],"
+                  "   ['dispBuf',boolText(s.buffersAllocated)],"
+                  "   ['dispTouch',boolText(s.touchReady)],"
+                  "   ['dispTickMode',s.tickFallback?'loop':'timer'],"
+                  "   ['dispDebugUi',boolText(s.debugSimpleUi)],"
+                  "   ['dispLvgl',s.lastLvglRunMs!==undefined?s.lastLvglRunMs:'-'],"
+                  "   ['dispError',s.lastError||'-']"
+                  " ];"
+                  " map.forEach(([id,val])=>{const el=document.getElementById(id);if(el) el.innerText=val;});"
+                  "}"
+
+                  "function toggleDisplaySpinner(active){"
+                  " const sp=document.getElementById('displaySpinner');"
+                  " if(!sp) return;"
+                  " if(active){sp.classList.remove('hidden');}else{sp.classList.add('hidden');}"
+                  "}"
+
+                  "function fetchDisplayStatus(){"
+                  " toggleDisplaySpinner(true);"
+                  " const done=beginRequest();"
+                  " fetch('/dev/display-status').then(r=>r.json()).then(s=>{updateDisplayStatusUi(s);}).catch(()=>{updateDisplayStatusUi({initAttempted:false,ready:false,lastError:'Request fehlgeschlagen'});}).finally(()=>{toggleDisplaySpinner(false);done();});"
+                  "}"
+
+                  "function triggerDisplayPattern(pattern){"
+                  " toggleDisplaySpinner(true);"
+                  " const done=beginRequest();"
+                  " const body='pattern='+encodeURIComponent(pattern||'bars');"
+                  " fetch('/dev/display-pattern',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body}).finally(()=>{toggleDisplaySpinner(false);done();fetchDisplayStatus();});"
+                  "}"
+
                   "function fetchStatus(){"
                   " const done=beginRequest();"
                   " fetch('/status').then(r=>r.json()).then(s=>{"
@@ -953,12 +997,19 @@ namespace
                   " const br=document.getElementById('btnReset');"
                   " if(br) br.addEventListener('click',()=>window.location.reload());"
                   " const bdsp=document.getElementById('btnDisplayLogo');"
-                  " if(bdsp) bdsp.addEventListener('click',()=>postSimple('/dev/display-logo'));"
+                  " if(bdsp) bdsp.addEventListener('click',()=>{toggleDisplaySpinner(true);const done=beginRequest();fetch('/dev/display-logo',{method:'POST'}).finally(()=>{toggleDisplaySpinner(false);done();fetchDisplayStatus();});});"
+                  " const bds=document.getElementById('btnDisplayStatus');"
+                  " if(bds) bds.addEventListener('click',fetchDisplayStatus);"
+                  " const bdb=document.getElementById('btnDisplayBars');"
+                  " if(bdb) bdb.addEventListener('click',()=>triggerDisplayPattern('bars'));"
+                  " const bdg=document.getElementById('btnDisplayGrid');"
+                  " if(bdg) bdg.addEventListener('click',()=>triggerDisplayPattern('grid'));"
                   " initLedPreview();"
                   " updateColorUi();"
                   " fetchStatus();"
                   " statusTimer=setInterval(fetchStatus,2200);"
                   " setInterval(updateSpinnerVisibility,1000);"
+                  " if(document.getElementById('displayStatusBlock')) fetchDisplayStatus();"
                   " captureInitialMainState();"
                   " recomputeMainDirty();"
                   "}"
@@ -2180,6 +2231,11 @@ namespace
     void handleBleScan()
     {
         markHttpActivity("WEB_BLE_SCAN");
+        if (g_bleConnectInProgress || g_connectTaskRunning || g_manualConnectActive)
+        {
+            server.send(200, "application/json", "{\"status\":\"busy\",\"reason\":\"connecting\"}");
+            return;
+        }
         bool started = startBleScan();
         if (started)
             server.send(200, "application/json", "{\"status\":\"started\"}");
@@ -2343,6 +2399,52 @@ namespace
         server.send(200, "text/plain", "OK");
     }
 
+    void handleDevDisplayStatus()
+    {
+        markHttpActivity("WEB_DEV_DISPLAY_STATUS");
+        DisplayDebugInfo info = displayGetDebugInfo();
+
+        String json = "{";
+        json += "\"initAttempted\":" + String(info.initAttempted ? "true" : "false");
+        json += ",\"ready\":" + String(info.ready ? "true" : "false");
+        json += ",\"buffersAllocated\":" + String(info.buffersAllocated ? "true" : "false");
+        json += ",\"panelInitialized\":" + String(info.panelInitialized ? "true" : "false");
+        json += ",\"touchReady\":" + String(info.touchReady ? "true" : "false");
+        json += ",\"tickFallback\":" + String(info.tickFallback ? "true" : "false");
+        json += ",\"debugSimpleUi\":" + String(info.debugSimpleUi ? "true" : "false");
+        json += ",\"lastLvglRunMs\":" + String(info.lastLvglRunMs);
+        json += ",\"lastError\":\"" + jsonEscape(info.lastError) + "\"";
+        json += "}";
+
+        server.send(200, "application/json", json);
+    }
+
+    void handleDevDisplayPattern()
+    {
+        markHttpActivity("WEB_DEV_DISPLAY_PATTERN");
+        if (server.method() != HTTP_POST)
+        {
+            server.send(405, "text/plain", "Method Not Allowed");
+            return;
+        }
+
+        DisplayDebugPattern pattern = DisplayDebugPattern::ColorBars;
+        if (server.hasArg("pattern"))
+        {
+            String p = server.arg("pattern");
+            p.toLowerCase();
+            if (p == "grid")
+                pattern = DisplayDebugPattern::Grid;
+            else if (p == "ui")
+                pattern = DisplayDebugPattern::UiLabel;
+            else
+                pattern = DisplayDebugPattern::ColorBars;
+        }
+
+        displayShowDebugPattern(pattern);
+        server.send(200, "application/json", "{\"status\":\"ok\"}");
+    }
+
     void handleNotFound()
     {
         markHttpActivity("WEB_NOT_FOUND");
@@ -2373,6 +2475,8 @@ void initWebUi()
     server.on("/settings/", HTTP_POST, handleSettingsSave);
     server.on("/settings/vehicle-refresh", HTTP_POST, handleSettingsVehicleRefresh);
     server.on("/dev/display-logo", HTTP_POST, handleDevDisplayLogo);
+    server.on("/dev/display-status", HTTP_GET, handleDevDisplayStatus);
+    server.on("/dev/display-pattern", HTTP_POST, handleDevDisplayPattern);
     server.on("/dev/obd-send", HTTP_POST, handleDevObdSend);
     server.onNotFound(handleNotFound);
 
