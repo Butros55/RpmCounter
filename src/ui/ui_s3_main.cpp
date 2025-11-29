@@ -292,9 +292,8 @@ namespace
         {
             lv_obj_t *dot = lv_obj_get_child(g_ui.dataIndicator, i);
             bool active = static_cast<int>(i) == g_state.dataPageIndex;
-            lv_obj_set_style_bg_color(dot, active ? color_dot_active : color_dot, 0);
-            lv_obj_set_style_opa(dot, active ? LV_OPA_COVER : LV_OPA_40, 0);
-            lv_obj_set_width(dot, active ? 18 : 6);
+            lv_obj_set_style_bg_color(dot, active ? lv_color_hex(0x0A84FF) : lv_color_hex(0x636366), 0);
+            lv_obj_set_width(dot, active ? 20 : 8);
         }
     }
 
@@ -329,42 +328,32 @@ namespace
         if (!g_ui.dataCarousel)
             return;
 
-        const lv_coord_t contWidth = lv_obj_get_width(g_ui.dataCarousel);
-        const lv_coord_t centerX = -lv_obj_get_scroll_x(g_ui.dataCarousel) + (contWidth / 2);
-
-        int closestIdx = g_state.dataPageIndex;
-        lv_coord_t closestDist = LV_COORD_MAX;
-
+        // Ensure all data pages are visible
         for (size_t i = 0; i < DATA_PAGE_COUNT; ++i)
         {
             DataPageWidgets &pw = g_ui.dataPages[i];
             if (!pw.container)
                 continue;
 
-            lv_coord_t pageCenter = lv_obj_get_x(pw.container) + (lv_obj_get_width(pw.container) / 2);
-            lv_coord_t delta = LV_ABS(centerX - pageCenter);
-
-            if (delta < closestDist)
-            {
-                closestDist = delta;
-                closestIdx = static_cast<int>(i);
-            }
-
-            float ratio = static_cast<float>(delta) / static_cast<float>(contWidth / 2 + 1);
-            ratio = std::min(1.0f, ratio);
-
-            // Opacity animation for smooth transitions
-            lv_obj_set_style_opa(pw.container, 255 - static_cast<int>(200 * ratio), 0);
-            
-            // Scale animation
-            int zoom = static_cast<int>(256 * (1.0f - 0.15f * ratio));
-            lv_obj_set_style_transform_zoom(pw.container, zoom, 0);
+            // Keep pages fully visible
+            lv_obj_set_style_opa(pw.container, LV_OPA_COVER, 0);
+            lv_obj_set_style_transform_zoom(pw.container, 256, 0);
+            lv_obj_clear_flag(pw.container, LV_OBJ_FLAG_HIDDEN);
         }
-
-        if (g_state.dataPageIndex != closestIdx)
+        
+        // Update page indicator based on scroll position
+        if (g_ui.dataCarousel && g_ui.dataIndicator)
         {
-            g_state.dataPageIndex = closestIdx;
-            update_data_indicator();
+            lv_coord_t scrollX = lv_obj_get_scroll_x(g_ui.dataCarousel);
+            lv_coord_t pageWidth = lv_disp_get_hor_res(g_ui.disp);
+            int newIdx = (scrollX + pageWidth / 2) / pageWidth;
+            newIdx = std::max(0, std::min(newIdx, static_cast<int>(DATA_PAGE_COUNT) - 1));
+            
+            if (g_state.dataPageIndex != newIdx)
+            {
+                g_state.dataPageIndex = newIdx;
+                update_data_indicator();
+            }
         }
     }
 
@@ -490,7 +479,8 @@ namespace
     {
         if (lv_event_get_code(e) == LV_EVENT_GESTURE)
         {
-            if (lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_RIGHT)
+            // Changed to swipe UP (from bottom to top) to go back
+            if (lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_TOP)
             {
                 show_home();
             }
@@ -523,7 +513,10 @@ namespace
         size_t idx = 0;
         for (; idx < CARD_COUNT; ++idx)
         {
-            if (g_ui.cards[idx].container == target)
+            if (g_ui.cards[idx].container == target || 
+                g_ui.cards[idx].circle == target ||
+                g_ui.cards[idx].icon == target ||
+                g_ui.cards[idx].label == target)
                 break;
         }
 
@@ -531,13 +524,8 @@ namespace
             return;
 
         mark_interacted();
-
-        if (static_cast<int>(idx) != g_state.cardIndex)
-        {
-            scroll_to_card(static_cast<int>(idx), LV_ANIM_ON);
-            return;
-        }
-
+        
+        // Always open the clicked card's menu directly
         open_detail(CARDS[idx]);
     }
 
@@ -578,28 +566,40 @@ namespace
 
         lv_obj_t *header = lv_obj_create(scr);
         lv_obj_remove_style_all(header);
-        lv_obj_set_size(header, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_size(header, LV_PCT(100), 40);
         lv_obj_set_layout(header, LV_LAYOUT_FLEX);
         lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(header, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
+        // Create a larger clickable back button area
+        lv_obj_t *backBtn = lv_obj_create(header);
+        lv_obj_remove_style_all(backBtn);
+        lv_obj_set_size(backBtn, 80, 40);
+        lv_obj_set_style_bg_color(backBtn, lv_color_hex(0x2C2C2E), 0);
+        lv_obj_set_style_bg_opa(backBtn, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(backBtn, 10, 0);
+        lv_obj_add_flag(backBtn, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_clear_flag(backBtn, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_event_cb(backBtn, on_back, LV_EVENT_CLICKED, nullptr);
+        
+        lv_obj_t *backLbl = lv_label_create(backBtn);
+        lv_label_set_text(backLbl, LV_SYMBOL_LEFT);
+        lv_obj_set_style_text_font(backLbl, &lv_font_montserrat_24, 0);
+        lv_obj_set_style_text_color(backLbl, lv_color_hex(0x0A84FF), 0);
+        lv_obj_center(backLbl);
+
         lv_obj_t *titleLbl = lv_label_create(header);
         lv_label_set_text(titleLbl, title);
         lv_obj_set_style_text_font(titleLbl, &lv_font_montserrat_24, 0);
-
-        lv_obj_t *back = lv_label_create(header);
-        lv_label_set_text(back, LV_SYMBOL_LEFT " Back");
-        lv_obj_add_style(back, &styleMuted, 0);
-        lv_obj_add_event_cb(back, on_back, LV_EVENT_CLICKED, nullptr);
-        attach_back_handler(back);
+        lv_obj_set_style_text_color(titleLbl, color_text, 0);
 
         lv_obj_t *body = lv_obj_create(scr);
         lv_obj_remove_style_all(body);
         lv_obj_set_size(body, LV_PCT(100), LV_PCT(100));
-        lv_obj_set_style_pad_top(body, 8, 0);
+        lv_obj_set_style_pad_top(body, 16, 0);
         lv_obj_set_layout(body, LV_LAYOUT_FLEX);
         lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(body, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+        lv_obj_set_flex_align(body, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_set_style_pad_row(body, 10, 0);
 
         return body;
@@ -774,7 +774,8 @@ namespace
     {
         if (lv_event_get_code(e) == LV_EVENT_GESTURE)
         {
-            if (lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_RIGHT)
+            // Swipe UP to go back (bottom to top)
+            if (lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_TOP)
             {
                 show_home();
             }
@@ -795,22 +796,26 @@ namespace
         // Full-screen container for each data page
         w.container = lv_obj_create(g_ui.dataCarousel);
         lv_obj_remove_style_all(w.container);
-        lv_obj_set_size(w.container, lv_disp_get_hor_res(g_ui.disp) - 40, LV_PCT(100));
+        lv_obj_set_size(w.container, lv_disp_get_hor_res(g_ui.disp) - 20, LV_PCT(100));
+        lv_obj_set_style_bg_color(w.container, lv_color_hex(0x1C1C1E), 0);
+        lv_obj_set_style_bg_opa(w.container, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(w.container, 16, 0);
         lv_obj_set_layout(w.container, LV_LAYOUT_FLEX);
         lv_obj_set_flex_flow(w.container, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(w.container, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
         lv_obj_clear_flag(w.container, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(w.container, LV_OBJ_FLAG_SNAPPABLE);
 
         // Name label at top
         w.nameLabel = lv_label_create(w.container);
         lv_label_set_text(w.nameLabel, def.label);
-        lv_obj_add_style(w.nameLabel, &styleDataName, 0);
+        lv_obj_set_style_text_color(w.nameLabel, lv_color_hex(0x8E8E93), 0);
         lv_obj_set_style_text_font(w.nameLabel, &lv_font_montserrat_24, 0);
 
         // Large value in center
         w.valueLabel = lv_label_create(w.container);
         lv_label_set_text(w.valueLabel, "---");
-        lv_obj_add_style(w.valueLabel, &styleDataValue, 0);
+        lv_obj_set_style_text_color(w.valueLabel, lv_color_hex(0xFFFFFF), 0);
         lv_obj_set_style_text_font(w.valueLabel, &lv_font_montserrat_48, 0);
         lv_obj_set_style_pad_top(w.valueLabel, 20, 0);
         lv_obj_set_style_pad_bottom(w.valueLabel, 10, 0);
@@ -818,7 +823,7 @@ namespace
         // Unit label below
         w.unitLabel = lv_label_create(w.container);
         lv_label_set_text(w.unitLabel, def.unit);
-        lv_obj_add_style(w.unitLabel, &styleDataUnit, 0);
+        lv_obj_set_style_text_color(w.unitLabel, lv_color_hex(0x636366), 0);
         lv_obj_set_style_text_font(w.unitLabel, &lv_font_montserrat_16, 0);
 
         return w;
@@ -834,16 +839,25 @@ namespace
         lv_obj_clear_flag(g_ui.dataScreen, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_event_cb(g_ui.dataScreen, on_data_gesture, LV_EVENT_GESTURE, nullptr);
 
-        // Back button at top-left
-        lv_obj_t *back = lv_label_create(g_ui.dataScreen);
-        lv_label_set_text(back, LV_SYMBOL_LEFT);
-        lv_obj_set_style_text_color(back, color_muted, 0);
-        lv_obj_set_style_text_font(back, &lv_font_montserrat_24, 0);
-        lv_obj_align(back, LV_ALIGN_TOP_LEFT, 16, 12);
-        lv_obj_add_flag(back, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(back, on_back, LV_EVENT_CLICKED, nullptr);
+        // Larger clickable back button at top-left
+        lv_obj_t *backBtn = lv_obj_create(g_ui.dataScreen);
+        lv_obj_remove_style_all(backBtn);
+        lv_obj_set_size(backBtn, 60, 40);
+        lv_obj_set_style_bg_color(backBtn, lv_color_hex(0x2C2C2E), 0);
+        lv_obj_set_style_bg_opa(backBtn, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(backBtn, 10, 0);
+        lv_obj_align(backBtn, LV_ALIGN_TOP_LEFT, 12, 8);
+        lv_obj_add_flag(backBtn, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_clear_flag(backBtn, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_event_cb(backBtn, on_back, LV_EVENT_CLICKED, nullptr);
+        
+        lv_obj_t *backLbl = lv_label_create(backBtn);
+        lv_label_set_text(backLbl, LV_SYMBOL_LEFT);
+        lv_obj_set_style_text_font(backLbl, &lv_font_montserrat_24, 0);
+        lv_obj_set_style_text_color(backLbl, lv_color_hex(0x0A84FF), 0);
+        lv_obj_center(backLbl);
 
-        // Status icons at top-right (copy from home)
+        // Status icons at top-right
         lv_obj_t *statusIcons = lv_obj_create(g_ui.dataScreen);
         lv_obj_remove_style_all(statusIcons);
         lv_obj_set_size(statusIcons, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
@@ -865,17 +879,18 @@ namespace
         // Horizontal carousel for data pages
         g_ui.dataCarousel = lv_obj_create(g_ui.dataScreen);
         lv_obj_remove_style_all(g_ui.dataCarousel);
-        lv_obj_set_size(g_ui.dataCarousel, LV_PCT(100), LV_PCT(80));
-        lv_obj_align(g_ui.dataCarousel, LV_ALIGN_CENTER, 0, 10);
+        lv_obj_set_size(g_ui.dataCarousel, LV_PCT(100), 300);
+        lv_obj_align(g_ui.dataCarousel, LV_ALIGN_CENTER, 0, 20);
         lv_obj_set_layout(g_ui.dataCarousel, LV_LAYOUT_FLEX);
         lv_obj_set_flex_flow(g_ui.dataCarousel, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(g_ui.dataCarousel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_column(g_ui.dataCarousel, 20, 0);
-        lv_obj_set_style_pad_left(g_ui.dataCarousel, 20, 0);
+        lv_obj_set_style_pad_column(g_ui.dataCarousel, 15, 0);
+        lv_obj_set_style_pad_left(g_ui.dataCarousel, 10, 0);
+        lv_obj_set_style_pad_right(g_ui.dataCarousel, 10, 0);
         lv_obj_set_scroll_dir(g_ui.dataCarousel, LV_DIR_HOR);
         lv_obj_set_scroll_snap_x(g_ui.dataCarousel, LV_SCROLL_SNAP_CENTER);
         lv_obj_set_scrollbar_mode(g_ui.dataCarousel, LV_SCROLLBAR_MODE_OFF);
-        lv_obj_add_flag(g_ui.dataCarousel, LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SNAPPABLE);
+        lv_obj_add_flag(g_ui.dataCarousel, LV_OBJ_FLAG_SCROLL_MOMENTUM);
         lv_obj_add_event_cb(g_ui.dataCarousel, on_data_scroll, LV_EVENT_SCROLL, nullptr);
 
         // Create data pages
@@ -892,15 +907,17 @@ namespace
         lv_obj_set_layout(g_ui.dataIndicator, LV_LAYOUT_FLEX);
         lv_obj_set_flex_flow(g_ui.dataIndicator, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(g_ui.dataIndicator, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_column(g_ui.dataIndicator, 8, 0);
-        lv_obj_align(g_ui.dataIndicator, LV_ALIGN_BOTTOM_MID, 0, -20);
+        lv_obj_set_style_pad_column(g_ui.dataIndicator, 10, 0);
+        lv_obj_align(g_ui.dataIndicator, LV_ALIGN_BOTTOM_MID, 0, -30);
 
         for (size_t i = 0; i < DATA_PAGE_COUNT; ++i)
         {
             lv_obj_t *dot = lv_obj_create(g_ui.dataIndicator);
             lv_obj_remove_style_all(dot);
-            lv_obj_add_style(dot, &styleDot, 0);
-            lv_obj_set_size(dot, 6, 6);
+            lv_obj_set_size(dot, 8, 8);
+            lv_obj_set_style_bg_color(dot, lv_color_hex(0x636366), 0);
+            lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+            lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
             lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
         }
 
