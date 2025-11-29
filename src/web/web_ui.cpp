@@ -738,13 +738,14 @@ void initWebUi()
         g_filesystemReady = true;
     }
 
-    // Serve static assets with caching
+    // Serve static assets from /assets/ subfolder with caching
     server.serveStatic("/assets/style.css", LittleFS, "/assets/style.css", "max-age=86400");
     server.serveStatic("/assets/main.js", LittleFS, "/assets/main.js", "max-age=86400");
     server.serveStatic("/assets/settings.js", LittleFS, "/assets/settings.js", "max-age=86400");
 
-    // HTML pages
+    // HTML pages - root level files
     server.on("/", HTTP_GET, handleRoot);
+    server.on("/index.html", HTTP_GET, handleRoot);
 
     // Main page API
     server.on("/brightness", HTTP_GET, handleBrightness);
@@ -769,6 +770,7 @@ void initWebUi()
     // Settings page
     server.on("/settings", HTTP_GET, handleSettingsGet);
     server.on("/settings/", HTTP_GET, handleSettingsGet);
+    server.on("/settings.html", HTTP_GET, handleSettingsGet);
     server.on("/settings", HTTP_POST, handleSettingsSave);
     server.on("/settings/", HTTP_POST, handleSettingsSave);
     server.on("/settings/vehicle-refresh", HTTP_POST, handleSettingsVehicleRefresh);
