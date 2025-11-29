@@ -369,7 +369,7 @@ namespace
             g_touchDev,
             buf,
             len + 1,
-            -1);  // Blocking call
+            -1); // Blocking call
 
         if (err != ESP_OK)
         {
@@ -397,7 +397,7 @@ namespace
             1,
             data,
             len,
-            -1);  // Blocking call
+            -1); // Blocking call
 
         if (err != ESP_OK)
         {
@@ -410,8 +410,9 @@ namespace
 
     bool ft3168_init()
     {
-        ESP_LOGI(TAG, "FT3168 init: starting (sda=%d scl=%d addr=0x%02X)", PIN_TOUCH_SDA, PIN_TOUCH_SCL, TOUCH_ADDR);
-        Serial.printf("[S3] FT3168 init start sda=%d scl=%d addr=0x%02X\n", PIN_TOUCH_SDA, PIN_TOUCH_SCL, TOUCH_ADDR);
+        Serial.println("[TOUCH] ---- FT3168 Init Start ----");
+        Serial.printf("[TOUCH] Pins: SDA=%d, SCL=%d, Addr=0x%02X\n", PIN_TOUCH_SDA, PIN_TOUCH_SCL, TOUCH_ADDR);
+        
         constexpr int MAX_ATTEMPTS = 5;
         constexpr uint32_t RETRY_DELAY_MS = 100;
 
@@ -420,10 +421,12 @@ namespace
 
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; ++attempt)
         {
+            Serial.printf("[TOUCH] Attempt %d/%d...\n", attempt, MAX_ATTEMPTS);
+            
             if (!ft3168_ll_init())
             {
                 setLastError("touch-bus-init-failed");
-                Serial.println("[S3] FT3168 bus init failed");
+                Serial.println("[TOUCH] ERROR: I2C bus init failed");
                 return false;
             }
 
@@ -434,8 +437,7 @@ namespace
             uint8_t id = 0;
             if (!ft3168_read_reg(0xA3, &id, 1))
             {
-                ESP_LOGW(TAG, "FT3168 init attempt %d: read ID failed", attempt);
-                Serial.printf("[S3] FT3168 init attempt %d read ID failed\n", attempt);
+                Serial.printf("[TOUCH] Attempt %d: Read ID failed, retrying...\n", attempt);
                 release_touch_dev();
                 delay(RETRY_DELAY_MS);
                 continue;
@@ -444,8 +446,7 @@ namespace
             // ID 0x00 means no proper response - controller not ready
             if (id == 0x00 && attempt < MAX_ATTEMPTS)
             {
-                ESP_LOGW(TAG, "FT3168 init attempt %d: ID=0x00 (not ready)", attempt);
-                Serial.printf("[S3] FT3168 init attempt %d ID=0x00 (not ready)\n", attempt);
+                Serial.printf("[TOUCH] Attempt %d: ID=0x00 (not ready), retrying...\n", attempt);
                 release_touch_dev();
                 delay(RETRY_DELAY_MS * 2); // Wait longer for controller to wake up
                 continue;
@@ -455,8 +456,7 @@ namespace
             uint8_t mode = 0x00;
             if (!ft3168_write_reg(0x00, &mode, 1))
             {
-                ESP_LOGW(TAG, "FT3168 init attempt %d: write mode failed (reg=0x00)", attempt);
-                Serial.printf("[S3] FT3168 init attempt %d write mode failed\n", attempt);
+                Serial.printf("[TOUCH] Attempt %d: Write mode failed (non-critical)\n", attempt);
                 // Continue anyway - some controllers work without explicit mode set
             }
 
@@ -464,16 +464,16 @@ namespace
             uint8_t intMode = 0x01; // Trigger mode
             ft3168_write_reg(0xA4, &intMode, 1);
 
-            ESP_LOGI(TAG, "FT3168 ID=0x%02X (sda=%d scl=%d) attempt=%d", id, PIN_TOUCH_SDA, PIN_TOUCH_SCL, attempt);
-            Serial.printf("[S3] FT3168 ID=0x%02X attempt=%d\n", id, attempt);
+            Serial.println("[TOUCH] ---- FT3168 Init Success ----");
+            Serial.printf("[TOUCH] Controller ID: 0x%02X\n", id);
+            Serial.println();
 
             // Valid IDs for FocalTech touch controllers: 0x11, 0x36, 0x64, 0x70, etc.
             // ID 0x00 might still work on some boards
             return true;
         }
 
-        ESP_LOGW(TAG, "FT3168 init failed after %d attempts", MAX_ATTEMPTS);
-        Serial.println("[S3] FT3168 init failed after attempts");
+        Serial.println("[TOUCH] ERROR: Init failed after all attempts!");
         setLastError("touch-init-failed");
         return false;
     }
@@ -556,15 +556,9 @@ namespace
     void touch_read_cb(lv_indev_drv_t *, lv_indev_data_t *data)
     {
         static TouchPoint lastPoint{false, 0, 0};
-        static bool loggedPress = false;
-        static uint32_t tickCount = 0;
-
-        // Only log tick once per second to avoid flooding serial
-        tickCount++;
-        if (tickCount % 33 == 1) // ~once per second at 30ms interval
-        {
-            Serial.println("[S3] touch_read_cb tick");
-        }
+        static bool wasTouched = false;
+        static uint32_t lastTouchLogMs = 0;
+        static uint32_t touchCount = 0;
 
         TouchPoint p = ft3168_read_touch();
         if (p.touched)
@@ -574,19 +568,35 @@ namespace
             data->point.x = mapped.x;
             data->point.y = mapped.y;
             lastPoint = mapped;
-            if (!loggedPress)
+            
+            // Log touch start and periodically during hold (max once per 500ms)
+            uint32_t now = millis();
+            if (!wasTouched)
             {
-                ESP_LOGI(TAG, "touch raw=(%u,%u) mapped=(%u,%u)", p.x, p.y, mapped.x, mapped.y);
-                Serial.printf("[S3] TOUCH: raw=(%u,%u) mapped=(%u,%u)\n", p.x, p.y, mapped.x, mapped.y);
-                loggedPress = true;
+                touchCount++;
+                Serial.println("----------------------------------------");
+                Serial.printf("[TOUCH] #%lu PRESSED at (%u, %u)\n", touchCount, mapped.x, mapped.y);
+                Serial.println("----------------------------------------");
+                lastTouchLogMs = now;
             }
+            else if (now - lastTouchLogMs > 500)
+            {
+                Serial.printf("[TOUCH] Holding at (%u, %u)\n", mapped.x, mapped.y);
+                lastTouchLogMs = now;
+            }
+            wasTouched = true;
         }
         else
         {
             data->state = LV_INDEV_STATE_RELEASED;
             data->point.x = lastPoint.x;
             data->point.y = lastPoint.y;
-            loggedPress = false;
+            
+            if (wasTouched)
+            {
+                Serial.printf("[TOUCH] Released at (%u, %u)\n", lastPoint.x, lastPoint.y);
+            }
+            wasTouched = false;
         }
     }
 } // namespace
@@ -642,21 +652,25 @@ void display_s3_init()
     if (g_displayReady)
         return;
 
-    ESP_LOGI(TAG, "[S3] display_s3_init() called");
-    Serial.println("[S3] display_s3_init() called");
+    Serial.println();
+    Serial.println("[DISPLAY] ---- S3 AMOLED Init Start ----");
+    
     lv_init();
-    ESP_LOGI(TAG, "LVGL cfg: depth=%d swap=%d", LV_COLOR_DEPTH, LV_COLOR_16_SWAP);
-    Serial.printf("[S3] LVGL cfg depth=%d swap=%d\n", LV_COLOR_DEPTH, LV_COLOR_16_SWAP);
+    Serial.printf("[DISPLAY] LVGL initialized (depth=%d, swap=%d)\n", LV_COLOR_DEPTH, LV_COLOR_16_SWAP);
 
     if (!allocateLvglBuffers())
     {
+        Serial.println("[DISPLAY] ERROR: Buffer allocation failed!");
         return;
     }
+    Serial.println("[DISPLAY] Buffers allocated OK");
 
     if (!initPanel())
     {
+        Serial.println("[DISPLAY] ERROR: Panel init failed!");
         return;
     }
+    Serial.println("[DISPLAY] Panel initialized OK");
 
     drawStartupPattern();
 
@@ -664,8 +678,10 @@ void display_s3_init()
 
     if (!initLvglDriver())
     {
+        Serial.println("[DISPLAY] ERROR: LVGL driver init failed!");
         return;
     }
+    Serial.println("[DISPLAY] LVGL driver OK");
 
     lv_disp_set_default(g_disp);
 
@@ -685,9 +701,10 @@ void display_s3_init()
     g_displayReady = true;
     g_lastLvglRun = millis();
     setLastError("");
-    ESP_LOGI(TAG,
-             "Display + LVGL init done (S3 AMOLED) res=%dx%d rot=%d",
-             LCD_H_RES, LCD_V_RES, static_cast<int>(g_rotation));
+    
+    Serial.println("[DISPLAY] ---- S3 AMOLED Init Complete ----");
+    Serial.printf("[DISPLAY] Resolution: %dx%d\n", LCD_H_RES, LCD_V_RES);
+    Serial.println();
 }
 
 bool display_s3_ready()

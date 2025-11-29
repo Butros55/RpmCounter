@@ -142,11 +142,7 @@ namespace
                 }
 
                 g_currentRpm = rpm;
-                Serial.print("=> RPM: ");
-                Serial.print(rpm);
-                Serial.print("   (max: ");
-                Serial.print(g_maxSeenRpm);
-                Serial.println(")");
+                // Only log RPM changes (skip if same as before to reduce spam)\n                static int lastLoggedRpm = -1;\n                if (abs(rpm - lastLoggedRpm) >= 100)  // Log if RPM changed by 100+\n                {\n                    Serial.printf(\"[OBD] RPM: %d  (max: %d)\\n\", rpm, g_maxSeenRpm);\n                    lastLoggedRpm = rpm;\n                }
 
                 unsigned long nowMs = millis();
                 g_lastObdMs = nowMs;
@@ -162,7 +158,7 @@ namespace
                     g_engineStartLogoShown = false;
                     if (cfg.logoOnIgnitionOn && nowMs - g_lastLogoMs > LOGO_COOLDOWN_MS && !g_ignitionLogoShown)
                     {
-                        Serial.println("[MLOGO] Zündung an – Animation");
+                        Serial.println("[LOGO] Ignition ON - Playing M-Logo Animation");
                         g_logoPlayedThisCycle = true;
                         g_leavingPlayedThisCycle = false;
                         g_lastLogoMs = nowMs;
@@ -174,7 +170,7 @@ namespace
                 {
                     if (cfg.logoOnEngineStart && !g_engineStartLogoShown && nowMs - g_lastLogoMs > LOGO_COOLDOWN_MS)
                     {
-                        Serial.println("[MLOGO] Motorstart – Animation");
+                        Serial.println("[LOGO] Engine START - Playing M-Logo Animation");
                         g_logoPlayedThisCycle = true;
                         g_leavingPlayedThisCycle = false;
                         g_lastLogoMs = nowMs;

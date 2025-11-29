@@ -358,12 +358,51 @@ namespace
     {
         if (g_ui.wifiIcon)
         {
-            // WiFi is OK if: STA connected OR AP is active (with or without clients)
-            bool wifiOk = g_state.lastWifi.staConnected || g_state.lastWifi.apActive;
-            bool wifiConnecting = g_state.lastWifi.staConnecting;
-
-            lv_color_t col = wifiOk ? color_ok : (wifiConnecting ? color_warn : color_error);
-            lv_opa_t opa = (wifiConnecting && (millis() / 400) % 2) ? LV_OPA_40 : LV_OPA_COVER;
+            // WiFi status visualization:
+            // - Green solid: STA connected OR AP active with clients
+            // - Green blinking: AP active but no clients (waiting for connection)
+            // - Yellow blinking: STA connecting
+            // - Red: AP and STA both inactive (error state)
+            
+            bool staConnected = g_state.lastWifi.staConnected;
+            bool apActive = g_state.lastWifi.apActive;
+            bool staConnecting = g_state.lastWifi.staConnecting;
+            int apClients = g_state.lastWifi.apClients;
+            
+            lv_color_t col;
+            lv_opa_t opa = LV_OPA_COVER;
+            
+            if (staConnected)
+            {
+                // STA connected - solid green
+                col = color_ok;
+            }
+            else if (apActive)
+            {
+                if (apClients > 0)
+                {
+                    // AP with clients - solid green
+                    col = color_ok;
+                }
+                else
+                {
+                    // AP active but no clients - blinking green (slow blink)
+                    col = color_ok;
+                    opa = ((millis() / 800) % 2) ? LV_OPA_COVER : LV_OPA_60;
+                }
+            }
+            else if (staConnecting)
+            {
+                // STA connecting - blinking yellow (fast blink)
+                col = color_warn;
+                opa = ((millis() / 300) % 2) ? LV_OPA_COVER : LV_OPA_40;
+            }
+            else
+            {
+                // Neither AP nor STA - red (error)
+                col = color_error;
+            }
+            
             lv_obj_set_style_text_color(g_ui.wifiIcon, col, 0);
             lv_obj_set_style_opa(g_ui.wifiIcon, opa, 0);
         }
