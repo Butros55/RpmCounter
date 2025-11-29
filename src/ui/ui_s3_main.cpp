@@ -102,6 +102,8 @@ namespace
         lv_obj_t *logoOverlay = nullptr;
         lv_obj_t *detail = nullptr;
         lv_obj_t *detailContent = nullptr;
+        lv_obj_t *detailWifiIcon = nullptr;
+        lv_obj_t *detailBleIcon = nullptr;
         lv_obj_t *wifiList = nullptr;
         lv_obj_t *bleList = nullptr;
         lv_obj_t *brightnessSlider = nullptr;
@@ -109,6 +111,8 @@ namespace
         lv_obj_t *dataScreen = nullptr;
         lv_obj_t *dataCarousel = nullptr;
         lv_obj_t *dataIndicator = nullptr;
+        lv_obj_t *dataWifiIcon = nullptr;
+        lv_obj_t *dataBleIcon = nullptr;
         std::array<CardWidgets, CARD_COUNT> cards{};
         std::array<DataPageWidgets, DATA_PAGE_COUNT> dataPages{};
     };
@@ -129,6 +133,8 @@ namespace
         WifiStatus lastWifi{};
         bool bleConnected = false;
         bool bleConnecting = false;
+        uint32_t lastTouchTime = 0;
+        bool iconsHidden = false;
     };
 
     UiRefs g_ui;
@@ -171,9 +177,20 @@ namespace
         return CARDS[g_state.cardIndex];
     }
 
+    void show_status_icons();
+
     void mark_interacted()
     {
         g_state.hasInteracted = true;
+        g_state.lastTouchTime = millis();
+        
+        // Show status icons if they were hidden
+        if (g_state.iconsHidden)
+        {
+            g_state.iconsHidden = false;
+            show_status_icons();
+        }
+        
         if (g_state.tutorialVisible && g_ui.tutorial)
         {
             g_state.tutorialVisible = false;
@@ -360,80 +377,94 @@ namespace
     // =======================================================================
     // STATUS ICONS UPDATE
     // =======================================================================
+    
+    // Helper to get WiFi icon color and opacity based on state
+    void get_wifi_icon_style(lv_color_t &col, lv_opa_t &opa, bool &isConnected)
+    {
+        bool staConnected = g_state.lastWifi.staConnected;
+        bool apActive = g_state.lastWifi.apActive;
+        bool staConnecting = g_state.lastWifi.staConnecting;
+        int apClients = g_state.lastWifi.apClients;
+        
+        opa = LV_OPA_COVER;
+        isConnected = false;
+
+        if (staConnected)
+        {
+            col = color_ok;
+            isConnected = true;
+        }
+        else if (apActive)
+        {
+            col = color_ok;
+            isConnected = (apClients > 0);
+        }
+        else if (staConnecting)
+        {
+            col = color_warn;
+        }
+        else
+        {
+            col = color_error;
+        }
+    }
+    
+    // Helper to get BLE icon color and opacity based on state
+    void get_ble_icon_style(lv_color_t &col, lv_opa_t &opa, bool &isConnected)
+    {
+        opa = LV_OPA_COVER;
+        isConnected = false;
+        
+        if (g_state.bleConnected)
+        {
+            col = color_card_accent; // iOS blue
+            isConnected = true;
+        }
+        else if (g_state.bleConnecting)
+        {
+            col = color_warn;
+        }
+        else
+        {
+            col = color_text_secondary;
+            opa = LV_OPA_60;
+        }
+    }
+    
+    void apply_icon_style(lv_obj_t *icon, lv_color_t col, lv_opa_t opa)
+    {
+        if (!icon) return;
+        lv_obj_set_style_text_color(icon, col, 0);
+        lv_obj_set_style_opa(icon, opa, 0);
+    }
+    
     void update_status_icons()
     {
-        if (g_ui.wifiIcon)
-        {
-            bool staConnected = g_state.lastWifi.staConnected;
-            bool apActive = g_state.lastWifi.apActive;
-            bool staConnecting = g_state.lastWifi.staConnecting;
-            int apClients = g_state.lastWifi.apClients;
-
-            lv_color_t col;
-            lv_opa_t opa = LV_OPA_COVER;
-            
-            // Cache millis for animation calculations
-            const uint32_t now = millis();
-
-            if (staConnected)
-            {
-                col = color_ok;
-            }
-            else if (apActive)
-            {
-                col = color_ok;
-                // Subtle pulse when waiting for clients
-                if (apClients == 0)
-                {
-                    float phase = static_cast<float>(now % 2512) / 400.0f; // 2512 ~ 2*PI*400
-                    float pulse = (sinf(phase) + 1.0f) * 0.5f;
-                    opa = static_cast<lv_opa_t>(180 + static_cast<int>(75 * pulse));
-                }
-            }
-            else if (staConnecting)
-            {
-                col = color_warn;
-                float phase = static_cast<float>(now % 1256) / 200.0f; // 1256 ~ 2*PI*200
-                float pulse = (sinf(phase) + 1.0f) * 0.5f;
-                opa = static_cast<lv_opa_t>(100 + static_cast<int>(155 * pulse));
-            }
-            else
-            {
-                col = color_error;
-            }
-
-            lv_obj_set_style_text_color(g_ui.wifiIcon, col, 0);
-            lv_obj_set_style_opa(g_ui.wifiIcon, opa, 0);
-        }
-
-        if (g_ui.bleIcon)
-        {
-            lv_color_t col;
-            lv_opa_t opa = LV_OPA_COVER;
-            
-            // Cache millis for animation calculations
-            const uint32_t now = millis();
-            
-            if (g_state.bleConnected)
-            {
-                col = color_card_accent; // iOS blue
-            }
-            else if (g_state.bleConnecting)
-            {
-                col = color_warn;
-                float phase = static_cast<float>(now % 1570) / 250.0f; // 1570 ~ 2*PI*250
-                float pulse = (sinf(phase) + 1.0f) * 0.5f;
-                opa = static_cast<lv_opa_t>(100 + static_cast<int>(155 * pulse));
-            }
-            else
-            {
-                col = color_text_secondary;
-                opa = LV_OPA_60;
-            }
-            
-            lv_obj_set_style_text_color(g_ui.bleIcon, col, 0);
-            lv_obj_set_style_opa(g_ui.bleIcon, opa, 0);
-        }
+        lv_color_t wifiCol, bleCol;
+        lv_opa_t wifiOpa, bleOpa;
+        bool wifiConnected, bleConnected;
+        
+        get_wifi_icon_style(wifiCol, wifiOpa, wifiConnected);
+        get_ble_icon_style(bleCol, bleOpa, bleConnected);
+        
+        // Update main screen icons
+        apply_icon_style(g_ui.wifiIcon, wifiCol, wifiOpa);
+        apply_icon_style(g_ui.bleIcon, bleCol, bleOpa);
+        
+        // Update detail screen icons
+        apply_icon_style(g_ui.detailWifiIcon, wifiCol, wifiOpa);
+        apply_icon_style(g_ui.detailBleIcon, bleCol, bleOpa);
+        
+        // Update data screen icons
+        apply_icon_style(g_ui.dataWifiIcon, wifiCol, wifiOpa);
+        apply_icon_style(g_ui.dataBleIcon, bleCol, bleOpa);
+    }
+    
+    void show_status_icons()
+    {
+        // Show main screen icons
+        if (g_ui.statusBar)
+            lv_obj_set_style_opa(g_ui.statusBar, LV_OPA_COVER, 0);
     }
 
     // =======================================================================
@@ -564,6 +595,7 @@ namespace
 
         lv_obj_add_event_cb(scr, on_detail_gesture, LV_EVENT_GESTURE, nullptr);
 
+        // Header row with back button, title, and status icons
         lv_obj_t *header = lv_obj_create(scr);
         lv_obj_remove_style_all(header);
         lv_obj_set_size(header, LV_PCT(100), 40);
@@ -574,7 +606,7 @@ namespace
         // Create a larger clickable back button area
         lv_obj_t *backBtn = lv_obj_create(header);
         lv_obj_remove_style_all(backBtn);
-        lv_obj_set_size(backBtn, 80, 40);
+        lv_obj_set_size(backBtn, 50, 40);
         lv_obj_set_style_bg_color(backBtn, lv_color_hex(0x2C2C2E), 0);
         lv_obj_set_style_bg_opa(backBtn, LV_OPA_COVER, 0);
         lv_obj_set_style_radius(backBtn, 10, 0);
@@ -584,14 +616,32 @@ namespace
         
         lv_obj_t *backLbl = lv_label_create(backBtn);
         lv_label_set_text(backLbl, LV_SYMBOL_LEFT);
-        lv_obj_set_style_text_font(backLbl, &lv_font_montserrat_24, 0);
+        lv_obj_set_style_text_font(backLbl, &lv_font_montserrat_20, 0);
         lv_obj_set_style_text_color(backLbl, lv_color_hex(0x0A84FF), 0);
         lv_obj_center(backLbl);
 
+        // Title in center
         lv_obj_t *titleLbl = lv_label_create(header);
         lv_label_set_text(titleLbl, title);
-        lv_obj_set_style_text_font(titleLbl, &lv_font_montserrat_24, 0);
+        lv_obj_set_style_text_font(titleLbl, &lv_font_montserrat_20, 0);
         lv_obj_set_style_text_color(titleLbl, color_text, 0);
+
+        // Status icons container (top-right)
+        lv_obj_t *statusIcons = lv_obj_create(header);
+        lv_obj_remove_style_all(statusIcons);
+        lv_obj_set_size(statusIcons, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_layout(statusIcons, LV_LAYOUT_FLEX);
+        lv_obj_set_flex_flow(statusIcons, LV_FLEX_FLOW_ROW);
+        lv_obj_set_style_pad_column(statusIcons, 8, 0);
+        lv_obj_clear_flag(statusIcons, LV_OBJ_FLAG_SCROLLABLE);
+
+        g_ui.detailWifiIcon = lv_label_create(statusIcons);
+        lv_label_set_text(g_ui.detailWifiIcon, LV_SYMBOL_WIFI);
+        lv_obj_set_style_text_font(g_ui.detailWifiIcon, &lv_font_montserrat_16, 0);
+
+        g_ui.detailBleIcon = lv_label_create(statusIcons);
+        lv_label_set_text(g_ui.detailBleIcon, LV_SYMBOL_BLUETOOTH);
+        lv_obj_set_style_text_font(g_ui.detailBleIcon, &lv_font_montserrat_16, 0);
 
         lv_obj_t *body = lv_obj_create(scr);
         lv_obj_remove_style_all(body);
@@ -761,6 +811,13 @@ namespace
             return;
         g_state.inDetail = false;
         g_state.inDataView = false;
+        
+        // Clear detail screen icon references
+        g_ui.detailWifiIcon = nullptr;
+        g_ui.detailBleIcon = nullptr;
+        g_ui.dataWifiIcon = nullptr;
+        g_ui.dataBleIcon = nullptr;
+        
         lv_disp_load_scr(g_ui.root);
         update_carousel_visuals();
         update_status_icons();
@@ -842,7 +899,7 @@ namespace
         // Larger clickable back button at top-left
         lv_obj_t *backBtn = lv_obj_create(g_ui.dataScreen);
         lv_obj_remove_style_all(backBtn);
-        lv_obj_set_size(backBtn, 60, 40);
+        lv_obj_set_size(backBtn, 50, 40);
         lv_obj_set_style_bg_color(backBtn, lv_color_hex(0x2C2C2E), 0);
         lv_obj_set_style_bg_opa(backBtn, LV_OPA_COVER, 0);
         lv_obj_set_style_radius(backBtn, 10, 0);
@@ -853,28 +910,27 @@ namespace
         
         lv_obj_t *backLbl = lv_label_create(backBtn);
         lv_label_set_text(backLbl, LV_SYMBOL_LEFT);
-        lv_obj_set_style_text_font(backLbl, &lv_font_montserrat_24, 0);
+        lv_obj_set_style_text_font(backLbl, &lv_font_montserrat_20, 0);
         lv_obj_set_style_text_color(backLbl, lv_color_hex(0x0A84FF), 0);
         lv_obj_center(backLbl);
 
-        // Status icons at top-right
+        // Status icons at top-right (tracked for updates)
         lv_obj_t *statusIcons = lv_obj_create(g_ui.dataScreen);
         lv_obj_remove_style_all(statusIcons);
         lv_obj_set_size(statusIcons, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
         lv_obj_set_layout(statusIcons, LV_LAYOUT_FLEX);
         lv_obj_set_flex_flow(statusIcons, LV_FLEX_FLOW_ROW);
-        lv_obj_set_style_pad_column(statusIcons, 12, 0);
-        lv_obj_align(statusIcons, LV_ALIGN_TOP_RIGHT, -16, 12);
+        lv_obj_set_style_pad_column(statusIcons, 8, 0);
+        lv_obj_align(statusIcons, LV_ALIGN_TOP_RIGHT, -12, 12);
+        lv_obj_clear_flag(statusIcons, LV_OBJ_FLAG_SCROLLABLE);
 
-        lv_obj_t *wifiCopy = lv_label_create(statusIcons);
-        lv_label_set_text(wifiCopy, LV_SYMBOL_WIFI);
-        lv_obj_set_style_text_font(wifiCopy, &lv_font_montserrat_16, 0);
-        lv_obj_set_style_text_color(wifiCopy, color_muted, 0);
+        g_ui.dataWifiIcon = lv_label_create(statusIcons);
+        lv_label_set_text(g_ui.dataWifiIcon, LV_SYMBOL_WIFI);
+        lv_obj_set_style_text_font(g_ui.dataWifiIcon, &lv_font_montserrat_16, 0);
 
-        lv_obj_t *bleCopy = lv_label_create(statusIcons);
-        lv_label_set_text(bleCopy, LV_SYMBOL_BLUETOOTH);
-        lv_obj_set_style_text_font(bleCopy, &lv_font_montserrat_16, 0);
-        lv_obj_set_style_text_color(bleCopy, color_muted, 0);
+        g_ui.dataBleIcon = lv_label_create(statusIcons);
+        lv_label_set_text(g_ui.dataBleIcon, LV_SYMBOL_BLUETOOTH);
+        lv_obj_set_style_text_font(g_ui.dataBleIcon, &lv_font_montserrat_16, 0);
 
         // Horizontal carousel for data pages
         g_ui.dataCarousel = lv_obj_create(g_ui.dataScreen);
@@ -925,6 +981,7 @@ namespace
         update_data_indicator();
         update_data_values();
         update_data_carousel_visuals();
+        update_status_icons();
 
         lv_disp_load_scr(g_ui.dataScreen);
         g_state.inDetail = true;
@@ -977,6 +1034,7 @@ namespace
         lv_obj_add_event_cb(slider, [](lv_event_t *)
                             { saveConfig(); }, LV_EVENT_RELEASED, nullptr);
 
+        update_status_icons();
         lv_disp_load_scr(g_ui.detail);
         g_state.inDetail = true;
     }
@@ -1016,6 +1074,7 @@ namespace
         lv_label_set_text(g_ui.wifiList, "\nConfigure via WebUI");
         lv_obj_set_style_pad_top(g_ui.wifiList, 20, 0);
 
+        update_status_icons();
         lv_disp_load_scr(g_ui.detail);
         g_state.inDetail = true;
     }
@@ -1052,6 +1111,7 @@ namespace
         lv_label_set_text(g_ui.bleList, "\nPair OBD dongle via WebUI");
         lv_obj_set_style_pad_top(g_ui.bleList, 20, 0);
 
+        update_status_icons();
         lv_disp_load_scr(g_ui.detail);
         g_state.inDetail = true;
     }
@@ -1078,6 +1138,7 @@ namespace
         lv_obj_add_style(ver, &styleMuted, 0);
         lv_obj_set_style_pad_top(ver, 30, 0);
 
+        update_status_icons();
         lv_disp_load_scr(g_ui.detail);
         g_state.inDetail = true;
     }
