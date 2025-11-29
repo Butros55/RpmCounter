@@ -557,8 +557,6 @@ namespace
     {
         static TouchPoint lastPoint{false, 0, 0};
         static bool wasTouched = false;
-        static uint32_t lastTouchLogMs = 0;
-        static uint32_t touchCount = 0;
 
         TouchPoint p = ft3168_read_touch();
         if (p.touched)
@@ -568,22 +566,6 @@ namespace
             data->point.x = mapped.x;
             data->point.y = mapped.y;
             lastPoint = mapped;
-
-            // Log touch start and periodically during hold (max once per 500ms)
-            uint32_t now = millis();
-            if (!wasTouched)
-            {
-                touchCount++;
-                Serial.println("----------------------------------------");
-                Serial.printf("[TOUCH] #%lu PRESSED at (%u, %u)\n", touchCount, mapped.x, mapped.y);
-                Serial.println("----------------------------------------");
-                lastTouchLogMs = now;
-            }
-            else if (now - lastTouchLogMs > 500)
-            {
-                Serial.printf("[TOUCH] Holding at (%u, %u)\n", mapped.x, mapped.y);
-                lastTouchLogMs = now;
-            }
             wasTouched = true;
         }
         else
@@ -591,11 +573,6 @@ namespace
             data->state = LV_INDEV_STATE_RELEASED;
             data->point.x = lastPoint.x;
             data->point.y = lastPoint.y;
-
-            if (wasTouched)
-            {
-                Serial.printf("[TOUCH] Released at (%u, %u)\n", lastPoint.x, lastPoint.y);
-            }
             wasTouched = false;
         }
     }

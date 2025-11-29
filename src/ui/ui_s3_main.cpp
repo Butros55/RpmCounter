@@ -378,7 +378,7 @@ namespace
     // STATUS ICONS UPDATE
     // =======================================================================
     
-    // Helper to get WiFi icon color and opacity based on state
+    // Helper to get WiFi icon color and opacity based on state (with blinking)
     void get_wifi_icon_style(lv_color_t &col, lv_opa_t &opa, bool &isConnected)
     {
         bool staConnected = g_state.lastWifi.staConnected;
@@ -386,48 +386,56 @@ namespace
         bool staConnecting = g_state.lastWifi.staConnecting;
         int apClients = g_state.lastWifi.apClients;
         
+        const uint32_t now = millis();
         opa = LV_OPA_COVER;
         isConnected = false;
 
         if (staConnected)
         {
-            col = color_ok;
+            col = color_ok; // Green = connected
             isConnected = true;
         }
-        else if (apActive)
+        else if (apActive && apClients > 0)
         {
-            col = color_ok;
-            isConnected = (apClients > 0);
+            col = color_ok; // Green = AP with clients
+            isConnected = true;
         }
-        else if (staConnecting)
+        else if (apActive || staConnecting)
         {
+            // Blinking orange during AP waiting or STA connecting
             col = color_warn;
+            float phase = static_cast<float>(now % 1000) / 500.0f; // 1Hz blink
+            opa = (phase < 1.0f) ? LV_OPA_COVER : LV_OPA_30;
         }
         else
         {
-            col = color_error;
+            col = color_error; // Red = error/no connection
         }
     }
     
-    // Helper to get BLE icon color and opacity based on state
+    // Helper to get BLE icon color and opacity based on state (with blinking)
     void get_ble_icon_style(lv_color_t &col, lv_opa_t &opa, bool &isConnected)
     {
+        const uint32_t now = millis();
         opa = LV_OPA_COVER;
         isConnected = false;
         
         if (g_state.bleConnected)
         {
-            col = color_card_accent; // iOS blue
+            col = color_card_accent; // Blue = connected
             isConnected = true;
         }
         else if (g_state.bleConnecting)
         {
-            col = color_warn;
+            // Blinking blue during connection attempt
+            col = color_card_accent;
+            float phase = static_cast<float>(now % 800) / 400.0f; // 1.25Hz blink
+            opa = (phase < 1.0f) ? LV_OPA_COVER : LV_OPA_30;
         }
         else
         {
-            col = color_text_secondary;
-            opa = LV_OPA_60;
+            col = color_error; // Red = not connected / failed
+            opa = LV_OPA_80;
         }
     }
     
@@ -603,22 +611,13 @@ namespace
         lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(header, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-        // Create a larger clickable back button area
-        lv_obj_t *backBtn = lv_obj_create(header);
-        lv_obj_remove_style_all(backBtn);
-        lv_obj_set_size(backBtn, 50, 40);
-        lv_obj_set_style_bg_color(backBtn, lv_color_hex(0x2C2C2E), 0);
-        lv_obj_set_style_bg_opa(backBtn, LV_OPA_COVER, 0);
-        lv_obj_set_style_radius(backBtn, 10, 0);
-        lv_obj_add_flag(backBtn, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_clear_flag(backBtn, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_add_event_cb(backBtn, on_back, LV_EVENT_CLICKED, nullptr);
-        
-        lv_obj_t *backLbl = lv_label_create(backBtn);
+        // Simple back arrow (no grey box)
+        lv_obj_t *backLbl = lv_label_create(header);
         lv_label_set_text(backLbl, LV_SYMBOL_LEFT);
-        lv_obj_set_style_text_font(backLbl, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_font(backLbl, &lv_font_montserrat_24, 0);
         lv_obj_set_style_text_color(backLbl, lv_color_hex(0x0A84FF), 0);
-        lv_obj_center(backLbl);
+        lv_obj_add_flag(backLbl, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(backLbl, on_back, LV_EVENT_CLICKED, nullptr);
 
         // Title in center
         lv_obj_t *titleLbl = lv_label_create(header);
@@ -896,23 +895,14 @@ namespace
         lv_obj_clear_flag(g_ui.dataScreen, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_event_cb(g_ui.dataScreen, on_data_gesture, LV_EVENT_GESTURE, nullptr);
 
-        // Larger clickable back button at top-left
-        lv_obj_t *backBtn = lv_obj_create(g_ui.dataScreen);
-        lv_obj_remove_style_all(backBtn);
-        lv_obj_set_size(backBtn, 50, 40);
-        lv_obj_set_style_bg_color(backBtn, lv_color_hex(0x2C2C2E), 0);
-        lv_obj_set_style_bg_opa(backBtn, LV_OPA_COVER, 0);
-        lv_obj_set_style_radius(backBtn, 10, 0);
-        lv_obj_align(backBtn, LV_ALIGN_TOP_LEFT, 12, 8);
-        lv_obj_add_flag(backBtn, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_clear_flag(backBtn, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_add_event_cb(backBtn, on_back, LV_EVENT_CLICKED, nullptr);
-        
-        lv_obj_t *backLbl = lv_label_create(backBtn);
+        // Simple back arrow at top-left (no grey box)
+        lv_obj_t *backLbl = lv_label_create(g_ui.dataScreen);
         lv_label_set_text(backLbl, LV_SYMBOL_LEFT);
-        lv_obj_set_style_text_font(backLbl, &lv_font_montserrat_20, 0);
+        lv_obj_set_style_text_font(backLbl, &lv_font_montserrat_24, 0);
         lv_obj_set_style_text_color(backLbl, lv_color_hex(0x0A84FF), 0);
-        lv_obj_center(backLbl);
+        lv_obj_align(backLbl, LV_ALIGN_TOP_LEFT, 12, 12);
+        lv_obj_add_flag(backLbl, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(backLbl, on_back, LV_EVENT_CLICKED, nullptr);
 
         // Status icons at top-right (tracked for updates)
         lv_obj_t *statusIcons = lv_obj_create(g_ui.dataScreen);
