@@ -2231,6 +2231,11 @@ namespace
     void handleBleScan()
     {
         markHttpActivity("WEB_BLE_SCAN");
+        if (g_bleConnectInProgress || g_connectTaskRunning || g_manualConnectActive)
+        {
+            server.send(200, "application/json", "{\"status\":\"busy\",\"reason\":\"connecting\"}");
+            return;
+        }
         bool started = startBleScan();
         if (started)
             server.send(200, "application/json", "{\"status\":\"started\"}");

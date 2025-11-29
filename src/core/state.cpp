@@ -1,9 +1,9 @@
 #include "state.h"
 #include "config.h"
 
-BLEClient *g_client = nullptr;
-BLERemoteCharacteristic *g_charWrite = nullptr;
-BLERemoteCharacteristic *g_charNotify = nullptr;
+BleClientHandle *g_client = nullptr;
+BleRemoteCharacteristicHandle *g_charWrite = nullptr;
+BleRemoteCharacteristicHandle *g_charNotify = nullptr;
 
 bool g_connected = false;
 String g_serialLine;
