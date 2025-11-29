@@ -5,11 +5,16 @@
 struct WifiStatus;
 
 /**
- * Home/Status UI for the ESP32-S3 AMOLED path.
+ * Modern carousel-based home UI for the ESP32-S3 AMOLED display.
+ *
+ * Features:
+ * - Minimalist status bar with WiFi/BLE icons only
+ * - Horizontal carousel with animated zoom/opacity
+ * - Full-screen data pages (RPM, Speed, Gear, Temp) with swipe navigation
+ * - Clean Apple-style dark theme optimized for AMOLED
  *
  * ui_s3_init() builds the LVGL screen and loads it immediately.
- * ui_s3_loop() updates status indicators and detail lists from the live
- * WiFi/BLE state provided by the rest of the application.
+ * ui_s3_loop() updates status indicators and data values.
  */
 struct UiDisplayHooks
 {
@@ -22,3 +27,8 @@ void ui_s3_loop(const WifiStatus &wifiStatus, bool bleConnected, bool bleConnect
 void ui_s3_set_gear(int gear);
 void ui_s3_set_shiftlight(bool active);
 void ui_s3_show_logo();
+
+// Vehicle data setters for live updates
+void ui_s3_set_rpm(int rpm);
+void ui_s3_set_speed(int speed);
+void ui_s3_set_coolant(int temp);
