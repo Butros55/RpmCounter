@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ShiftLight Setup</title>
+    <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+    <h1>
+        <span>ShiftLight Setup</span>
+        <a href="/settings" style="text-decoration:none;color:#0af;font-size:20px;">⚙️</a>
+    </h1>
+
+    <form id="mainForm" method="POST" action="/save">
+        <!-- Allgemein Section -->
+        <div class="section">
+            <div class="section-title">Allgemein</div>
+            
+            <label for="modeSelect">Mode</label>
+            <select name="mode" id="modeSelect">
+                <option value="0">Casual</option>
+                <option value="1">F1-Style</option>
+                <option value="2">Überempfindlich</option>
+            </select>
+
+            <label for="brightness_slider">Brightness (0-255)</label>
+            <input type="range" min="0" max="255" value="80" id="brightness_slider">
+            <div class="small">Wert: <span id="bval">80</span></div>
+            <input type="hidden" name="brightness" id="brightness" value="80">
+
+            <div class="color-row">
+                <div class="color-swatch">
+                    <div class="color-swatch-title">Low RPM</div>
+                    <input type="color" class="color-circle" id="greenColorInput" name="greenColor" value="#00FF00">
+                    <div class="color-name" id="color1Name">Grün</div>
+                    <input type="hidden" name="greenLabel" id="greenLabelHidden" value="Grün">
+                </div>
+                <div class="color-swatch">
+                    <div class="color-swatch-title">Mid RPM</div>
+                    <input type="color" class="color-circle" id="yellowColorInput" name="yellowColor" value="#FFB400">
+                    <div class="color-name" id="color2Name">Gelb</div>
+                    <input type="hidden" name="yellowLabel" id="yellowLabelHidden" value="Gelb">
+                </div>
+                <div class="color-swatch">
+                    <div class="color-swatch-title">Shift / Warnung</div>
+                    <input type="color" class="color-circle" id="redColorInput" name="redColor" value="#FF0000">
+                    <div class="color-name" id="color3Name">Rot</div>
+                    <input type="hidden" name="redLabel" id="redLabelHidden" value="Rot">
+                </div>
+            </div>
+        </div>
+
+        <!-- Drehzahl-Bereich Section -->
+        <div class="section">
+            <div class="section-title">Drehzahl-Bereich</div>
+            
+            <div class="toggle-row">
+                <span class="toggle-label">Auto-Scale Max RPM (benutze max gesehene Drehzahl)</span>
+                <label class="switch">
+                    <input type="checkbox" id="autoscaleToggle" name="autoscale" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+
+            <div class="range-group" id="fixedMaxContainer">
+                <label for="fixedMaxRpmInput">Fixed Max RPM</label>
+                <input type="number" id="fixedMaxRpmInput" name="fixedMaxRpm" min="1000" max="8000" value="5000">
+            </div>
+
+            <div class="range-group">
+                <label class="rpm-label" id="greenEndLabel">
+                    <span class="rpm-label-title">Low RPM</span>
+                    <span class="rpm-label-range">End (% von Max RPM)</span>
+                </label>
+                <input type="range" name="greenEndPct" min="0" max="100" value="60" id="greenEndSlider" data-display="greenEndVal">
+                <div class="small">Wert: <span id="greenEndVal">60%</span></div>
+            </div>
+
+            <div class="range-group">
+                <label class="rpm-label" id="yellowEndLabel">
+                    <span class="rpm-label-title">Mid RPM</span>
+                    <span class="rpm-label-range">End (% von Max RPM)</span>
+                </label>
+                <input type="range" name="yellowEndPct" min="0" max="100" value="85" id="yellowEndSlider" data-display="yellowEndVal">
+                <div class="small">Wert: <span id="yellowEndVal">85%</span></div>
+            </div>
+
+            <div class="range-group" id="blinkStartContainer">
+                <label class="rpm-label" id="blinkStartLabel">
+                    <span class="rpm-label-title">Shift / Warnung</span>
+                    <span class="rpm-label-range">Start (% von Max RPM)</span>
+                </label>
+                <input type="range" name="blinkStartPct" min="0" max="100" value="90" id="blinkStartSlider" data-display="blinkStartVal">
+                <div class="small">Wert: <span id="blinkStartVal">90%</span></div>
+            </div>
+
+            <div class="led-preview-title small">LED-Vorschau</div>
+            <div id="ledPreview" class="led-preview" data-led-count="30"></div>
+            
+            <button type="button" id="btnTest">Testlauf: RPM-Sweep</button>
+        </div>
+
+        <!-- Coming-Home / Leaving Section -->
+        <div class="section">
+            <div class="section-title">Coming-Home / Leaving</div>
+            
+            <div class="toggle-row">
+                <span class="toggle-label">M-Logo bei Zündung an</span>
+                <label class="switch">
+                    <input type="checkbox" name="logoIgnOn" id="logoIgnOn" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+            
+            <div class="toggle-row">
+                <span class="toggle-label">M-Logo bei Motorstart</span>
+                <label class="switch">
+                    <input type="checkbox" name="logoEngStart" id="logoEngStart" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+            
+            <div class="toggle-row">
+                <span class="toggle-label">Leaving-Animation bei Zündung aus</span>
+                <label class="switch">
+                    <input type="checkbox" name="logoIgnOff" id="logoIgnOff" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Mein Fahrzeug Section -->
+        <div class="section">
+            <div class="section-title">Mein Fahrzeug</div>
+            <div class="row small">Fahrzeug: <strong id="vehicleModel" data-base="-">-</strong></div>
+            <div class="row small">VIN: <strong id="vehicleVin" data-base="-">-</strong></div>
+            <div class="row small">Diagnose: <strong id="vehicleDiag" data-base="-">-</strong></div>
+        </div>
+
+        <!-- Dev Mode: OBD / Verbindung Section (hidden by default) -->
+        <div class="section dev-section dev-collapsed" id="devObdSection">
+            <div class="section-title">OBD / Verbindung</div>
+            
+            <div class="toggle-row">
+                <span class="toggle-label">OBD automatisch verbinden (Reconnect)</span>
+                <label class="switch">
+                    <input type="checkbox" name="autoReconnect" id="autoReconnect">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            
+            <div class="status-line">BLE-Status: <span id="bleStatus">Getrennt</span></div>
+            
+            <button type="button" id="btnConnect">Jetzt mit OBD verbinden</button>
+            <button type="button" class="btn-danger" id="btnDisconnect" style="display:none">OBD trennen</button>
+        </div>
+
+        <!-- Dev Mode: Display Section (hidden by default) -->
+        <div class="section dev-section dev-collapsed" id="displayStatusBlock">
+            <div class="section-title">Display <span id="displaySpinner" class="spinner hidden"></span></div>
+            
+            <div class="row small">Init versucht: <span id="dispInit">-</span> | Ready: <span id="dispReady">-</span></div>
+            <div class="row small">Panel/Buffer: <span id="dispPanel">-</span> / <span id="dispBuf">-</span> | Touch: <span id="dispTouch">-</span></div>
+            <div class="row small">LVGL Tick: <span id="dispTickMode">-</span> | Debug-UI: <span id="dispDebugUi">-</span></div>
+            <div class="row small">Letzte LVGL-Ausführung (ms): <span id="dispLvgl">-</span></div>
+            <div class="row small">Fehler: <span id="dispError">-</span></div>
+            
+            <button type="button" id="btnDisplayStatus">Status aktualisieren</button>
+            <button type="button" id="btnDisplayBars">Testbild: Farb-Balken</button>
+            <button type="button" id="btnDisplayGrid">Testbild: Raster/Helligkeit</button>
+            <button type="button" id="btnDisplayLogo">BMW Logo auf Display anzeigen</button>
+            
+            <div class="small">Zeigt Debug-Testbilder, um Panel und Treiber zu prüfen (hilft wenn nichts angezeigt wird).</div>
+        </div>
+
+        <!-- Dev Mode: Debug Section (hidden by default) -->
+        <div class="section dev-section dev-collapsed" id="debugSection">
+            <div class="section-title">Debug<span id="debugSpinner" class="spinner hidden"></span></div>
+            <div class="row small">Letzter TX: <span id="lastTx">-</span></div>
+            <div class="row small">Letzte OBD-Zeile: <span id="lastObd">-</span></div>
+            <div class="row small">Aktuelle RPM: <span id="rpmVal">0</span> / Max gesehen: <span id="rpmMaxVal">0</span></div>
+        </div>
+
+        <!-- Action Buttons -->
+        <button type="button" id="btnSave" disabled>Speichern</button>
+        <button type="button" class="btn-danger" id="btnReset" style="display:none">Zurücksetzen</button>
+    </form>
+
+    <div class="small" style="text-align:center;margin-top:16px;">IP: <span id="currentIp">-</span></div>
+
+    <script src="/assets/main.js"></script>
+</body>
+</html>

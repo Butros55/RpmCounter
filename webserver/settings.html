@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ShiftLight Einstellungen</title>
+    <link rel="stylesheet" href="/assets/style.css">
+</head>
+<body>
+    <h1>
+        <a href="/">← Zurück</a>
+        <span>Einstellungen</span>
+    </h1>
+
+    <form id="settingsForm" method="POST" action="/settings">
+        <!-- Modus / Dev-Mode Section -->
+        <div class="section">
+            <div class="section-title">Modus</div>
+            
+            <div class="toggle-row">
+                <span class="toggle-label">Entwicklermodus</span>
+                <label class="switch">
+                    <input type="checkbox" name="devMode" id="devModeToggle">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            
+            <div class="small">Schaltet zusätzliche Debug- und OBD-Einstellungen frei.</div>
+        </div>
+
+        <!-- WLAN Section -->
+        <div class="section">
+            <div class="section-title">WLAN</div>
+            
+            <div class="wifi-status-card">
+                <span id="wifiStatusDot" class="status-dot bad"></span>
+                <div class="status-texts">
+                    <div id="wifiStatusText" class="wifi-status-main">Keine Verbindung</div>
+                    <div id="wifiStatusSub" class="status-sub">Modus: -</div>
+                    <div id="wifiStatusMeta" class="wifi-status-meta">IP: -</div>
+                    <div id="wifiStatusError" class="wifi-error"></div>
+                </div>
+            </div>
+
+            <label for="wifiMode">WLAN-Modus</label>
+            <div class="select-wrap">
+                <select name="wifiMode" id="wifiMode" class="wifi-mode-select">
+                    <option value="0">Access Point (nur AP)</option>
+                    <option value="1">Heim-WLAN (nur STA)</option>
+                    <option value="2">Heim-WLAN mit AP-Fallback</option>
+                </select>
+            </div>
+            <div class="wifi-note">Speichern löst einen kurzen WLAN-Neustart aus. STA verbindet neu, AP bleibt in AP- oder Fallback-Modus aktiv.</div>
+
+            <div id="wifiInteractive" class="collapsible collapsed">
+                <div class="wifi-actions">
+                    <button type="button" class="btn" id="wifiScanBtn">Netzwerke suchen</button>
+                    <button type="button" class="btn btn-secondary" id="wifiDisconnectBtn">Trennen</button>
+                    <span id="wifiScanStatus" class="wifi-inline">Bereit</span>
+                </div>
+                
+                <div id="wifiResults" class="device-list collapsed">
+                    <div id="wifiResultsList"></div>
+                    <div id="wifiScanEmpty" class="wifi-inline">Keine Netzwerke gefunden.</div>
+                </div>
+            </div>
+
+            <!-- WiFi Password Modal -->
+            <div id="wifiPasswordModal" class="modal hidden">
+                <div class="modal-backdrop"></div>
+                <div class="modal-card">
+                    <div class="modal-title">Verbinden mit <span id="wifiModalSsid"></span></div>
+                    <label for="wifiModalPassword">Passwort</label>
+                    <input type="password" id="wifiModalPassword" autocomplete="off" placeholder="Passwort eingeben">
+                    <div class="modal-actions">
+                        <button type="button" class="btn" id="wifiModalConnect">Verbinden</button>
+                        <button type="button" class="btn btn-outline" id="wifiModalCancel">Abbrechen</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mein Fahrzeug Section -->
+        <div class="section">
+            <div class="section-title">Mein Fahrzeug</div>
+            
+            <div class="row small">Fahrzeug: <strong id="vehicleModel" data-base="-">-</strong></div>
+            <div class="row small">VIN: <strong id="vehicleVin" data-base="-">-</strong></div>
+            <div class="row small">Diagnose: <strong id="vehicleDiag" data-base="-">-</strong></div>
+            <div class="row small">Status: <span id="vehicleStatus" data-base="Noch keine Daten">Noch keine Daten</span></div>
+            
+            <button type="button" class="btn" id="btnVehicleRefresh">Fahrzeugdaten neu synchronisieren</button>
+            <div id="settingsError" class="error"></div>
+        </div>
+
+        <!-- Bluetooth Verbindung Section -->
+        <div class="section">
+            <div class="section-title">Bluetooth Verbindung</div>
+            
+            <div class="status-pill">
+                <span id="bleStatusDot" class="status-dot"></span>
+                <span id="bleStatusText">Keine Verbindung</span>
+            </div>
+            
+            <div class="row small">Gerät: <strong id="bleTargetName" data-base="-">-</strong></div>
+            <div class="row small">MAC: <span id="bleTargetAddr" data-base="-">-</span></div>
+            
+            <div class="ble-actions">
+                <button type="button" class="btn" id="bleScanBtn">Geräte suchen</button>
+                <span id="bleScanStatus" class="ble-inline">Bereit</span>
+            </div>
+            
+            <div id="bleError" class="error"></div>
+            
+            <div id="bleResults" class="device-list collapsed">
+                <div id="bleResultsList"></div>
+                <div id="bleScanEmpty" class="ble-inline">Keine Geräte gefunden.</div>
+            </div>
+        </div>
+
+        <!-- Dev Mode: OBD-Konsole Section (hidden by default) -->
+        <div id="devObdSection" class="section dev-section dev-collapsed">
+            <div class="section-title">OBD-Konsole</div>
+            
+            <div class="small">
+                Direkte AT-/OBD-Befehle senden (z.&nbsp;B. <code>010C</code>, <code>010D</code>, <code>ATZ</code>). 
+                Antworten erscheinen unten.
+            </div>
+            
+            <div id="obdConsole" class="console-box"></div>
+            
+            <div class="console-row">
+                <input type="text" id="obdCmdInput" class="console-input" placeholder="Befehl, z.B. 010C">
+                <button type="button" class="btn" id="obdSendBtn" style="width:auto;margin-top:0;">Senden</button>
+            </div>
+            
+            <div class="console-footer">
+                <div class="console-footer-left">
+                    <span class="toggle-label">Auto-Log</span>
+                    <label class="switch">
+                        <input type="checkbox" id="obdAutoLog">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+                <button type="button" class="btn btn-danger" id="obdClearBtn" style="width:auto;padding:6px 10px;margin-top:0;">Clear</button>
+            </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <button type="submit" class="btn" id="settingsSave" disabled>Speichern</button>
+        <button type="button" class="btn btn-danger" id="settingsReset" style="display:none">Zurücksetzen</button>
+    </form>
+
+    <script src="/assets/settings.js"></script>
+</body>
+</html>
