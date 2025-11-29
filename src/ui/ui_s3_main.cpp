@@ -410,6 +410,9 @@ namespace
 
             lv_color_t col;
             lv_opa_t opa = LV_OPA_COVER;
+            
+            // Cache millis for animation calculations
+            const uint32_t now = millis();
 
             if (staConnected)
             {
@@ -421,15 +424,17 @@ namespace
                 // Subtle pulse when waiting for clients
                 if (apClients == 0)
                 {
-                    float pulse = (sin(millis() / 400.0f) + 1.0f) / 2.0f;
-                    opa = static_cast<lv_opa_t>(180 + 75 * pulse);
+                    float phase = static_cast<float>(now % 2512) / 400.0f; // 2512 ~ 2*PI*400
+                    float pulse = (sinf(phase) + 1.0f) * 0.5f;
+                    opa = static_cast<lv_opa_t>(180 + static_cast<int>(75 * pulse));
                 }
             }
             else if (staConnecting)
             {
                 col = color_warn;
-                float pulse = (sin(millis() / 200.0f) + 1.0f) / 2.0f;
-                opa = static_cast<lv_opa_t>(100 + 155 * pulse);
+                float phase = static_cast<float>(now % 1256) / 200.0f; // 1256 ~ 2*PI*200
+                float pulse = (sinf(phase) + 1.0f) * 0.5f;
+                opa = static_cast<lv_opa_t>(100 + static_cast<int>(155 * pulse));
             }
             else
             {
@@ -445,6 +450,9 @@ namespace
             lv_color_t col;
             lv_opa_t opa = LV_OPA_COVER;
             
+            // Cache millis for animation calculations
+            const uint32_t now = millis();
+            
             if (g_state.bleConnected)
             {
                 col = color_card_accent; // iOS blue
@@ -452,8 +460,9 @@ namespace
             else if (g_state.bleConnecting)
             {
                 col = color_warn;
-                float pulse = (sin(millis() / 250.0f) + 1.0f) / 2.0f;
-                opa = static_cast<lv_opa_t>(100 + 155 * pulse);
+                float phase = static_cast<float>(now % 1570) / 250.0f; // 1570 ~ 2*PI*250
+                float pulse = (sinf(phase) + 1.0f) * 0.5f;
+                opa = static_cast<lv_opa_t>(100 + static_cast<int>(155 * pulse));
             }
             else
             {
@@ -1121,11 +1130,9 @@ void ui_s3_loop(const WifiStatus &wifiStatus, bool bleConnected, bool bleConnect
     g_state.bleConnected = bleConnected;
     g_state.bleConnecting = bleConnecting;
 
-    // Fetch live data from global state
-    g_state.rpm = g_currentRpm;
-    g_state.speed = g_vehicleSpeedKmh;
-    g_state.gear = g_estimatedGear;
-    // TODO: g_state.coolant from OBD when available
+    // Note: Vehicle data (rpm, speed, gear, coolant) should be set via
+    // the dedicated setter functions: ui_s3_set_rpm(), ui_s3_set_speed(),
+    // ui_s3_set_gear(), ui_s3_set_coolant()
 
     update_status_icons();
 

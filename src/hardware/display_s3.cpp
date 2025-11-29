@@ -731,6 +731,12 @@ void display_s3_loop()
         g_lastLvglRun = now;
     }
 
+    // Update UI with live vehicle data via setter functions
+    ui_s3_set_rpm(g_currentRpm);
+    ui_s3_set_speed(g_vehicleSpeedKmh);
+    ui_s3_set_gear(g_estimatedGear);
+    // TODO: ui_s3_set_coolant() when coolant data available from OBD
+
     ui_s3_loop(wifiStatus, g_connected, g_bleConnectInProgress);
 }
 
