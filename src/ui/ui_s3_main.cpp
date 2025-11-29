@@ -306,46 +306,18 @@ namespace
         if (!g_ui.carousel)
             return;
 
-        const lv_coord_t contWidth = lv_obj_get_width(g_ui.carousel);
-        const lv_coord_t centerX = -lv_obj_get_scroll_x(g_ui.carousel) + (contWidth / 2);
-
-        int closestIdx = g_state.cardIndex;
-        lv_coord_t closestDist = LV_COORD_MAX;
-
+        // Make sure all cards are visible with basic styling
+        // The zoom/opacity effects are subtle to avoid visibility issues
         for (size_t i = 0; i < CARD_COUNT; ++i)
         {
             CardWidgets &cw = g_ui.cards[i];
             if (!cw.container)
                 continue;
 
-            lv_coord_t cardCenter = lv_obj_get_x(cw.container) + (lv_obj_get_width(cw.container) / 2);
-            lv_coord_t delta = LV_ABS(centerX - cardCenter);
-
-            if (delta < closestDist)
-            {
-                closestDist = delta;
-                closestIdx = static_cast<int>(i);
-            }
-
-            float ratio = static_cast<float>(delta) / static_cast<float>(contWidth / 2 + 1);
-            ratio = std::min(1.0f, ratio);
-
-            // Smooth zoom: 125% at center, 85% at edges
-            int zoom = static_cast<int>(256 * (1.25f - 0.40f * ratio));
-            zoom = std::max(180, std::min(zoom, 320));
-            lv_obj_set_style_transform_zoom(cw.container, zoom, 0);
-            
-            // Opacity: full at center, 50% at edges
-            lv_obj_set_style_opa(cw.container, 255 - static_cast<int>(130 * ratio), 0);
-            
-            // Lift center card slightly
-            lv_obj_set_style_translate_y(cw.container, static_cast<lv_coord_t>(-15 * (1.0f - ratio)), 0);
-        }
-
-        if (g_state.cardIndex != closestIdx)
-        {
-            g_state.cardIndex = closestIdx;
-            update_page_indicator();
+            // Ensure card is always visible
+            lv_obj_set_style_opa(cw.container, LV_OPA_COVER, 0);
+            lv_obj_set_style_transform_zoom(cw.container, 256, 0);
+            lv_obj_clear_flag(cw.container, LV_OBJ_FLAG_HIDDEN);
         }
     }
 
@@ -640,31 +612,38 @@ namespace
 
         w.container = lv_obj_create(g_ui.carousel);
         lv_obj_remove_style_all(w.container);
-        lv_obj_add_style(w.container, &styleCard, 0);
-        lv_obj_set_size(w.container, 128, 156);
-        lv_obj_set_style_bg_opa(w.container, LV_OPA_90, 0);
+        lv_obj_set_size(w.container, 120, 150);
+        lv_obj_set_style_bg_color(w.container, lv_color_hex(0x1C1C1E), 0);
+        lv_obj_set_style_bg_opa(w.container, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(w.container, 20, 0);
+        lv_obj_set_style_border_width(w.container, 2, 0);
+        lv_obj_set_style_border_color(w.container, lv_color_hex(0x3A3A3C), 0);
         lv_obj_clear_flag(w.container, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_add_flag(w.container, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(w.container, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SNAPPABLE);
         lv_obj_set_layout(w.container, LV_LAYOUT_FLEX);
         lv_obj_set_flex_flow(w.container, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(w.container, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_row(w.container, 10, 0);
+        lv_obj_set_style_pad_row(w.container, 8, 0);
+        lv_obj_set_style_pad_top(w.container, 15, 0);
         lv_obj_add_event_cb(w.container, on_card_click, LV_EVENT_CLICKED, nullptr);
 
         w.circle = lv_obj_create(w.container);
         lv_obj_remove_style_all(w.circle);
-        lv_obj_add_style(w.circle, &styleCircle, 0);
-        lv_obj_set_size(w.circle, 84, 84);
+        lv_obj_set_size(w.circle, 70, 70);
+        lv_obj_set_style_bg_color(w.circle, lv_color_hex(0x0A84FF), 0);
+        lv_obj_set_style_bg_opa(w.circle, LV_OPA_30, 0);
+        lv_obj_set_style_radius(w.circle, LV_RADIUS_CIRCLE, 0);
         lv_obj_clear_flag(w.circle, LV_OBJ_FLAG_SCROLLABLE);
 
         w.icon = lv_label_create(w.circle);
         lv_label_set_text(w.icon, def.symbol);
         lv_obj_set_style_text_font(w.icon, &lv_font_montserrat_32, 0);
+        lv_obj_set_style_text_color(w.icon, lv_color_hex(0x0A84FF), 0);
         lv_obj_center(w.icon);
 
         w.label = lv_label_create(w.container);
         lv_label_set_text(w.label, def.title);
-        lv_obj_add_style(w.label, &styleMuted, 0);
+        lv_obj_set_style_text_color(w.label, lv_color_hex(0x8E8E93), 0);
         lv_obj_set_style_text_font(w.label, &lv_font_montserrat_16, 0);
 
         return w;
@@ -743,18 +722,19 @@ namespace
         // Main carousel - takes most of the screen
         g_ui.carousel = lv_obj_create(g_ui.root);
         lv_obj_remove_style_all(g_ui.carousel);
-        lv_obj_set_size(g_ui.carousel, LV_PCT(100), LV_PCT(75));
-        lv_obj_align(g_ui.carousel, LV_ALIGN_CENTER, 0, 0);
-        lv_obj_set_style_pad_hor(g_ui.carousel, 24, 0);
+        lv_obj_set_size(g_ui.carousel, LV_PCT(100), 200);
+        lv_obj_align(g_ui.carousel, LV_ALIGN_CENTER, 0, 20);
+        lv_obj_set_style_pad_left(g_ui.carousel, 76, 0);  // Center first card (280-128)/2 = 76
+        lv_obj_set_style_pad_right(g_ui.carousel, 76, 0);
         lv_obj_set_style_pad_ver(g_ui.carousel, 10, 0);
         lv_obj_set_layout(g_ui.carousel, LV_LAYOUT_FLEX);
         lv_obj_set_flex_flow(g_ui.carousel, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(g_ui.carousel, LV_FLEX_ALIGN_SPACE_AROUND, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_column(g_ui.carousel, 24, 0);
+        lv_obj_set_flex_align(g_ui.carousel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(g_ui.carousel, 20, 0);
         lv_obj_set_scroll_dir(g_ui.carousel, LV_DIR_HOR);
         lv_obj_set_scroll_snap_x(g_ui.carousel, LV_SCROLL_SNAP_CENTER);
         lv_obj_set_scrollbar_mode(g_ui.carousel, LV_SCROLLBAR_MODE_OFF);
-        lv_obj_add_flag(g_ui.carousel, LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SNAPPABLE);
+        lv_obj_add_flag(g_ui.carousel, LV_OBJ_FLAG_SCROLL_MOMENTUM);
         lv_obj_add_event_cb(g_ui.carousel, on_carousel_scroll, LV_EVENT_SCROLL, nullptr);
 
         // Create cards
