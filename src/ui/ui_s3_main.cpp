@@ -363,15 +363,15 @@ namespace
             // - Green blinking: AP active but no clients (waiting for connection)
             // - Yellow blinking: STA connecting
             // - Red: AP and STA both inactive (error state)
-            
+
             bool staConnected = g_state.lastWifi.staConnected;
             bool apActive = g_state.lastWifi.apActive;
             bool staConnecting = g_state.lastWifi.staConnecting;
             int apClients = g_state.lastWifi.apClients;
-            
+
             lv_color_t col;
             lv_opa_t opa = LV_OPA_COVER;
-            
+
             if (staConnected)
             {
                 // STA connected - solid green
@@ -402,7 +402,7 @@ namespace
                 // Neither AP nor STA - red (error)
                 col = color_error;
             }
-            
+
             lv_obj_set_style_text_color(g_ui.wifiIcon, col, 0);
             lv_obj_set_style_opa(g_ui.wifiIcon, opa, 0);
         }

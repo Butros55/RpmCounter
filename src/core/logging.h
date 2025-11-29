@@ -20,13 +20,13 @@ LogLevel getLogLevel();
 bool isLogLevelEnabled(LogLevel level);
 void logMessage(LogLevel level, const char *source, const char *code, const String &message);
 
-#define LOG_MESSAGE(level, source, code, message)                     \
-    do                                                                \
-    {                                                                 \
-        if (isLogLevelEnabled(level))                                 \
-        {                                                             \
-            logMessage(level, source, code, String(message));         \
-        }                                                             \
+#define LOG_MESSAGE(level, source, code, message)             \
+    do                                                        \
+    {                                                         \
+        if (isLogLevelEnabled(level))                         \
+        {                                                     \
+            logMessage(level, source, code, String(message)); \
+        }                                                     \
     } while (0)
 
 #define LOG_ERROR(source, code, message) LOG_MESSAGE(LogLevel::Error, source, code, message)

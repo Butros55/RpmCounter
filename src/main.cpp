@@ -16,33 +16,33 @@
 void setup()
 {
     Serial.begin(115200);
-    delay(100);  // Wait for serial to stabilize
-    
+    delay(100); // Wait for serial to stabilize
+
     Serial.println();
     Serial.println("============================================");
     Serial.println("       SHIFTLIGHT ESP32-S3 STARTING");
     Serial.println("============================================");
     Serial.println();
-    
+
     Serial.println("[BOOT] Loading config...");
     initConfig();
     loadConfig();
-    
+
     Serial.println("[BOOT] Initializing state...");
     initGlobalState();
-    
+
     Serial.println("[BOOT] Initializing LEDs...");
     initLeds();
-    
+
     Serial.println("[BOOT] Setting up WiFi...");
     setupWifiFromConfig(cfg);
-    
+
     Serial.println("[BOOT] Starting WebServer...");
     initWebUi();
-    
+
     Serial.println("[BOOT] Initializing BLE...");
     initBle();
-    
+
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
     Serial.println("[BOOT] Initializing S3 AMOLED Display...");
     display_s3_init();

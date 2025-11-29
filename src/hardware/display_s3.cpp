@@ -412,7 +412,7 @@ namespace
     {
         Serial.println("[TOUCH] ---- FT3168 Init Start ----");
         Serial.printf("[TOUCH] Pins: SDA=%d, SCL=%d, Addr=0x%02X\n", PIN_TOUCH_SDA, PIN_TOUCH_SCL, TOUCH_ADDR);
-        
+
         constexpr int MAX_ATTEMPTS = 5;
         constexpr uint32_t RETRY_DELAY_MS = 100;
 
@@ -422,7 +422,7 @@ namespace
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; ++attempt)
         {
             Serial.printf("[TOUCH] Attempt %d/%d...\n", attempt, MAX_ATTEMPTS);
-            
+
             if (!ft3168_ll_init())
             {
                 setLastError("touch-bus-init-failed");
@@ -568,7 +568,7 @@ namespace
             data->point.x = mapped.x;
             data->point.y = mapped.y;
             lastPoint = mapped;
-            
+
             // Log touch start and periodically during hold (max once per 500ms)
             uint32_t now = millis();
             if (!wasTouched)
@@ -591,7 +591,7 @@ namespace
             data->state = LV_INDEV_STATE_RELEASED;
             data->point.x = lastPoint.x;
             data->point.y = lastPoint.y;
-            
+
             if (wasTouched)
             {
                 Serial.printf("[TOUCH] Released at (%u, %u)\n", lastPoint.x, lastPoint.y);
@@ -654,7 +654,7 @@ void display_s3_init()
 
     Serial.println();
     Serial.println("[DISPLAY] ---- S3 AMOLED Init Start ----");
-    
+
     lv_init();
     Serial.printf("[DISPLAY] LVGL initialized (depth=%d, swap=%d)\n", LV_COLOR_DEPTH, LV_COLOR_16_SWAP);
 
@@ -701,7 +701,7 @@ void display_s3_init()
     g_displayReady = true;
     g_lastLvglRun = millis();
     setLastError("");
-    
+
     Serial.println("[DISPLAY] ---- S3 AMOLED Init Complete ----");
     Serial.printf("[DISPLAY] Resolution: %dx%d\n", LCD_H_RES, LCD_V_RES);
     Serial.println();

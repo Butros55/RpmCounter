@@ -26,7 +26,7 @@ namespace
         uint32_t staConnectTimeoutMs = 15000;
         bool apActive = false;
         int apClients = 0;
-        int apClientsLastLogged = -1;  // Track client count changes for logging
+        int apClientsLastLogged = -1; // Track client count changes for logging
         String apIp;
         bool scanRunning = false;
         unsigned long scanStartMs = 0;
@@ -41,7 +41,7 @@ namespace
         unsigned long lastRetryMs = 0;
         unsigned long lastApCheckMs = 0;
         unsigned long lastApLogMs = 0;
-        bool apWasActive = false;  // Track AP state changes
+        bool apWasActive = false; // Track AP state changes
     };
 
     WifiRuntimeState g_wifi;
@@ -67,11 +67,11 @@ namespace
         wifi_mode_t mode = WiFi.getMode();
         bool wasActive = g_wifi.apActive;
         g_wifi.apActive = (mode == WIFI_AP || mode == WIFI_AP_STA);
-        
+
         int prevClients = g_wifi.apClients;
         g_wifi.apClients = g_wifi.apActive ? WiFi.softAPgetStationNum() : 0;
         g_wifi.apIp = g_wifi.apActive ? WiFi.softAPIP().toString() : "";
-        
+
         // Log AP state changes
         if (g_wifi.apActive != wasActive)
         {
@@ -85,7 +85,7 @@ namespace
             }
             g_wifi.apWasActive = g_wifi.apActive;
         }
-        
+
         // Log client count changes
         if (g_wifi.apClients != prevClients && g_wifi.apClients != g_wifi.apClientsLastLogged)
         {
@@ -209,9 +209,9 @@ namespace
         }
 
         // Configure WiFi for AP stability
-        WiFi.persistent(false);  // Don't save to flash on every change
-        WiFi.setAutoReconnect(false);  // We handle reconnection manually
-        
+        WiFi.persistent(false);       // Don't save to flash on every change
+        WiFi.setAutoReconnect(false); // We handle reconnection manually
+
         // Set mode first, then configure - prevents AP restart
         if (currentMode != WIFI_AP_STA && currentMode != WIFI_AP)
         {
@@ -219,14 +219,14 @@ namespace
             delay(100); // Give WiFi stack time to initialize
         }
 
-        WiFi.setSleep(false);  // Disable power saving for better responsiveness
-        WiFi.setTxPower(WIFI_POWER_19_5dBm);  // Maximum power for better range
+        WiFi.setSleep(false);                // Disable power saving for better responsiveness
+        WiFi.setTxPower(WIFI_POWER_19_5dBm); // Maximum power for better range
 
         // Configure AP with static IP
         IPAddress apIp(192, 168, 4, 1);
         IPAddress gateway(192, 168, 4, 1);
         IPAddress subnet(255, 255, 255, 0);
-        
+
         if (!WiFi.softAPConfig(apIp, gateway, subnet))
         {
             LOG_ERROR("WIFI", "AP_CONFIG_FAIL", "softAPConfig failed");
@@ -237,18 +237,18 @@ namespace
         strncpy((char *)wifi_config.ap.ssid, ssid.c_str(), sizeof(wifi_config.ap.ssid) - 1);
         strncpy((char *)wifi_config.ap.password, pass.c_str(), sizeof(wifi_config.ap.password) - 1);
         wifi_config.ap.ssid_len = ssid.length();
-        wifi_config.ap.channel = 6;  // Channel 6 is often less congested
+        wifi_config.ap.channel = 6; // Channel 6 is often less congested
         wifi_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
         wifi_config.ap.ssid_hidden = 0;
         wifi_config.ap.max_connection = 4;
-        wifi_config.ap.beacon_interval = 100;  // 100ms beacon interval (standard)
-        wifi_config.ap.pairwise_cipher = WIFI_CIPHER_TYPE_CCMP;  // AES encryption
+        wifi_config.ap.beacon_interval = 100;                   // 100ms beacon interval (standard)
+        wifi_config.ap.pairwise_cipher = WIFI_CIPHER_TYPE_CCMP; // AES encryption
         wifi_config.ap.ftm_responder = false;
         wifi_config.ap.pmf_cfg.required = false;
-        
+
         // Apply ESP-IDF config before Arduino softAP
         esp_wifi_set_config(WIFI_IF_AP, &wifi_config);
-        
+
         // Start AP with Arduino API
         bool ok = WiFi.softAP(ssid.c_str(), pass.c_str(), 6, false, 4);
 
@@ -256,7 +256,7 @@ namespace
         {
             // Additional delay for AP to fully stabilize
             delay(200);
-            
+
             // Verify AP is actually running
             wifi_mode_t verifyMode = WiFi.getMode();
             if (verifyMode != WIFI_AP && verifyMode != WIFI_AP_STA)
@@ -273,7 +273,7 @@ namespace
         g_wifi.activeMode = activeMode;
         g_wifi.currentSsid = ssid;
         g_wifi.apWasActive = ok;
-        g_wifi.apClientsLastLogged = -1;  // Reset to trigger first log
+        g_wifi.apClientsLastLogged = -1; // Reset to trigger first log
 
         updateIp();
         if (ok)
@@ -528,7 +528,7 @@ void wifiLoop()
         if (now - g_wifi.lastApCheckMs >= AP_CLIENT_CHECK_INTERVAL_MS)
         {
             g_wifi.lastApCheckMs = now;
-            
+
             // If AP should be active but isn't, restart it
             if (!g_wifi.apActive && g_wifi.apWasActive)
             {
@@ -536,7 +536,7 @@ void wifiLoop()
                 Serial.println("[WIFI] AP recovery - restarting AP");
                 startSoftAp(cfg, g_wifi.activeMode);
             }
-            
+
             // Periodic status log when AP is active (every 10s)
             if (g_wifi.apActive && (now - g_wifi.lastApLogMs >= AP_INACTIVE_LOG_INTERVAL_MS))
             {
@@ -559,7 +559,7 @@ void wifiLoop()
             g_wifi.staLastError = "";
             g_wifi.currentSsid = WiFi.SSID();
             updateIp();
-            
+
             // Log STA IP prominently so user knows where to access webserver
             String staIp = WiFi.localIP().toString();
             LOG_INFO("WIFI", "WIFI_STA_READY", String("ssid=") + g_wifi.currentSsid + " ip=" + staIp);
