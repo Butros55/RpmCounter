@@ -358,8 +358,12 @@ namespace
     {
         if (g_ui.wifiIcon)
         {
-            lv_color_t col = g_state.lastWifi.staConnected ? color_ok : (g_state.lastWifi.staConnecting ? color_warn : color_error);
-            lv_opa_t opa = (g_state.lastWifi.staConnecting && (millis() / 400) % 2) ? LV_OPA_40 : LV_OPA_COVER;
+            // WiFi is OK if: STA connected OR AP is active (with or without clients)
+            bool wifiOk = g_state.lastWifi.staConnected || g_state.lastWifi.apActive;
+            bool wifiConnecting = g_state.lastWifi.staConnecting;
+
+            lv_color_t col = wifiOk ? color_ok : (wifiConnecting ? color_warn : color_error);
+            lv_opa_t opa = (wifiConnecting && (millis() / 400) % 2) ? LV_OPA_40 : LV_OPA_COVER;
             lv_obj_set_style_text_color(g_ui.wifiIcon, col, 0);
             lv_obj_set_style_opa(g_ui.wifiIcon, opa, 0);
         }
@@ -487,10 +491,16 @@ void ui_s3_init(lv_disp_t *disp, const UiDisplayHooks &hooks)
 
 void ui_s3_loop(const WifiStatus &wifiStatus, bool bleConnected, bool bleConnecting)
 {
+    // Always update state from parameters
     g_state.lastWifi = wifiStatus;
     g_state.bleConnected = bleConnected;
     g_state.bleConnecting = bleConnecting;
+
+    // Update status icons every frame - this ensures BLE/WiFi indicators
+    // refresh immediately when connection state changes, not just when
+    // accessing webserver
     update_status_icons();
+    update_badges(); // Also update gear/shift badges in case they changed
 
     if (g_state.inDetail && g_ui.wifiList)
     {

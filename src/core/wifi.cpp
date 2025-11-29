@@ -2,6 +2,8 @@
 
 #include <WiFi.h>
 #include <esp_wifi.h>
+#include <esp_log.h>
+#include <cstdio>
 
 #include "config.h"
 #include "logging.h"
@@ -37,12 +39,21 @@ namespace
     };
 
     WifiRuntimeState g_wifi;
+    bool g_wifiEventsRegistered = false;
+    WiFiEventId_t g_wifiEventId = 0;
 
     String trimmed(const String &value)
     {
         String out = value;
         out.trim();
         return out;
+    }
+
+    String macToString(const uint8_t mac[6])
+    {
+        char buf[18];
+        snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        return String(buf);
     }
 
     void refreshApState()
@@ -83,12 +94,51 @@ namespace
         }
     }
 
-    wifi_mode_t pickApMode()
+    void ensureWifiEventsRegistered()
     {
-        wifi_mode_t mode = WiFi.getMode();
-        if (mode == WIFI_STA || mode == WIFI_AP_STA)
-            return WIFI_AP_STA;
-        return WIFI_AP;
+        if (g_wifiEventsRegistered)
+        {
+            return;
+        }
+
+        g_wifiEventId = WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info)
+                                     {
+                                         switch (event)
+                                         {
+                                         case ARDUINO_EVENT_WIFI_AP_START:
+                                             LOG_INFO("WIFI", "WIFI_EVT_AP_START", String("ip=") + WiFi.softAPIP().toString());
+                                             break;
+                                         case ARDUINO_EVENT_WIFI_AP_STOP:
+                                             LOG_INFO("WIFI", "WIFI_EVT_AP_STOP", "softAP stopped");
+                                             break;
+                                        case ARDUINO_EVENT_WIFI_AP_STACONNECTED:
+                                            LOG_INFO("WIFI", "WIFI_EVT_AP_STACONNECT", String("mac=") + macToString(info.wifi_ap_staconnected.mac));
+                                            break;
+                                        case ARDUINO_EVENT_WIFI_AP_STADISCONNECTED:
+                                            LOG_INFO("WIFI", "WIFI_EVT_AP_STADISCONNECT", String("mac=") + macToString(info.wifi_ap_stadisconnected.mac));
+                                            break;
+                                         case ARDUINO_EVENT_WIFI_STA_START:
+                                             LOG_INFO("WIFI", "WIFI_EVT_STA_START", "STA interface started");
+                                             break;
+                                         case ARDUINO_EVENT_WIFI_STA_CONNECTED:
+                                             LOG_INFO("WIFI", "WIFI_EVT_STA_CONNECTED", String("ssid=") + WiFi.SSID());
+                                             break;
+                                         case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+                                             ESP_LOGW("WIFI", "WIFI_EVT_STA_DISCONNECTED reason=%d", info.wifi_sta_disconnected.reason);
+                                             break;
+                                         case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+                                         {
+                                             IPAddress ip(info.got_ip.ip_info.ip.addr);
+                                             LOG_INFO("WIFI", "WIFI_EVT_STA_GOT_IP", String("ip=") + ip.toString());
+                                             break;
+                                         }
+                                         case ARDUINO_EVENT_WIFI_STA_LOST_IP:
+                                             ESP_LOGW("WIFI", "WIFI_EVT_STA_LOST_IP");
+                                             break;
+                                         default:
+                                             break;
+                                         } });
+        g_wifiEventsRegistered = true;
     }
 
     void clearStaState()
@@ -99,11 +149,8 @@ namespace
         g_wifi.staIp = "";
     }
 
-    void ensureApForFallback(const AppConfig &config, bool keepSta)
+    bool startSoftAp(const AppConfig &config, WifiMode activeMode)
     {
-        if (config.wifiMode != STA_WITH_AP_FALLBACK)
-            return;
-
         String ssid = trimmed(config.apSsid);
         String pass = trimmed(config.apPassword);
         if (ssid.isEmpty())
@@ -111,33 +158,72 @@ namespace
         if (pass.length() < 8)
             pass = AP_PASS;
 
-        wifi_mode_t mode = keepSta ? WIFI_AP_STA : pickApMode();
-        WiFi.mode(mode);
-        bool ok = WiFi.softAP(ssid.c_str(), pass.c_str());
+        ensureWifiEventsRegistered();
+
+        // Check if AP is already running with same SSID - avoid restart
+        wifi_mode_t currentMode = WiFi.getMode();
+        if ((currentMode == WIFI_AP || currentMode == WIFI_AP_STA) &&
+            WiFi.softAPSSID() == ssid && WiFi.softAPIP() != IPAddress(0, 0, 0, 0))
+        {
+            // AP already running, just update state
+            g_wifi.apActive = true;
+            g_wifi.apClients = WiFi.softAPgetStationNum();
+            g_wifi.apIp = WiFi.softAPIP().toString();
+            g_wifi.configuredMode = config.wifiMode;
+            g_wifi.activeMode = activeMode;
+            g_wifi.currentSsid = ssid;
+            updateIp();
+            LOG_INFO("WIFI", "AP_ALREADY_ACTIVE", String("ssid=") + ssid + " ip=" + g_wifi.apIp);
+            return true;
+        }
+
+        // Set mode first, then configure - prevents AP restart
+        if (currentMode != WIFI_AP_STA && currentMode != WIFI_AP)
+        {
+            WiFi.mode(WIFI_AP_STA);
+            delay(100); // Give WiFi stack time to initialize
+        }
+
+        WiFi.setSleep(false);
+        WiFi.setTxPower(WIFI_POWER_19_5dBm);
+
+        IPAddress apIp(192, 168, 4, 1);
+        IPAddress subnet(255, 255, 255, 0);
+        WiFi.softAPConfig(apIp, apIp, subnet);
+
+        // Start AP with fixed channel for iPhone compatibility
+        bool ok = WiFi.softAP(ssid.c_str(), pass.c_str(), 1, false, 4); // channel 1, not hidden, max 4 clients
+
+        // Small delay to let AP stabilize
+        delay(100);
+
         g_wifi.apActive = ok;
         g_wifi.apClients = ok ? WiFi.softAPgetStationNum() : 0;
         g_wifi.apIp = ok ? WiFi.softAPIP().toString() : "";
-        if (ok)
-        {
-            wifi_config_t conf{};
-            if (esp_wifi_get_config(WIFI_IF_AP, &conf) == ESP_OK)
-            {
-                conf.ap.authmode = WIFI_AUTH_WPA2_PSK;
-                conf.ap.channel = (conf.ap.channel == 0) ? 6 : conf.ap.channel;
-                conf.ap.pmf_cfg.required = false;
-                esp_wifi_set_config(WIFI_IF_AP, &conf);
-            }
-        }
+        g_wifi.configuredMode = config.wifiMode;
+        g_wifi.activeMode = activeMode;
+        g_wifi.currentSsid = ssid;
+
         updateIp();
         if (ok)
         {
-            LOG_INFO("WIFI", "WIFI_AP_READY", String("mode=fallback ssid=") + ssid + " ip=" + WiFi.softAPIP().toString());
+            LOG_INFO("WIFI", "WIFI_AP_START", String("ssid=") + ssid + " ip=" + WiFi.softAPIP().toString());
             LOG_INFO("WIFI", "AP_READY", String("ssid=") + ssid + " ip=" + g_wifi.apIp);
+            Serial.printf("[WIFI] AP IP: %s\n", g_wifi.apIp.c_str());
         }
         else
         {
-            LOG_ERROR("WIFI", "WIFI_AP_FALLBACK_FAIL", String("ssid=") + ssid);
+            LOG_ERROR("WIFI", "WIFI_AP_FAIL", String("ssid=") + ssid);
         }
+
+        return ok;
+    }
+
+    void ensureApForFallback(const AppConfig &config, bool keepSta)
+    {
+        if (config.wifiMode != STA_WITH_AP_FALLBACK)
+            return;
+        startSoftAp(config, keepSta ? STA_WITH_AP_FALLBACK : AP_ONLY);
     }
 
     void handleStaFailure(const String &reason)
@@ -153,51 +239,7 @@ namespace
 
 bool startApMode(const AppConfig &config)
 {
-    String ssid = trimmed(config.apSsid);
-    String pass = trimmed(config.apPassword);
-    if (ssid.isEmpty())
-        ssid = AP_SSID;
-    if (pass.length() < 8)
-        pass = AP_PASS;
-
-    if (WiFi.getMode() != WIFI_MODE_NULL)
-    {
-        WiFi.disconnect(true);
-    }
-    WiFi.mode(pickApMode());
-    bool ok = WiFi.softAP(ssid.c_str(), pass.c_str());
-
-    if (ok)
-    {
-        wifi_config_t conf{};
-        if (esp_wifi_get_config(WIFI_IF_AP, &conf) == ESP_OK)
-        {
-            conf.ap.authmode = WIFI_AUTH_WPA2_PSK;
-            conf.ap.channel = (conf.ap.channel == 0) ? 6 : conf.ap.channel;
-            conf.ap.pmf_cfg.required = false;
-            esp_wifi_set_config(WIFI_IF_AP, &conf);
-        }
-    }
-
-    g_wifi.configuredMode = config.wifiMode;
-    g_wifi.activeMode = AP_ONLY;
-    g_wifi.apActive = ok;
-    g_wifi.apClients = ok ? WiFi.softAPgetStationNum() : 0;
-    g_wifi.apIp = ok ? WiFi.softAPIP().toString() : "";
-    g_wifi.currentSsid = ssid;
-    updateIp();
-
-    if (ok)
-    {
-        LOG_INFO("WIFI", "WIFI_AP_START", String("ssid=") + ssid + " ip=" + WiFi.softAPIP().toString());
-        LOG_INFO("WIFI", "AP_READY", String("ssid=") + ssid + " ip=" + g_wifi.apIp);
-    }
-    else
-    {
-        LOG_ERROR("WIFI", "WIFI_AP_FAIL", String("ssid=") + ssid);
-    }
-
-    return ok;
+    return startSoftAp(config, AP_ONLY);
 }
 
 bool startStaMode(const AppConfig &config, uint32_t timeoutMs)
@@ -210,6 +252,7 @@ bool startStaMode(const AppConfig &config, uint32_t timeoutMs)
         return false;
     }
 
+    ensureWifiEventsRegistered();
     g_wifi.configuredMode = config.wifiMode;
     g_wifi.activeMode = config.wifiMode;
     g_wifi.staLastError = "";
@@ -222,28 +265,23 @@ bool startStaMode(const AppConfig &config, uint32_t timeoutMs)
     g_wifi.staConnected = false;
     g_wifi.staIp = "";
     g_wifi.lastIp = "";
+    g_wifi.lastRetryMs = millis();
     if (config.wifiMode != STA_WITH_AP_FALLBACK)
     {
         g_wifi.apActive = false;
     }
 
-    if (WiFi.getMode() != WIFI_MODE_NULL)
-    {
-        WiFi.disconnect(true);
-    }
     if (config.wifiMode == STA_WITH_AP_FALLBACK)
     {
-        if (!g_wifi.apActive)
-        {
-            ensureApForFallback(config, true);
-        }
-        else
-        {
-            WiFi.mode(WIFI_AP_STA);
-        }
+        WiFi.mode(WIFI_AP_STA);
+        WiFi.disconnect(false, true);
     }
     else
     {
+        if (WiFi.getMode() != WIFI_MODE_NULL)
+        {
+            WiFi.disconnect(true, true);
+        }
         WiFi.mode(WIFI_STA);
     }
 
@@ -255,11 +293,13 @@ bool startStaMode(const AppConfig &config, uint32_t timeoutMs)
 
 void setupWifiFromConfig(const AppConfig &config)
 {
+    ensureWifiEventsRegistered();
     WiFi.setSleep(false);
     g_wifi.configuredMode = config.wifiMode;
     g_wifi.staLastError = "";
     g_wifi.staRetryCount = 0;
-    g_wifi.lastRetryMs = millis();
+    g_wifi.lastRetryMs = 0; // Allow immediate first retry
+    LOG_INFO("WIFI", "WIFI_CFG", String("mode=") + static_cast<int>(config.wifiMode) + " sta=" + config.staSsid);
 
     switch (config.wifiMode)
     {
@@ -277,15 +317,19 @@ void setupWifiFromConfig(const AppConfig &config)
         break;
     case STA_WITH_AP_FALLBACK:
     default:
-        ensureApForFallback(config, true);
-        if (startStaMode(config))
+        // Start AP first for immediate connectivity
+        startSoftAp(config, STA_WITH_AP_FALLBACK);
+
+        // Start STA connection in background - non-blocking
+        // The wifiLoop will handle retries if needed
+        String staSsid = trimmed(config.staSsid);
+        if (!staSsid.isEmpty())
         {
-            g_wifi.staRetryCount = 1;
-            g_wifi.lastRetryMs = millis();
-        }
-        else
-        {
-            startApMode(config);
+            g_wifi.targetSsid = staSsid;
+            g_wifi.targetPass = trimmed(config.staPassword);
+            g_wifi.staRetryCount = 0;
+            g_wifi.lastRetryMs = 0; // Trigger immediate retry in wifiLoop
+            LOG_INFO("WIFI", "WIFI_STA_QUEUED", String("ssid=") + staSsid);
         }
         break;
     }
@@ -434,17 +478,25 @@ void wifiLoop()
         if (g_wifi.staConnected)
         {
             g_wifi.currentSsid = WiFi.SSID();
+            g_wifi.staRetryCount = 0; // Reset retry count on successful connection
         }
         else if (cfg.wifiMode == STA_WITH_AP_FALLBACK)
         {
-            if (g_wifi.staRetryCount < WIFI_STA_MAX_RETRIES && !trimmed(cfg.staSsid).isEmpty())
+            String staSsid = trimmed(cfg.staSsid);
+            if (g_wifi.staRetryCount < WIFI_STA_MAX_RETRIES && !staSsid.isEmpty())
             {
-                if (now - g_wifi.lastRetryMs >= WIFI_STA_RETRY_DELAY_MS)
+                // First retry can be immediate (lastRetryMs == 0)
+                unsigned long timeSinceLastRetry = (g_wifi.lastRetryMs == 0) ? WIFI_STA_RETRY_DELAY_MS : (now - g_wifi.lastRetryMs);
+                if (timeSinceLastRetry >= WIFI_STA_RETRY_DELAY_MS)
                 {
                     g_wifi.staRetryCount++;
                     g_wifi.lastRetryMs = now;
-                    LOG_INFO("WIFI", "WIFI_STA_RETRY", String("Retrying STA connection (attempt ") + g_wifi.staRetryCount + ")");
-                    startStaMode(cfg);
+                    LOG_INFO("WIFI", "WIFI_STA_RETRY", String("STA attempt ") + g_wifi.staRetryCount + "/" + WIFI_STA_MAX_RETRIES + " ssid=" + staSsid);
+
+                    // Start STA connection without disturbing AP
+                    g_wifi.staConnecting = true;
+                    g_wifi.staConnectStartMs = now;
+                    WiFi.begin(staSsid.c_str(), trimmed(cfg.staPassword).c_str());
                 }
             }
         }
