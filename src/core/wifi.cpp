@@ -9,6 +9,8 @@
 namespace
 {
     constexpr unsigned long WIFI_SCAN_MAX_DURATION_MS = 15000;
+    constexpr uint8_t WIFI_STA_MAX_RETRIES = 5;
+    constexpr unsigned long WIFI_STA_RETRY_DELAY_MS = 5000;
 
     struct WifiRuntimeState
     {
@@ -30,6 +32,8 @@ namespace
         String currentSsid;
         String staIp;
         String lastIp;
+        uint8_t staRetryCount = 0;
+        unsigned long lastRetryMs = 0;
     };
 
     WifiRuntimeState g_wifi;
@@ -254,6 +258,8 @@ void setupWifiFromConfig(const AppConfig &config)
     WiFi.setSleep(false);
     g_wifi.configuredMode = config.wifiMode;
     g_wifi.staLastError = "";
+    g_wifi.staRetryCount = 0;
+    g_wifi.lastRetryMs = millis();
 
     switch (config.wifiMode)
     {
@@ -263,12 +269,21 @@ void setupWifiFromConfig(const AppConfig &config)
         break;
     case STA_ONLY:
         g_wifi.apActive = false;
-        startStaMode(config);
+        if (startStaMode(config))
+        {
+            g_wifi.staRetryCount = 1;
+            g_wifi.lastRetryMs = millis();
+        }
         break;
     case STA_WITH_AP_FALLBACK:
     default:
         ensureApForFallback(config, true);
-        if (!startStaMode(config))
+        if (startStaMode(config))
+        {
+            g_wifi.staRetryCount = 1;
+            g_wifi.lastRetryMs = millis();
+        }
+        else
         {
             startApMode(config);
         }
@@ -349,6 +364,8 @@ bool requestWifiConnect(const String &ssid, const String &password, WifiMode mod
     cfg.wifiMode = mode;
     cfg.staSsid = cleanSsid;
     cfg.staPassword = password;
+    g_wifi.staRetryCount = 1;
+    g_wifi.lastRetryMs = millis();
 
     if (mode == STA_WITH_AP_FALLBACK && !g_wifi.apActive)
     {
@@ -417,6 +434,19 @@ void wifiLoop()
         if (g_wifi.staConnected)
         {
             g_wifi.currentSsid = WiFi.SSID();
+        }
+        else if (cfg.wifiMode == STA_WITH_AP_FALLBACK)
+        {
+            if (g_wifi.staRetryCount < WIFI_STA_MAX_RETRIES && !trimmed(cfg.staSsid).isEmpty())
+            {
+                if (now - g_wifi.lastRetryMs >= WIFI_STA_RETRY_DELAY_MS)
+                {
+                    g_wifi.staRetryCount++;
+                    g_wifi.lastRetryMs = now;
+                    LOG_INFO("WIFI", "WIFI_STA_RETRY", String("Retrying STA connection (attempt ") + g_wifi.staRetryCount + ")");
+                    startStaMode(cfg);
+                }
+            }
         }
     }
 

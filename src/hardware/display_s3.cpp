@@ -80,8 +80,6 @@ namespace
     void touch_read_cb(lv_indev_drv_t *, lv_indev_data_t *);
     void display_flush_cb(lv_disp_drv_t *disp_drv, const lv_area_t *area, lv_color_t *color_p);
     TouchPoint map_touch_to_display(const TouchPoint &raw);
-    void show_display_self_test();
-    lv_obj_t *create_test_ui();
     void applyPanelBrightness(uint8_t value)
     {
         if (!g_gfx)
@@ -270,13 +268,17 @@ namespace
         TouchPoint(bool t, uint16_t px, uint16_t py) : touched(t), x(px), y(py) {}
     };
 
-    // letzter Touch + Debug-Dot
-    static TouchPoint g_lastTouch{};
-    static lv_obj_t *g_touchDot = nullptr;
-
     // Neuer I2C-Treiber (driver_ng)
     static i2c_master_bus_handle_t g_touchBus = nullptr;
     static i2c_master_dev_handle_t g_touchDev = nullptr;
+    static void release_touch_dev()
+    {
+        if (g_touchDev)
+        {
+            i2c_master_bus_rm_device(g_touchDev);
+            g_touchDev = nullptr;
+        }
+    }
 
     uint16_t clamp_to(uint16_t value, uint16_t maxValue)
     {
@@ -299,7 +301,7 @@ namespace
             bus_cfg.scl_io_num = PIN_TOUCH_SCL;
             bus_cfg.sda_io_num = PIN_TOUCH_SDA;
             bus_cfg.glitch_ignore_cnt = 7;
-            bus_cfg.trans_queue_depth = 0;
+            bus_cfg.trans_queue_depth = 4;
             bus_cfg.flags.enable_internal_pullup = true;
 
             esp_err_t err = i2c_new_master_bus(&bus_cfg, &g_touchBus);
@@ -382,26 +384,43 @@ namespace
 
     bool ft3168_init()
     {
-        uint8_t mode = 0x00; // normal mode
-        if (!ft3168_write_reg(0x00, &mode, 1))
+        constexpr int MAX_ATTEMPTS = 3;
+        constexpr uint32_t RETRY_DELAY_MS = 60;
+
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; ++attempt)
         {
-            ESP_LOGW(TAG, "FT3168: write mode failed");
-            printf("FT3168 init failed (write)\n");
-            return false;
+            if (!ft3168_ll_init())
+            {
+                setLastError("touch-bus-init-failed");
+                return false;
+            }
+
+            uint8_t mode = 0x00; // normal mode
+            if (!ft3168_write_reg(0x00, &mode, 1))
+            {
+                ESP_LOGW(TAG, "FT3168 init attempt %d: write mode failed", attempt);
+                release_touch_dev();
+                delay(RETRY_DELAY_MS);
+                continue;
+            }
+
+            uint8_t id = 0;
+            if (!ft3168_read_reg(0xA3, &id, 1))
+            {
+                ESP_LOGW(TAG, "FT3168 init attempt %d: read ID failed", attempt);
+                release_touch_dev();
+                delay(RETRY_DELAY_MS);
+                continue;
+            }
+
+            ESP_LOGI(TAG, "FT3168 touch initialized (ID=0x%02X) sda=%d scl=%d attempt=%d",
+                     id, PIN_TOUCH_SDA, PIN_TOUCH_SCL, attempt);
+            return true;
         }
 
-        uint8_t id = 0;
-        if (!ft3168_read_reg(0xA3, &id, 1))
-        {
-            ESP_LOGW(TAG, "FT3168: read ID failed");
-            printf("FT3168 init failed (id)\n");
-            return false;
-        }
-
-        ESP_LOGI(TAG, "FT3168 touch initialized (ID=0x%02X) sda=%d scl=%d",
-                 id, PIN_TOUCH_SDA, PIN_TOUCH_SCL);
-        printf("FT3168 init ok (ID=0x%02X)\n", id);
-        return true;
+        ESP_LOGW(TAG, "FT3168 init failed after %d attempts", MAX_ATTEMPTS);
+        setLastError("touch-init-failed");
+        return false;
     }
 
     TouchPoint ft3168_read_touch()
@@ -457,7 +476,6 @@ namespace
     {
         static TouchPoint lastPoint{false, 0, 0};
         TouchPoint p = ft3168_read_touch();
-        Serial.println("[S3] touch_read_cb tick");
         if (p.touched)
         {
             TouchPoint mapped = map_touch_to_display(p);
@@ -465,12 +483,6 @@ namespace
             data->point.x = mapped.x;
             data->point.y = mapped.y;
             lastPoint = mapped;
-            g_lastTouch = mapped;
-            if (g_touchDot)
-            {
-                lv_obj_set_pos(g_touchDot, mapped.x - lv_obj_get_width(g_touchDot) / 2, mapped.y - lv_obj_get_height(g_touchDot) / 2);
-                lv_obj_clear_flag(g_touchDot, LV_OBJ_FLAG_HIDDEN);
-            }
             static bool logged = false;
             if (!logged)
             {
@@ -484,72 +496,6 @@ namespace
             data->point.x = lastPoint.x;
             data->point.y = lastPoint.y;
         }
-    }
-
-    lv_obj_t *create_test_ui()
-    {
-        lv_obj_t *scr = lv_obj_create(nullptr);
-        lv_obj_remove_style_all(scr);
-        lv_obj_set_size(scr, lv_disp_get_hor_res(g_disp), lv_disp_get_ver_res(g_disp));
-        lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
-        lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
-        lv_obj_set_style_border_width(scr, 1, 0);
-        lv_obj_set_style_border_color(scr, lv_color_white(), 0);
-        lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
-
-        g_touchDot = lv_obj_create(scr);
-        lv_obj_remove_style_all(g_touchDot);
-        lv_obj_set_size(g_touchDot, 12, 12);
-        lv_obj_set_style_bg_color(g_touchDot, lv_color_hex(0x00FF7F), 0);
-        lv_obj_set_style_bg_opa(g_touchDot, LV_OPA_70, 0);
-        lv_obj_set_style_radius(g_touchDot, 6, 0);
-        lv_obj_add_flag(g_touchDot, LV_OBJ_FLAG_HIDDEN);
-
-        lv_obj_t *label = lv_label_create(scr);
-        lv_obj_set_style_text_font(label, &lv_font_montserrat_32, 0);
-        lv_obj_set_style_text_color(label, lv_color_white(), 0);
-        lv_label_set_text(label, "ShiftLight S3 TEST");
-        lv_obj_center(label);
-
-        lv_obj_t *btn = lv_btn_create(scr);
-        lv_obj_set_size(btn, LV_PCT(60), 48);
-        lv_obj_align(btn, LV_ALIGN_BOTTOM_MID, 0, -8);
-        lv_obj_set_style_bg_color(btn, lv_color_hex(0x303030), 0);
-        lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
-        lv_obj_set_style_radius(btn, 6, 0);
-        lv_obj_set_style_border_width(btn, 1, 0);
-        lv_obj_set_style_border_color(btn, lv_color_white(), 0);
-        lv_obj_t *btnLbl = lv_label_create(btn);
-        lv_obj_set_style_text_color(btnLbl, lv_color_white(), 0);
-        lv_label_set_text(btnLbl, "Tap me");
-        lv_obj_center(btnLbl);
-
-        lv_obj_add_event_cb(
-            btn,
-            [](lv_event_t *e)
-            {
-                lv_obj_t *lbl = static_cast<lv_obj_t *>(lv_event_get_user_data(e));
-                static bool toggled = false;
-                if (!lbl)
-                    return;
-                toggled = !toggled;
-                lv_label_set_text(lbl, toggled ? "Tapped!" : "ShiftLight S3 TEST");
-                ESP_LOGI(TAG, "Button clicked at x=%d y=%d", g_lastTouch.x, g_lastTouch.y);
-            },
-            LV_EVENT_CLICKED,
-            label);
-
-        return scr;
-    }
-
-    void show_display_self_test()
-    {
-        if (!g_disp)
-            return;
-
-        lv_obj_t *scr = create_test_ui();
-        lv_disp_load_scr(scr);
-        lv_timer_handler();
     }
 } // namespace
 
@@ -629,7 +575,6 @@ void display_s3_init()
 
     initTouch();
     startLvglTick();
-    show_display_self_test();
 
     UiDisplayHooks hooks{};
     hooks.setBrightness = applyPanelBrightness;

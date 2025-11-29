@@ -50,9 +50,9 @@ void initConfig()
     cfg.yellowLabel = "Yellow";
     cfg.redLabel = "Red";
 
-    cfg.wifiMode = AP_ONLY;
-    cfg.staSsid = "";
-    cfg.staPassword = "";
+    cfg.wifiMode = STA_WITH_AP_FALLBACK;
+    cfg.staSsid = "Larry-LAN";
+    cfg.staPassword = "R4di0C0ntroll3d";
     cfg.apSsid = AP_SSID;
     cfg.apPassword = AP_PASS;
 }
