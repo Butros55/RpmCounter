@@ -557,8 +557,15 @@ namespace
     {
         static TouchPoint lastPoint{false, 0, 0};
         static bool wasTouched = false;
+        static uint8_t logCount = 0;
 
         TouchPoint p = ft3168_read_touch();
+        if (logCount < 5)
+        {
+            Serial.printf("[TOUCH] read_cb status: touched=%d x=%u y=%u\n", p.touched, p.x, p.y);
+            logCount++;
+        }
+
         if (p.touched)
         {
             TouchPoint mapped = map_touch_to_display(p);
