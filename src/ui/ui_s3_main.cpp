@@ -178,6 +178,7 @@ namespace
     }
 
     void show_status_icons();
+    void update_page_indicator();
 
     void mark_interacted()
     {
@@ -537,11 +538,13 @@ namespace
             return;
         const int count = static_cast<int>(CARD_COUNT);
         idx = (idx % count + count) % count;
+        g_state.cardIndex = idx;  // Update state
         lv_obj_t *target = g_ui.cards[static_cast<size_t>(idx)].container;
         if (target)
         {
             lv_obj_scroll_to_view(target, anim);
         }
+        update_page_indicator();  // Update dots
     }
 
     void open_detail(const CardDef &def);
@@ -600,24 +603,35 @@ namespace
         lv_obj_set_size(scr, LV_PCT(100), LV_PCT(100));
         lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_style_pad_all(scr, 12, 0);
+        // Use flex column layout so body can take remaining space
+        lv_obj_set_layout(scr, LV_LAYOUT_FLEX);
+        lv_obj_set_flex_flow(scr, LV_FLEX_FLOW_COLUMN);
 
         lv_obj_add_event_cb(scr, on_detail_gesture, LV_EVENT_GESTURE, nullptr);
 
         // Header row with back button, title, and status icons
         lv_obj_t *header = lv_obj_create(scr);
         lv_obj_remove_style_all(header);
-        lv_obj_set_size(header, LV_PCT(100), 40);
+        lv_obj_set_width(header, LV_PCT(100));
+        lv_obj_set_height(header, 44);
         lv_obj_set_layout(header, LV_LAYOUT_FLEX);
         lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(header, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_clear_flag(header, LV_OBJ_FLAG_SCROLLABLE);
 
-        // Simple back arrow (no grey box)
-        lv_obj_t *backLbl = lv_label_create(header);
+        // Larger back button with padding for easier tap
+        lv_obj_t *backBtn = lv_obj_create(header);
+        lv_obj_remove_style_all(backBtn);
+        lv_obj_set_size(backBtn, 44, 44);
+        lv_obj_add_flag(backBtn, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_clear_flag(backBtn, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_event_cb(backBtn, on_back, LV_EVENT_CLICKED, nullptr);
+        
+        lv_obj_t *backLbl = lv_label_create(backBtn);
         lv_label_set_text(backLbl, LV_SYMBOL_LEFT);
         lv_obj_set_style_text_font(backLbl, &lv_font_montserrat_24, 0);
         lv_obj_set_style_text_color(backLbl, lv_color_hex(0x0A84FF), 0);
-        lv_obj_add_flag(backLbl, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_add_event_cb(backLbl, on_back, LV_EVENT_CLICKED, nullptr);
+        lv_obj_center(backLbl);
 
         // Title in center
         lv_obj_t *titleLbl = lv_label_create(header);
@@ -642,14 +656,18 @@ namespace
         lv_label_set_text(g_ui.detailBleIcon, LV_SYMBOL_BLUETOOTH);
         lv_obj_set_style_text_font(g_ui.detailBleIcon, &lv_font_montserrat_16, 0);
 
+        // Body takes remaining space after header
         lv_obj_t *body = lv_obj_create(scr);
         lv_obj_remove_style_all(body);
-        lv_obj_set_size(body, LV_PCT(100), LV_PCT(100));
-        lv_obj_set_style_pad_top(body, 16, 0);
+        lv_obj_set_width(body, LV_PCT(100));
+        lv_obj_set_flex_grow(body, 1);  // Take remaining vertical space
+        lv_obj_set_style_pad_top(body, 20, 0);
         lv_obj_set_layout(body, LV_LAYOUT_FLEX);
         lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(body, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_row(body, 10, 0);
+        lv_obj_set_style_pad_row(body, 12, 0);
+        lv_obj_add_flag(body, LV_OBJ_FLAG_SCROLL_ONE);
+        lv_obj_set_scrollbar_mode(body, LV_SCROLLBAR_MODE_AUTO);
 
         return body;
     }
