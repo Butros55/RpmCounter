@@ -68,7 +68,9 @@ namespace
         {DataPage::RPM, "RPM", "", 8000},
         {DataPage::Speed, "Speed", "km/h", 260},
         {DataPage::Gear, "Gear", "", 8},
-        {DataPage::Coolant, "Coolant", "\xc2\xb0" "C", 140},
+        {DataPage::Coolant, "Coolant", "\xc2\xb0"
+                                       "C",
+         140},
     };
 
     constexpr size_t DATA_PAGE_COUNT = sizeof(DATA_PAGES) / sizeof(DATA_PAGES[0]);
@@ -226,12 +228,10 @@ namespace
             lv_anim_set_var(&a, g_ui.tutorial);
             lv_anim_set_values(&a, LV_OPA_80, LV_OPA_TRANSP);
             lv_anim_set_time(&a, 300);
-            lv_anim_set_exec_cb(&a, [](void *obj, int32_t v) {
-                lv_obj_set_style_opa(static_cast<lv_obj_t *>(obj), static_cast<lv_opa_t>(v), 0);
-            });
-            lv_anim_set_ready_cb(&a, [](lv_anim_t *anim) {
-                lv_obj_add_flag(static_cast<lv_obj_t *>(anim->var), LV_OBJ_FLAG_HIDDEN);
-            });
+            lv_anim_set_exec_cb(&a, [](void *obj, int32_t v)
+                                { lv_obj_set_style_opa(static_cast<lv_obj_t *>(obj), static_cast<lv_opa_t>(v), 0); });
+            lv_anim_set_ready_cb(&a, [](lv_anim_t *anim)
+                                 { lv_obj_add_flag(static_cast<lv_obj_t *>(anim->var), LV_OBJ_FLAG_HIDDEN); });
             lv_anim_start(&a);
         }
     }
@@ -321,9 +321,8 @@ namespace
                 lv_anim_set_values(&a, currentW, targetW);
                 lv_anim_set_time(&a, 220);
                 lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
-                lv_anim_set_exec_cb(&a, [](void *obj, int32_t v) {
-                    lv_obj_set_width(static_cast<lv_obj_t *>(obj), static_cast<lv_coord_t>(v));
-                });
+                lv_anim_set_exec_cb(&a, [](void *obj, int32_t v)
+                                    { lv_obj_set_width(static_cast<lv_obj_t *>(obj), static_cast<lv_coord_t>(v)); });
                 lv_anim_start(&a);
             }
         }
@@ -568,13 +567,13 @@ namespace
 
     void attach_back_handler(lv_obj_t *obj)
     {
-        lv_obj_add_event_cb(obj, [](lv_event_t *evt) {
+        lv_obj_add_event_cb(obj, [](lv_event_t *evt)
+                            {
             if (lv_event_get_code(evt) == LV_EVENT_GESTURE &&
                 lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_TOP)
             {
                 show_home();
-            }
-        }, LV_EVENT_GESTURE, nullptr);
+            } }, LV_EVENT_GESTURE, nullptr);
     }
 
     void scroll_to_card(int idx, lv_anim_enable_t anim)
@@ -658,7 +657,7 @@ namespace
         lv_obj_t *titleLbl = lv_label_create(header);
         lv_label_set_text(titleLbl, title);
         lv_obj_set_style_text_color(titleLbl, color_text, 0);
-        lv_obj_set_style_text_font(titleLbl, &lv_font_montserrat_22, 0);
+        lv_obj_set_style_text_font(titleLbl, LV_FONT_MONTSERRAT_22, 0);
 
         lv_obj_t *icons = lv_obj_create(header);
         lv_obj_remove_style_all(icons);
@@ -669,11 +668,11 @@ namespace
 
         g_ui.detailWifiIcon = lv_label_create(icons);
         lv_label_set_text(g_ui.detailWifiIcon, LV_SYMBOL_WIFI);
-        lv_obj_set_style_text_font(g_ui.detailWifiIcon, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(g_ui.detailWifiIcon, LV_FONT_MONTSERRAT_18, 0);
 
         g_ui.detailBleIcon = lv_label_create(icons);
         lv_label_set_text(g_ui.detailBleIcon, LV_SYMBOL_BLUETOOTH);
-        lv_obj_set_style_text_font(g_ui.detailBleIcon, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(g_ui.detailBleIcon, LV_FONT_MONTSERRAT_18, 0);
 
         lv_obj_t *content = lv_obj_create(scr);
         lv_obj_remove_style_all(content);
@@ -736,7 +735,7 @@ namespace
         w.unitLabel = lv_label_create(w.container);
         lv_label_set_text(w.unitLabel, def.unit);
         lv_obj_add_style(w.unitLabel, &styleDataUnit, 0);
-        lv_obj_set_style_text_font(w.unitLabel, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(w.unitLabel, LV_FONT_MONTSERRAT_18, 0);
 
         return w;
     }
@@ -779,15 +778,15 @@ namespace
 
         g_ui.dataWifiIcon = lv_label_create(statusIcons);
         lv_label_set_text(g_ui.dataWifiIcon, LV_SYMBOL_WIFI);
-        lv_obj_set_style_text_font(g_ui.dataWifiIcon, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(g_ui.dataWifiIcon, LV_FONT_MONTSERRAT_18, 0);
 
         g_ui.dataBleIcon = lv_label_create(statusIcons);
         lv_label_set_text(g_ui.dataBleIcon, LV_SYMBOL_BLUETOOTH);
-        lv_obj_set_style_text_font(g_ui.dataBleIcon, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(g_ui.dataBleIcon, LV_FONT_MONTSERRAT_18, 0);
 
         lv_obj_t *backLbl = lv_label_create(g_ui.dataScreen);
         lv_label_set_text(backLbl, LV_SYMBOL_LEFT);
-        lv_obj_set_style_text_font(backLbl, &lv_font_montserrat_22, 0);
+        lv_obj_set_style_text_font(backLbl, LV_FONT_MONTSERRAT_22, 0);
         lv_obj_set_style_text_color(backLbl, color_card_accent, 0);
         lv_obj_align(backLbl, LV_ALIGN_TOP_LEFT, 12, 12);
         lv_obj_add_flag(backLbl, LV_OBJ_FLAG_CLICKABLE);
@@ -863,6 +862,29 @@ namespace
         lv_obj_set_style_pad_right(g_ui.brightnessPreview, full - filled, 0);
     }
 
+    // Helper: static callback for brightness buttons
+    static void brightness_btn_cb(lv_event_t *evt)
+    {
+        if (lv_event_get_code(evt) != LV_EVENT_CLICKED)
+            return;
+        lv_obj_t *btn = lv_event_get_target(evt);
+        uint8_t value = reinterpret_cast<uintptr_t>(lv_obj_get_user_data(btn));
+        rememberPreviewPixels();
+        cfg.displayBrightness = value;
+        if (g_ui.brightnessSlider)
+        {
+            lv_slider_set_value(g_ui.brightnessSlider, value, LV_ANIM_OFF);
+        }
+        if (g_ui.brightnessValue)
+        {
+            lv_label_set_text_fmt(g_ui.brightnessValue, "%d%%", (value * 100) / 255);
+        }
+        update_preview_bar(value);
+        if (g_hooks.setBrightness)
+            g_hooks.setBrightness(value);
+        updateRpmBar(g_state.rpm);
+    }
+
     void open_brightness()
     {
         g_state.detailScreen = CardScreen::Brightness;
@@ -872,7 +894,7 @@ namespace
 
         lv_obj_t *pctLabel = lv_label_create(content);
         lv_label_set_text_fmt(pctLabel, "%d%%", pct);
-        lv_obj_set_style_text_font(pctLabel, &lv_font_montserrat_42, 0);
+        lv_obj_set_style_text_font(pctLabel, LV_FONT_MONTSERRAT_42, 0);
         lv_obj_set_style_text_color(pctLabel, color_text, 0);
         lv_obj_set_style_pad_bottom(pctLabel, 14, 0);
         g_ui.brightnessValue = pctLabel;
@@ -897,7 +919,8 @@ namespace
         lv_obj_set_style_pad_all(slider, 0, LV_PART_KNOB);
         g_ui.brightnessSlider = slider;
 
-        lv_obj_add_event_cb(slider, [](lv_event_t *e) {
+        lv_obj_add_event_cb(slider, [](lv_event_t *e)
+                            {
             int val = lv_slider_get_value(static_cast<lv_obj_t *>(lv_event_get_target(e)));
             cfg.displayBrightness = val;
             int pct = (val * 100) / 255;
@@ -909,12 +932,10 @@ namespace
             if (g_hooks.setBrightness)
             {
                 g_hooks.setBrightness(static_cast<uint8_t>(val));
-            }
-        }, LV_EVENT_VALUE_CHANGED, nullptr);
+            } }, LV_EVENT_VALUE_CHANGED, nullptr);
 
-        lv_obj_add_event_cb(slider, [](lv_event_t *) {
-            saveConfig();
-        }, LV_EVENT_RELEASED, nullptr);
+        lv_obj_add_event_cb(slider, [](lv_event_t *)
+                            { saveConfig(); }, LV_EVENT_RELEASED, nullptr);
 
         lv_obj_t *btnRow = lv_obj_create(content);
         lv_obj_remove_style_all(btnRow);
@@ -925,31 +946,16 @@ namespace
         lv_obj_set_style_pad_column(btnRow, 10, 0);
         lv_obj_set_style_bg_opa(btnRow, LV_OPA_TRANSP, 0);
 
-        auto make_btn = [&](const char *txt, uint8_t value) {
-            lv_obj_t *btn = lv_btn_create(btnRow);
+        auto make_btn = [](const char *txt, uint8_t value)
+        {
+            lv_obj_t *btn = lv_btn_create(g_ui.brightnessSlider ? lv_obj_get_parent(g_ui.brightnessSlider) : nullptr);
             lv_obj_add_style(btn, &styleCardSide, 0);
             lv_obj_set_size(btn, 110, 42);
             lv_obj_t *lbl = lv_label_create(btn);
             lv_label_set_text(lbl, txt);
             lv_obj_center(lbl);
-            lv_obj_add_event_cb(btn, [value](lv_event_t *evt) {
-                if (lv_event_get_code(evt) != LV_EVENT_CLICKED)
-                    return;
-                rememberPreviewPixels();
-                cfg.displayBrightness = value;
-                if (g_ui.brightnessSlider)
-                {
-                    lv_slider_set_value(g_ui.brightnessSlider, value, LV_ANIM_OFF);
-                }
-                if (g_ui.brightnessValue)
-                {
-                    lv_label_set_text_fmt(g_ui.brightnessValue, "%d%%", (value * 100) / 255);
-                }
-                update_preview_bar(value);
-                if (g_hooks.setBrightness)
-                    g_hooks.setBrightness(value);
-                updateRpmBar(g_state.rpm);
-            }, LV_EVENT_CLICKED, nullptr);
+            lv_obj_set_user_data(btn, reinterpret_cast<void *>(static_cast<uintptr_t>(value)));
+            lv_obj_add_event_cb(btn, brightness_btn_cb, LV_EVENT_CLICKED, nullptr);
             return btn;
         };
 
@@ -963,7 +969,8 @@ namespace
         lv_obj_t *resetLbl = lv_label_create(resetBtn);
         lv_label_set_text(resetLbl, "Reset to Config");
         lv_obj_center(resetLbl);
-        lv_obj_add_event_cb(resetBtn, [](lv_event_t *evt) {
+        lv_obj_add_event_cb(resetBtn, [](lv_event_t *evt)
+                            {
             if (lv_event_get_code(evt) != LV_EVENT_CLICKED)
                 return;
             if (g_ui.brightnessSlider)
@@ -974,8 +981,7 @@ namespace
             if (g_hooks.setBrightness)
             {
                 g_hooks.setBrightness(static_cast<uint8_t>(cfg.displayBrightness));
-            }
-        }, LV_EVENT_CLICKED, nullptr);
+            } }, LV_EVENT_CLICKED, nullptr);
 
         update_status_icons();
         lv_disp_load_scr(g_ui.detail);
@@ -1054,7 +1060,7 @@ namespace
         g_ui.wifiHeader = header;
 
         g_ui.wifiList = lv_label_create(content);
-        lv_obj_set_style_text_font(g_ui.wifiList, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(g_ui.wifiList, LV_FONT_MONTSERRAT_18, 0);
         lv_obj_set_style_text_color(g_ui.wifiList, color_text, 0);
         lv_label_set_text(g_ui.wifiList, "Scanning...");
 
@@ -1069,11 +1075,11 @@ namespace
         lv_obj_t *lbl = lv_label_create(rescan);
         lv_label_set_text(lbl, "Rescan");
         lv_obj_center(lbl);
-        lv_obj_add_event_cb(rescan, [](lv_event_t *evt) {
+        lv_obj_add_event_cb(rescan, [](lv_event_t *evt)
+                            {
             if (lv_event_get_code(evt) != LV_EVENT_CLICKED)
                 return;
-            trigger_wifi_scan(true);
-        }, LV_EVENT_CLICKED, nullptr);
+            trigger_wifi_scan(true); }, LV_EVENT_CLICKED, nullptr);
 
         trigger_wifi_scan(true);
         update_status_icons();
@@ -1140,7 +1146,7 @@ namespace
         lv_obj_t *content = make_detail_base("Bluetooth");
 
         g_ui.bleList = lv_label_create(content);
-        lv_obj_set_style_text_font(g_ui.bleList, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(g_ui.bleList, LV_FONT_MONTSERRAT_18, 0);
         lv_obj_set_style_text_color(g_ui.bleList, color_text, 0);
         lv_label_set_text(g_ui.bleList, "Scanning...");
 
@@ -1155,11 +1161,11 @@ namespace
         lv_obj_t *lbl = lv_label_create(rescan);
         lv_label_set_text(lbl, "Rescan");
         lv_obj_center(lbl);
-        lv_obj_add_event_cb(rescan, [](lv_event_t *evt) {
+        lv_obj_add_event_cb(rescan, [](lv_event_t *evt)
+                            {
             if (lv_event_get_code(evt) != LV_EVENT_CLICKED)
                 return;
-            trigger_ble_scan(true);
-        }, LV_EVENT_CLICKED, nullptr);
+            trigger_ble_scan(true); }, LV_EVENT_CLICKED, nullptr);
 
         trigger_ble_scan(true);
         update_status_icons();
@@ -1193,7 +1199,8 @@ namespace
         lv_obj_set_style_pad_column(btnRow, 10, 0);
         lv_obj_set_style_bg_opa(btnRow, LV_OPA_TRANSP, 0);
 
-        auto make_btn = [&](const char *label, auto cb) {
+        auto make_btn = [&](const char *label, auto cb)
+        {
             lv_obj_t *btn = lv_btn_create(btnRow);
             lv_obj_add_style(btn, &styleCardSide, 0);
             lv_obj_set_size(btn, 120, 44);
@@ -1203,15 +1210,16 @@ namespace
             lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, nullptr);
         };
 
-        make_btn("Sweep Test", [](lv_event_t *evt) {
+        make_btn("Sweep Test", [](lv_event_t *evt)
+                 {
             LV_UNUSED(evt);
             rememberPreviewPixels();
             apply_led_test_status("Sweep preview");
             // TODO: implement dedicated sweep animation hook
-            updateRpmBar(g_state.rpm);
-        });
+            updateRpmBar(g_state.rpm); });
 
-        make_btn("All Green", [](lv_event_t *evt) {
+        make_btn("All Green", [](lv_event_t *evt)
+                 {
             LV_UNUSED(evt);
             rememberPreviewPixels();
             for (int i = 0; i < strip.numPixels(); ++i)
@@ -1219,10 +1227,10 @@ namespace
                 strip.setPixelColor(i, strip.Color(0, 255, 0));
             }
             strip.show();
-            apply_led_test_status("Set all LEDs green");
-        });
+            apply_led_test_status("Set all LEDs green"); });
 
-        make_btn("All Red", [](lv_event_t *evt) {
+        make_btn("All Red", [](lv_event_t *evt)
+                 {
             LV_UNUSED(evt);
             rememberPreviewPixels();
             for (int i = 0; i < strip.numPixels(); ++i)
@@ -1230,17 +1238,16 @@ namespace
                 strip.setPixelColor(i, strip.Color(255, 0, 0));
             }
             strip.show();
-            apply_led_test_status("Set all LEDs red");
-        });
+            apply_led_test_status("Set all LEDs red"); });
 
-        make_btn("Restore", [](lv_event_t *evt) {
+        make_btn("Restore", [](lv_event_t *evt)
+                 {
             LV_UNUSED(evt);
             strip.clear();
             strip.show();
             updateRpmBar(g_state.rpm);
             setStatusLED(false);
-            apply_led_test_status("Restored defaults");
-        });
+            apply_led_test_status("Restored defaults"); });
 
         update_status_icons();
         lv_disp_load_scr(g_ui.detail);
@@ -1364,7 +1371,7 @@ namespace
         lv_obj_t *logo = lv_label_create(bar);
         lv_label_set_text(logo, "RpmCounter");
         lv_obj_set_style_text_color(logo, color_text, 0);
-        lv_obj_set_style_text_font(logo, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(logo, LV_FONT_MONTSERRAT_18, 0);
 
         lv_obj_t *iconRow = lv_obj_create(bar);
         lv_obj_remove_style_all(iconRow);
@@ -1375,11 +1382,11 @@ namespace
 
         g_ui.wifiIcon = lv_label_create(iconRow);
         lv_label_set_text(g_ui.wifiIcon, LV_SYMBOL_WIFI);
-        lv_obj_set_style_text_font(g_ui.wifiIcon, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(g_ui.wifiIcon, LV_FONT_MONTSERRAT_18, 0);
 
         g_ui.bleIcon = lv_label_create(iconRow);
         lv_label_set_text(g_ui.bleIcon, LV_SYMBOL_BLUETOOTH);
-        lv_obj_set_style_text_font(g_ui.bleIcon, &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_font(g_ui.bleIcon, LV_FONT_MONTSERRAT_18, 0);
 
         g_ui.ledStatus = lv_obj_create(iconRow);
         lv_obj_set_size(g_ui.ledStatus, 20, 6);
@@ -1412,7 +1419,7 @@ namespace
         w.icon = lv_label_create(w.container);
         lv_label_set_text(w.icon, def.symbol);
         lv_obj_set_style_text_color(w.icon, color_text, 0);
-        lv_obj_set_style_text_font(w.icon, &lv_font_montserrat_36, 0);
+        lv_obj_set_style_text_font(w.icon, LV_FONT_MONTSERRAT_36, 0);
 
         w.label = lv_label_create(w.container);
         lv_label_set_text(w.label, def.title);
@@ -1622,13 +1629,12 @@ void ui_s3_show_logo()
     lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_TRANSP);
     lv_anim_set_delay(&a, 2000);
     lv_anim_set_time(&a, 500);
-    lv_anim_set_exec_cb(&a, [](void *obj, int32_t v) {
-        lv_obj_set_style_opa(static_cast<lv_obj_t *>(obj), static_cast<lv_opa_t>(v), 0);
-    });
-    lv_anim_set_ready_cb(&a, [](lv_anim_t *anim) {
+    lv_anim_set_exec_cb(&a, [](void *obj, int32_t v)
+                        { lv_obj_set_style_opa(static_cast<lv_obj_t *>(obj), static_cast<lv_opa_t>(v), 0); });
+    lv_anim_set_ready_cb(&a, [](lv_anim_t *anim)
+                         {
         lv_obj_add_flag(static_cast<lv_obj_t *>(anim->var), LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_style_opa(static_cast<lv_obj_t *>(anim->var), LV_OPA_COVER, 0);
-    });
+        lv_obj_set_style_opa(static_cast<lv_obj_t *>(anim->var), LV_OPA_COVER, 0); });
     lv_anim_start(&a);
 }
 
@@ -1658,4 +1664,3 @@ void ui_s3_set_coolant(int temp)
         update_data_values();
     }
 }
-

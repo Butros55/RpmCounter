@@ -1,0 +1,73 @@
+
+============================================
+       SHIFTLIGHT ESP32-S3 STARTING
+============================================
+
+[BOOT] Loading config...
+[BOOT] Initializing state...
+
+=== ESP32 BLE-OBD ShiftLight + WebUI ===
+[BOOT] Initializing LEDs...
+[BOOT] Setting up WiFi...
+[360][INFO][WIFI][WIFI_CFG] mode=2 sta=Larry-LAN
+[407][INFO][WIFI][WIFI_EVT_STA_START] STA interface started
+[408][INFO][WIFI][WIFI_EVT_AP_START] ip=192.168.4.1
+[510][INFO][WIFI][WIFI_EVT_AP_STOP] softAP stopped
+[511][INFO][WIFI][WIFI_EVT_AP_START] ip=192.168.4.1
+[710][INFO][WIFI][WIFI_AP_START] ssid=ShiftLight ch=6 ip=192.168.4.1
+
+========================================
+[WIFI] Access Point READY
+[WIFI] SSID: ShiftLight
+[WIFI] Password: shift1234
+[WIFI] >>> http://192.168.4.1 <<<
+========================================
+
+[710][INFO][WIFI][WIFI_STA_QUEUED] ssid=Larry-LAN
+[BOOT] Starting WebServer...
+[711][INFO][WEB][WEB_INIT] Web UI routes registered
+[BOOT] Initializing BLE...
+[922][INFO][BLE][BLE_CONNECT_TASK_AUTO] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[922][INFO][BLE][BLE_CONNECT_START] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[BOOT] Initializing S3 AMOLED Display...
+
+[DISPLAY] ---- S3 AMOLED Init Start ----
+[DISPLAY] LVGL initialized (depth=16, swap=1)
+[DISPLAY] Buffers allocated OK
+[DISPLAY] Panel initialized OK
+[DISPLAY] LVGL driver OK
+[S3] initTouch()
+[TOUCH] ---- FT3168 Init Start ----
+[TOUCH] Pins: SDA=47, SCL=48, Addr=0x38
+[TOUCH] Attempt 1/5...
+[1705][INFO][DISPLAY][TOUCH_BUS_OK] sda=47 scl=48 hz=100000
+[1705][INFO][DISPLAY][TOUCH_DEV_OK] addr=0x38
+[TOUCH] Attempt 1: Read ID failed, retrying...
+[TOUCH] Attempt 2/5...
+[1857][INFO][DISPLAY][TOUCH_DEV_OK] addr=0x38
+[TOUCH] ---- FT3168 Init Success ----
+[TOUCH] Controller ID: 0x64
+
+[S3] FT3168 touch ready (indev registered)
+[DISPLAY] ---- S3 AMOLED Init Complete ----
+[DISPLAY] LVGL Resolution (after rotation): 456x280
+[DISPLAY] Panel Resolution (native portrait): 280x456
+
+
+============================================
+          BOOT COMPLETE - READY
+============================================
+
+[1932][INFO][WIFI][WIFI_STA_RETRY] STA attempt 1/5 ssid=Larry-LAN
+[TOUCH] read_cb status: touched=0 x=0 y=0
+[TOUCH] read_cb status: touched=0 x=0 y=0
+[TOUCH] read_cb status: touched=0 x=0 y=0
+[TOUCH] read_cb status: touched=0 x=0 y=0
+[2120][INFO][WIFI][WIFI_EVT_STA_CONNECTED] ssid=Larry-LAN
+[TOUCH] read_cb status: touched=0 x=0 y=0
+[3988][INFO][WIFI][WIFI_EVT_STA_GOT_IP] ip=192.168.178.111
+[4013][INFO][WIFI][WIFI_STA_READY] ssid=Larry-LAN ip=192.168.178.111
+========================================
+[WIFI] STA Connected to: Larry-LAN
+[WIFI] >>> Webserver: http://192.168.178.111 <<<
+========================================
