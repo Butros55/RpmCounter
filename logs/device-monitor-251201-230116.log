@@ -1,0 +1,98 @@
+
+============================================
+       SHIFTLIGHT ESP32-S3 STARTING
+============================================
+
+[BOOT] Loading config...
+[BOOT] Initializing state...
+
+=== ESP32 BLE-OBD ShiftLight + WebUI ===
+[BOOT] Initializing LEDs...
+[BOOT] Setting up WiFi...
+[361][INFO][WIFI][WIFI_CFG] mode=2 sta=Larry-LAN
+[409][INFO][WIFI][WIFI_EVT_STA_START] STA interface started
+[409][INFO][WIFI][WIFI_EVT_AP_START] ip=192.168.4.1
+[511][INFO][WIFI][WIFI_EVT_AP_STOP] softAP stopped
+[512][INFO][WIFI][WIFI_EVT_AP_START] ip=192.168.4.1
+[711][INFO][WIFI][WIFI_AP_START] ssid=ShiftLight ch=6 ip=192.168.4.1
+
+========================================
+[WIFI] Access Point READY
+[WIFI] SSID: ShiftLight
+[WIFI] Password: shift1234
+[WIFI] >>> http://192.168.4.1 <<<
+========================================
+
+[712][INFO][WIFI][WIFI_STA_QUEUED] ssid=Larry-LAN
+[BOOT] Starting WebServer...
+[713][INFO][WEB][WEB_INIT] Web UI routes registered
+[BOOT] Initializing BLE...
+[923][INFO][BLE][BLE_CONNECT_TASK_AUTO] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[923][INFO][BLE][BLE_CONNECT_START] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[BOOT] Initializing S3 AMOLED Display...
+
+[DISPLAY] ---- S3 AMOLED Init Start ----
+[DISPLAY] LVGL initialized (depth=16, swap=1)
+[DISPLAY] Buffers allocated OK
+[DISPLAY] Panel initialized OK
+[DISPLAY] LVGL driver OK
+[S3] initTouch()
+[TOUCH] ---- FT3168 Init Start ----
+[TOUCH] Pins: SDA=47, SCL=48, Addr=0x38
+[TOUCH] Attempt 1/5...
+[1706][INFO][DISPLAY][TOUCH_BUS_OK] sda=47 scl=48 hz=100000
+[1707][INFO][DISPLAY][TOUCH_DEV_OK] addr=0x38
+[TOUCH] Attempt 1: Read ID failed, retrying...
+[TOUCH] Attempt 2/5...
+[1858][INFO][DISPLAY][TOUCH_DEV_OK] addr=0x38
+[TOUCH] ---- FT3168 Init Success ----
+[TOUCH] Controller ID: 0x64
+
+[S3] FT3168 touch ready (indev registered)
+[1947][INFO][UI][HOME_SNAP] [HOME] idx=0 carX=139 c0:82-196 c1:213-327 c2:344-458
+[DISPLAY] ---- S3 AMOLED Init Complete ----
+[DISPLAY] Resolution: 280x456
+
+
+============================================
+          BOOT COMPLETE - READY
+============================================
+
+[1952][INFO][WIFI][WIFI_STA_RETRY] STA attempt 1/5 ssid=Larry-LAN
+[TOUCH] read_cb status: touched=0 x=0 y=0
+[TOUCH] read_cb status: touched=0 x=0 y=0
+[TOUCH] read_cb status: touched=0 x=0 y=0
+[TOUCH] read_cb status: touched=0 x=0 y=0
+[TOUCH] read_cb status: touched=0 x=0 y=0
+[2136][INFO][WIFI][WIFI_EVT_STA_CONNECTED] ssid=Larry-LAN
+[3903][INFO][WIFI][WIFI_EVT_STA_GOT_IP] ip=192.168.178.111
+[3905][INFO][WIFI][WIFI_STA_READY] ssid=Larry-LAN ip=192.168.178.111
+========================================
+[WIFI] STA Connected to: Larry-LAN
+[WIFI] >>> Webserver: http://192.168.178.111 <<<
+========================================
+[12583][INFO][UI][DATA_SNAP] [DATA] idx=0 carX=139 p0:12-267 p1:284-539 p2:556-811
+[ 30927][E][BLEClient.cpp:854] connect(): Connection failed; status=13 
+[30934][ERROR][BLE][BLE_CONNECT_FAIL] connect() returned false
+[30934][INFO][BLE][BLE_CONNECT_DONE_AUTO] fail duration_ms=30011
+[30936][INFO][BLE][BLE_AUTORECONNECT] attempt=2 interval_ms=5000
+[30937][INFO][BLE][BLE_CONNECT_TASK_AUTO] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[30937][INFO][BLE][BLE_CONNECT_START] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[ 60940][E][BLEClient.cpp:854] connect(): Connection failed; status=13 
+[60947][ERROR][BLE][BLE_CONNECT_FAIL] connect() returned false
+[60948][INFO][BLE][BLE_CONNECT_DONE_AUTO] fail duration_ms=30012
+[60952][INFO][BLE][BLE_AUTORECONNECT] attempt=3 interval_ms=5000
+[60953][INFO][BLE][BLE_CONNECT_TASK_AUTO] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[60953][INFO][BLE][BLE_CONNECT_START] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[ 90956][E][BLEClient.cpp:854] connect(): Connection failed; status=13 
+[90962][ERROR][BLE][BLE_CONNECT_FAIL] connect() returned false
+[90963][INFO][BLE][BLE_CONNECT_DONE_AUTO] fail duration_ms=30011
+[90964][INFO][BLE][BLE_AUTORECONNECT] attempt=4 interval_ms=12000
+[90964][INFO][BLE][BLE_CONNECT_TASK_AUTO] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[90965][INFO][BLE][BLE_CONNECT_START] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[120968][E][BLEClient.cpp:854] connect(): Connection failed; status=13 
+BLE][BLE_CONNECT_FAIL] connect() returned false
+120975][INFO][BLE][BLE_CONNECT_DONE_AUTO] fail duration_ms=30011
+[120979][INFO][BLE][BLE_AUTORECONNECT] attempt=5 interval_ms=12000
+[120980][INFO][BLE][BLE_CONNECT_TASK_AUTO] target=66:1e:32:9d:2e:5d name=OBD-II Dongle
+[120980][INFO][BLE][
