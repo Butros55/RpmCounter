@@ -44,6 +44,16 @@ namespace
     constexpr int MAX_SPEED_GAUGE = 280;
     constexpr int MAX_COOLANT_GAUGE = 130;
     
+    // Brightness constants
+    constexpr int DEFAULT_DISPLAY_BRIGHTNESS = 128;  // 50% default
+    constexpr int DEFAULT_LED_BRIGHTNESS = 80;       // LED bar default
+    constexpr int DISPLAY_TO_LED_SCALE = 3;          // Display brightness / 3 = LED brightness
+    constexpr int LED_PREVIEW_GREEN_SCALE = 255;     // Green channel max in preview
+    constexpr int LED_PREVIEW_BLUE_SCALE = 512;      // Blue channel divisor in preview
+    
+    // Card indices for direct access
+    constexpr size_t LED_TEST_CARD_INDEX = 4;        // Index of LED test card in CARDS array
+    
     // LED test modes
     enum class LedTestMode
     {
@@ -271,12 +281,12 @@ namespace
             show_status_icons();
         }
         
-        // Store tutorial seen flag in config
+        // Store tutorial seen flag in config and persist
         if (g_state.tutorialVisible && g_ui.tutorial)
         {
             g_state.tutorialVisible = false;
             cfg.uiTutorialSeen = true;
-            // TODO: saveConfig() in background to persist this flag
+            saveConfig();  // Persist to NVS so tutorial doesn't show again
             
             lv_anim_t a;
             lv_anim_init(&a);
@@ -1515,16 +1525,18 @@ namespace
                 g_hooks.setBrightness(static_cast<uint8_t>(val));
             }
             // Also update LED bar brightness preview
-            cfg.brightness = val / 3;  // LED bar uses different scale
+            cfg.brightness = val / DISPLAY_TO_LED_SCALE;
             g_brightnessPreviewActive = true;
             g_lastBrightnessChangeMs = millis();
             strip.setBrightness(cfg.brightness);
             rememberPreviewPixels();
-            // Show preview on LED bar
+            // Show preview gradient on LED bar
             for (int i = 0; i < NUM_LEDS; i++)
             {
-                int intensity = (i * 255) / NUM_LEDS;
-                strip.setPixelColor(i, strip.Color(0, intensity * val / 255, intensity * val / 512));
+                int intensity = (i * LED_PREVIEW_GREEN_SCALE) / NUM_LEDS;
+                int green = intensity * val / LED_PREVIEW_GREEN_SCALE;
+                int blue = intensity * val / LED_PREVIEW_BLUE_SCALE;
+                strip.setPixelColor(i, strip.Color(0, green, blue));
             }
             strip.show(); }, LV_EVENT_VALUE_CHANGED, nullptr);
 
@@ -1561,15 +1573,15 @@ namespace
         lv_obj_center(resetLbl);
         lv_obj_add_event_cb(resetBtn, [](lv_event_t *)
                             {
-            cfg.displayBrightness = 128;  // Default 50%
-            cfg.brightness = 80;
+            cfg.displayBrightness = DEFAULT_DISPLAY_BRIGHTNESS;
+            cfg.brightness = DEFAULT_LED_BRIGHTNESS;
             if (g_ui.brightnessSlider)
-                lv_slider_set_value(g_ui.brightnessSlider, 128, LV_ANIM_ON);
+                lv_slider_set_value(g_ui.brightnessSlider, DEFAULT_DISPLAY_BRIGHTNESS, LV_ANIM_ON);
             if (g_ui.brightnessValue)
                 lv_label_set_text(g_ui.brightnessValue, "50%");
             if (g_hooks.setBrightness)
-                g_hooks.setBrightness(128);
-            strip.setBrightness(80);
+                g_hooks.setBrightness(DEFAULT_DISPLAY_BRIGHTNESS);
+            strip.setBrightness(DEFAULT_LED_BRIGHTNESS);
             strip.clear();
             strip.show();
             saveConfig(); }, LV_EVENT_CLICKED, nullptr);
@@ -2069,7 +2081,6 @@ void ui_s3_set_oil_temp(int temp)
 
 void ui_s3_show_led_test()
 {
-    // Navigate to LED test screen - index 4 in CARDS array (LED card)
-    // This opens the LED test detail screen directly
-    open_detail(CARDS[4]);  // LED Test card is at index 4
+    // Navigate to LED test screen using defined constant
+    open_detail(CARDS[LED_TEST_CARD_INDEX]);
 }
