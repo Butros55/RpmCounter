@@ -14,3 +14,5 @@
 #custom
 logs_codeql_detected_source_root
 _codeql_detected_source_root
+
+.logs
