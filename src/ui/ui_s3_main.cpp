@@ -311,7 +311,7 @@ namespace
     static void anim_set_width_cb(void *obj, int32_t v);
     static void anim_set_opa_cb(void *obj, int32_t v);
     static void anim_hide_on_ready(lv_anim_t *anim);
-    static void anim_restore_opa_on_ready(lv_anim_t *anim);
+    static void anim_hide_and_reset_opa(lv_anim_t *anim);
 
     // Debounce helper - returns true if enough time has passed since last touch
     bool is_gesture_debounced()
@@ -450,9 +450,11 @@ namespace
         lv_obj_add_flag(static_cast<lv_obj_t *>(anim->var), LV_OBJ_FLAG_HIDDEN);
     }
 
-    static void anim_restore_opa_on_ready(lv_anim_t *anim)
+    // Hides object and resets opacity to cover for future reuse (e.g., logo overlay)
+    static void anim_hide_and_reset_opa(lv_anim_t *anim)
     {
         lv_obj_add_flag(static_cast<lv_obj_t *>(anim->var), LV_OBJ_FLAG_HIDDEN);
+        // Reset opacity so the object is visible when unhidden again
         lv_obj_set_style_opa(static_cast<lv_obj_t *>(anim->var), LV_OPA_COVER, 0);
     }
 
@@ -2175,7 +2177,7 @@ void ui_s3_show_logo()
     lv_anim_set_delay(&a, ANIM_LOGO_DELAY_MS);
     lv_anim_set_time(&a, ANIM_LOGO_FADE_MS);
     lv_anim_set_exec_cb(&a, anim_set_opa_cb);
-    lv_anim_set_ready_cb(&a, anim_restore_opa_on_ready);
+    lv_anim_set_ready_cb(&a, anim_hide_and_reset_opa);
     lv_anim_start(&a);
 }
 
