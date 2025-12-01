@@ -37,14 +37,20 @@ namespace
     constexpr int CARD_CIRCLE_SIZE = 64;
 
     // =======================================================================
-    // CAROUSEL ZOOM CONSTANTS - Fixed values to eliminate flicker
+    // CAROUSEL ZOOM CONSTANTS - Disabled zoom to eliminate flicker
     // =======================================================================
-    // Home carousel: center ≈ 110% (zoom ~282), edges ≈ 95% (zoom ~243)
+    // IMPORTANT: Dynamic zoom transforms cause flickering on ESP32-S3 embedded display.
+    // The zoom calculation during scrolling creates layout recalculations that
+    // result in visual glitches. Solution: disable zoom, use only opacity.
+    // Set ENABLE_CAROUSEL_ZOOM to true to re-enable zoom (may cause flicker).
+    constexpr bool ENABLE_CAROUSEL_ZOOM = false;
+    
+    // Home carousel zoom (only used if ENABLE_CAROUSEL_ZOOM is true)
     constexpr int HOME_ZOOM_CENTER = 282;   // 110% scale (256 * 1.10)
     constexpr int HOME_ZOOM_EDGE = 243;     // 95% scale (256 * 0.95)
     constexpr int HOME_ZOOM_RANGE = HOME_ZOOM_CENTER - HOME_ZOOM_EDGE; // 39
 
-    // Data carousel: center ≈ 100% (zoom 256), edges ≈ 95% (zoom ~243)
+    // Data carousel zoom (only used if ENABLE_CAROUSEL_ZOOM is true)
     constexpr int DATA_ZOOM_CENTER = 256;   // 100% scale
     constexpr int DATA_ZOOM_EDGE = 243;     // 95% scale
     constexpr int DATA_ZOOM_RANGE = DATA_ZOOM_CENTER - DATA_ZOOM_EDGE; // 13
@@ -575,15 +581,23 @@ namespace
             float normalizedDist = static_cast<float>(dist) / static_cast<float>(halfScreen);
             normalizedDist = std::min(1.0f, normalizedDist);
 
-            // Calculate zoom: center (0) -> HOME_ZOOM_CENTER, edge (1) -> HOME_ZOOM_EDGE
-            const int targetZoom = HOME_ZOOM_CENTER - static_cast<int>(HOME_ZOOM_RANGE * normalizedDist);
+            // Apply zoom only if enabled (disabled by default to prevent flicker)
+            if (ENABLE_CAROUSEL_ZOOM)
+            {
+                const int targetZoom = HOME_ZOOM_CENTER - static_cast<int>(HOME_ZOOM_RANGE * normalizedDist);
+                lv_obj_set_style_transform_zoom(cw.container, static_cast<uint16_t>(targetZoom), 0);
+            }
+            else
+            {
+                // Keep zoom at 100% (256) to prevent flickering
+                lv_obj_set_style_transform_zoom(cw.container, ZOOM_NORMAL, 0);
+            }
 
             // Calculate opacity: center = OPA_CENTER, edges = OPA_EDGE (linear interpolation)
             const int opaValue = OPA_CENTER - static_cast<int>(OPA_RANGE * normalizedDist);
             const lv_opa_t targetOpa = static_cast<lv_opa_t>(opaValue);
 
-            // Apply zoom and opacity DIRECTLY (no animation = no flicker)
-            lv_obj_set_style_transform_zoom(cw.container, static_cast<uint16_t>(targetZoom), 0);
+            // Apply opacity DIRECTLY (no animation = no flicker)
             lv_obj_set_style_opa(cw.container, targetOpa, 0);
 
             // Update icon size based on focus (active card gets larger icon)
@@ -649,15 +663,23 @@ namespace
             float normalizedDist = static_cast<float>(dist) / static_cast<float>(halfScreen);
             normalizedDist = std::min(1.0f, normalizedDist);
 
-            // Calculate zoom: center (0) -> DATA_ZOOM_CENTER, edge (1) -> DATA_ZOOM_EDGE
-            const int targetZoom = DATA_ZOOM_CENTER - static_cast<int>(DATA_ZOOM_RANGE * normalizedDist);
+            // Apply zoom only if enabled (disabled by default to prevent flicker)
+            if (ENABLE_CAROUSEL_ZOOM)
+            {
+                const int targetZoom = DATA_ZOOM_CENTER - static_cast<int>(DATA_ZOOM_RANGE * normalizedDist);
+                lv_obj_set_style_transform_zoom(pw.container, static_cast<uint16_t>(targetZoom), 0);
+            }
+            else
+            {
+                // Keep zoom at 100% (256) to prevent flickering
+                lv_obj_set_style_transform_zoom(pw.container, ZOOM_NORMAL, 0);
+            }
 
             // Calculate opacity: center = OPA_CENTER, edges = OPA_EDGE (linear interpolation)
             const int opaValue = OPA_CENTER - static_cast<int>(OPA_RANGE * normalizedDist);
             const lv_opa_t targetOpa = static_cast<lv_opa_t>(opaValue);
 
-            // Apply zoom and opacity DIRECTLY (no animation = no flicker)
-            lv_obj_set_style_transform_zoom(pw.container, static_cast<uint16_t>(targetZoom), 0);
+            // Apply opacity DIRECTLY (no animation = no flicker)
             lv_obj_set_style_opa(pw.container, targetOpa, 0);
 
             // Ensure page is always visible (fixes invisible page bug)
