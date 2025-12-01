@@ -557,10 +557,15 @@ namespace
     {
         static TouchPoint lastPoint{false, 0, 0};
         static bool wasTouched = false;
-        static uint32_t lastTouchLogMs = 0;
-        static uint32_t touchCount = 0;
+        static uint8_t logCount = 0;
 
         TouchPoint p = ft3168_read_touch();
+        if (logCount < 5)
+        {
+            Serial.printf("[TOUCH] read_cb status: touched=%d x=%u y=%u\n", p.touched, p.x, p.y);
+            logCount++;
+        }
+
         if (p.touched)
         {
             TouchPoint mapped = map_touch_to_display(p);
@@ -568,22 +573,6 @@ namespace
             data->point.x = mapped.x;
             data->point.y = mapped.y;
             lastPoint = mapped;
-
-            // Log touch start and periodically during hold (max once per 500ms)
-            uint32_t now = millis();
-            if (!wasTouched)
-            {
-                touchCount++;
-                Serial.println("----------------------------------------");
-                Serial.printf("[TOUCH] #%lu PRESSED at (%u, %u)\n", touchCount, mapped.x, mapped.y);
-                Serial.println("----------------------------------------");
-                lastTouchLogMs = now;
-            }
-            else if (now - lastTouchLogMs > 500)
-            {
-                Serial.printf("[TOUCH] Holding at (%u, %u)\n", mapped.x, mapped.y);
-                lastTouchLogMs = now;
-            }
             wasTouched = true;
         }
         else
@@ -591,11 +580,6 @@ namespace
             data->state = LV_INDEV_STATE_RELEASED;
             data->point.x = lastPoint.x;
             data->point.y = lastPoint.y;
-
-            if (wasTouched)
-            {
-                Serial.printf("[TOUCH] Released at (%u, %u)\n", lastPoint.x, lastPoint.y);
-            }
             wasTouched = false;
         }
     }
@@ -730,6 +714,12 @@ void display_s3_loop()
         lv_timer_handler();
         g_lastLvglRun = now;
     }
+
+    // Update UI with live vehicle data via setter functions
+    ui_s3_set_rpm(g_currentRpm);
+    ui_s3_set_speed(g_vehicleSpeedKmh);
+    ui_s3_set_gear(g_estimatedGear);
+    // TODO: ui_s3_set_coolant() when coolant data available from OBD
 
     ui_s3_loop(wifiStatus, g_connected, g_bleConnectInProgress);
 }

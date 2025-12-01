@@ -12,4 +12,4 @@
 .fake
 
 #custom
-logs
+logs_codeql_detected_source_root
