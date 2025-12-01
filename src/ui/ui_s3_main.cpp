@@ -8,6 +8,7 @@
 
 #include "bluetooth/ble_obd.h"
 #include "core/config.h"
+#include "core/logging.h"
 #include "core/state.h"
 #include "core/utils.h"
 #include "core/wifi.h"
@@ -31,18 +32,53 @@ namespace
     constexpr int CARD_ICON_SIZE_ACTIVE = 36;
     constexpr int CARD_ICON_SIZE_INACTIVE = 28;
     constexpr int CARD_SHADOW_OFFSET = 4;
+    constexpr int CARD_PADDING_TOP = 18;
+    constexpr int CARD_ROW_SPACING = 10;
+    constexpr int CARD_COLUMN_SPACING = 16;
+    constexpr int CARD_CIRCLE_SIZE = 64;
 
-    // Carousel animation zoom levels (0-256 base = 100%)
-    constexpr int ZOOM_SIDE = 230;   // ~90%
-    constexpr int ZOOM_CENTER = 333; // ~130%
-    constexpr int ZOOM_NORMAL = 256; // 100%
+    // =======================================================================
+    // CAROUSEL ZOOM CONSTANTS - Fixed values to eliminate flicker
+    // =======================================================================
+    // Home carousel: center ≈ 110% (zoom ~282), edges ≈ 95% (zoom ~243)
+    constexpr int HOME_ZOOM_CENTER = 282;                              // 110% scale (256 * 1.10)
+    constexpr int HOME_ZOOM_EDGE = 243;                                // 95% scale (256 * 0.95)
+    constexpr int HOME_ZOOM_RANGE = HOME_ZOOM_CENTER - HOME_ZOOM_EDGE; // 39
+
+    // Data carousel: center ≈ 100% (zoom 256), edges ≈ 95% (zoom ~243)
+    constexpr int DATA_ZOOM_CENTER = 256;                              // 100% scale
+    constexpr int DATA_ZOOM_EDGE = 243;                                // 95% scale
+    constexpr int DATA_ZOOM_RANGE = DATA_ZOOM_CENTER - DATA_ZOOM_EDGE; // 13
+
+    // Common zoom constants
+    constexpr int ZOOM_NORMAL = 256; // 100% scale (LVGL base)
+
+    // Opacity constants
+    constexpr int OPA_CENTER = 255;                  // 100% opacity
+    constexpr int OPA_EDGE = 204;                    // 80% opacity
+    constexpr int OPA_RANGE = OPA_CENTER - OPA_EDGE; // 51
+
+    // Distance threshold for center detection (pixels)
+    constexpr lv_coord_t CENTER_DISTANCE_MAX = 9999;
 
     // Data page arc gauge settings
     constexpr int ARC_THICKNESS = 8;
     constexpr int ARC_SIZE = 180;
+    constexpr int ARC_ROTATION = 135;
+    constexpr int ARC_ANGLE_MAX = 270;
     constexpr int MAX_RPM_GAUGE = 8000;
     constexpr int MAX_SPEED_GAUGE = 280;
     constexpr int MAX_COOLANT_GAUGE = 130;
+
+    // Layout constants
+    constexpr int HEADER_HEIGHT = 44;
+    constexpr int BACK_BUTTON_SIZE = 44;
+    constexpr int STATUS_BAR_HEIGHT = 32;
+    constexpr int PAGE_INDICATOR_BOTTOM = 18;
+    constexpr int DOT_SIZE = 8;
+    constexpr int DOT_ACTIVE_WIDTH = 24;
+    constexpr int DOT_RADIUS = 4;
+    constexpr int DOT_SPACING = 6;
 
     // Brightness constants
     constexpr int DEFAULT_DISPLAY_BRIGHTNESS = 128; // 50% default
@@ -50,6 +86,18 @@ namespace
     constexpr int DISPLAY_TO_LED_SCALE = 3;         // Display brightness / 3 = LED brightness
     constexpr int LED_PREVIEW_GREEN_SCALE = 255;    // Green channel max in preview
     constexpr int LED_PREVIEW_BLUE_SCALE = 512;     // Blue channel divisor in preview
+    constexpr int BRIGHTNESS_MIN = 10;
+    constexpr int BRIGHTNESS_MAX = 255;
+
+    // Animation timing
+    constexpr int ANIM_DOT_WIDTH_MS = 250;
+    constexpr int ANIM_TUTORIAL_FADE_MS = 300;
+    constexpr int ANIM_LOGO_DELAY_MS = 2000;
+    constexpr int ANIM_LOGO_FADE_MS = 500;
+
+    // Carousel debug logging
+    constexpr uint32_t CAROUSEL_LOG_INTERVAL_MS = 350;
+    constexpr uint8_t CAROUSEL_LOG_LIMIT = 20;
 
     // Card indices for direct access
     constexpr size_t LED_TEST_CARD_INDEX = 4; // Index of LED test card in CARDS array
@@ -72,7 +120,7 @@ namespace
         Brightness,
         Wifi,
         Bluetooth,
-        LedTest, // NEW: LED test screen
+        LedTest, // LED test screen
         Settings
     };
 
@@ -216,6 +264,12 @@ namespace
     UiRefs g_ui;
     UiState g_state;
     UiDisplayHooks g_hooks;
+    uint32_t g_homeCarouselLogMs = 0;
+    uint32_t g_dataCarouselLogMs = 0;
+    uint8_t g_homeCarouselLogCount = 0;
+    uint8_t g_dataCarouselLogCount = 0;
+    bool g_homeSnapshotLogged = false;
+    bool g_dataSnapshotLogged = false;
 
     // =======================================================================
     // STYLES - Clean Apple-like dark theme (iOS/watchOS style)
@@ -258,15 +312,22 @@ namespace
         return CARDS[g_state.cardIndex];
     }
 
+    // Forward declarations
     void show_status_icons();
     void update_page_indicator();
     void stop_wifi_scan();
     void stop_ble_scan();
 
+    // Animation callback forward declarations
+    static void anim_set_width_cb(void *obj, int32_t v);
+    static void anim_set_opa_cb(void *obj, int32_t v);
+    static void anim_hide_on_ready(lv_anim_t *anim);
+    static void anim_hide_and_reset_opa(lv_anim_t *anim);
+
     // Debounce helper - returns true if enough time has passed since last touch
     bool is_gesture_debounced()
     {
-        uint32_t now = millis();
+        const uint32_t now = millis();
         return (now - g_state.lastTouchTime) >= GESTURE_DEBOUNCE_MS;
     }
 
@@ -296,13 +357,27 @@ namespace
             lv_anim_init(&a);
             lv_anim_set_var(&a, g_ui.tutorial);
             lv_anim_set_values(&a, LV_OPA_80, LV_OPA_TRANSP);
-            lv_anim_set_time(&a, 300);
-            lv_anim_set_exec_cb(&a, [](void *obj, int32_t v)
-                                { lv_obj_set_style_opa(static_cast<lv_obj_t *>(obj), static_cast<lv_opa_t>(v), 0); });
-            lv_anim_set_ready_cb(&a, [](lv_anim_t *anim)
-                                 { lv_obj_add_flag(static_cast<lv_obj_t *>(anim->var), LV_OBJ_FLAG_HIDDEN); });
+            lv_anim_set_time(&a, ANIM_TUTORIAL_FADE_MS);
+            lv_anim_set_exec_cb(&a, anim_set_opa_cb);
+            lv_anim_set_ready_cb(&a, anim_hide_on_ready);
             lv_anim_start(&a);
         }
+    }
+
+    bool should_log_carousel(LogLevel level, uint32_t &lastMs, uint8_t &counter)
+    {
+        if (!isLogLevelEnabled(level))
+            return false;
+
+        const uint32_t now = millis();
+        if (counter >= CAROUSEL_LOG_LIMIT)
+            return false;
+        if ((now - lastMs) < CAROUSEL_LOG_INTERVAL_MS)
+            return false;
+
+        lastMs = now;
+        ++counter;
+        return true;
     }
 
     // =======================================================================
@@ -385,6 +460,32 @@ namespace
     }
 
     // =======================================================================
+    // ANIMATION CALLBACKS - Named static functions (refactored from lambdas)
+    // =======================================================================
+    static void anim_set_width_cb(void *obj, int32_t v)
+    {
+        lv_obj_set_width(static_cast<lv_obj_t *>(obj), static_cast<lv_coord_t>(v));
+    }
+
+    static void anim_set_opa_cb(void *obj, int32_t v)
+    {
+        lv_obj_set_style_opa(static_cast<lv_obj_t *>(obj), static_cast<lv_opa_t>(v), 0);
+    }
+
+    static void anim_hide_on_ready(lv_anim_t *anim)
+    {
+        lv_obj_add_flag(static_cast<lv_obj_t *>(anim->var), LV_OBJ_FLAG_HIDDEN);
+    }
+
+    // Hides object and resets opacity to cover for future reuse (e.g., logo overlay)
+    static void anim_hide_and_reset_opa(lv_anim_t *anim)
+    {
+        lv_obj_add_flag(static_cast<lv_obj_t *>(anim->var), LV_OBJ_FLAG_HIDDEN);
+        // Reset opacity so the object is visible when unhidden again
+        lv_obj_set_style_opa(static_cast<lv_obj_t *>(anim->var), LV_OPA_COVER, 0);
+    }
+
+    // =======================================================================
     // PAGE INDICATOR UPDATE - Pill-shaped with animated brightness/width
     // =======================================================================
     void update_page_indicator()
@@ -392,34 +493,33 @@ namespace
         if (!g_ui.pageIndicator)
             return;
 
-        uint32_t childCount = lv_obj_get_child_cnt(g_ui.pageIndicator);
+        const uint32_t childCount = lv_obj_get_child_cnt(g_ui.pageIndicator);
         for (uint32_t i = 0; i < childCount; ++i)
         {
             lv_obj_t *dot = lv_obj_get_child(g_ui.pageIndicator, i);
             if (!dot)
                 continue;
 
-            bool active = static_cast<int>(i) == g_state.cardIndex;
+            const bool active = static_cast<int>(i) == g_state.cardIndex;
 
-            // Animate color and opacity
-            lv_color_t targetColor = active ? color_dot_active : color_dot;
-            lv_opa_t targetOpa = active ? LV_OPA_COVER : LV_OPA_60;
+            // Set color and opacity directly
+            const lv_color_t targetColor = active ? color_dot_active : color_dot;
+            const lv_opa_t targetOpa = active ? LV_OPA_COVER : LV_OPA_60;
             lv_obj_set_style_bg_color(dot, targetColor, 0);
             lv_obj_set_style_opa(dot, targetOpa, 0);
 
             // Animate width (pill expands when active)
-            lv_coord_t targetW = active ? 24 : 8;
-            lv_coord_t currentW = lv_obj_get_width(dot);
+            const lv_coord_t targetW = active ? DOT_ACTIVE_WIDTH : DOT_SIZE;
+            const lv_coord_t currentW = lv_obj_get_width(dot);
             if (currentW != targetW)
             {
                 lv_anim_t a;
                 lv_anim_init(&a);
                 lv_anim_set_var(&a, dot);
                 lv_anim_set_values(&a, currentW, targetW);
-                lv_anim_set_time(&a, 250);
+                lv_anim_set_time(&a, ANIM_DOT_WIDTH_MS);
                 lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
-                lv_anim_set_exec_cb(&a, [](void *obj, int32_t v)
-                                    { lv_obj_set_width(static_cast<lv_obj_t *>(obj), static_cast<lv_coord_t>(v)); });
+                lv_anim_set_exec_cb(&a, anim_set_width_cb);
                 lv_anim_start(&a);
             }
         }
@@ -433,50 +533,72 @@ namespace
         if (!g_ui.dataIndicator)
             return;
 
-        uint32_t childCount = lv_obj_get_child_cnt(g_ui.dataIndicator);
+        const uint32_t childCount = lv_obj_get_child_cnt(g_ui.dataIndicator);
         for (uint32_t i = 0; i < childCount; ++i)
         {
             lv_obj_t *dot = lv_obj_get_child(g_ui.dataIndicator, i);
             if (!dot)
                 continue;
 
-            bool active = static_cast<int>(i) == g_state.dataPageIndex;
+            const bool active = static_cast<int>(i) == g_state.dataPageIndex;
             lv_obj_set_style_bg_color(dot, active ? color_dot_active : lv_color_hex(0x48484A), 0);
             lv_obj_set_style_opa(dot, active ? LV_OPA_COVER : LV_OPA_60, 0);
 
             // Animate width
-            lv_coord_t targetW = active ? 24 : 8;
-            lv_coord_t currentW = lv_obj_get_width(dot);
+            const lv_coord_t targetW = active ? DOT_ACTIVE_WIDTH : DOT_SIZE;
+            const lv_coord_t currentW = lv_obj_get_width(dot);
             if (currentW != targetW)
             {
                 lv_anim_t a;
                 lv_anim_init(&a);
                 lv_anim_set_var(&a, dot);
                 lv_anim_set_values(&a, currentW, targetW);
-                lv_anim_set_time(&a, 200);
+                lv_anim_set_time(&a, ANIM_DOT_WIDTH_MS);
                 lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
-                lv_anim_set_exec_cb(&a, [](void *obj, int32_t v)
-                                    { lv_obj_set_width(static_cast<lv_obj_t *>(obj), static_cast<lv_coord_t>(v)); });
+                lv_anim_set_exec_cb(&a, anim_set_width_cb);
                 lv_anim_start(&a);
             }
         }
     }
 
     // =======================================================================
-    // CAROUSEL VISUAL UPDATE - Direct zoom without animation (prevents flicker)
+    // CAROUSEL VISUAL UPDATE - Uses lv_obj_get_coords() for flicker-free operation
     // =======================================================================
+    // Key fix: Cards in a horizontal flex layout can have coords far outside screen
+    // when scrolled. We must calculate distance relative to the carousel's visible
+    // center, not the card's absolute position. The zoom/opacity values are clamped
+    // to ensure cards are NEVER invisible (min 80% opacity, min 95% scale).
+    // NO lv_obj_update_layout() calls here - layout is updated only on screen build.
     void update_carousel_visuals()
     {
-        if (!g_ui.carousel)
+        if (!g_ui.carousel || !g_ui.disp)
             return;
 
-        // Calculate which card is closest to center for focus effect
-        lv_coord_t scrollX = lv_obj_get_scroll_x(g_ui.carousel);
-        lv_coord_t carouselW = lv_obj_get_width(g_ui.carousel);
+        // Get carousel bounds in screen coordinates
+        lv_area_t carCoords{};
+        lv_obj_get_coords(g_ui.carousel, &carCoords);
+        const int carouselWidth = carCoords.x2 - carCoords.x1;
+        const int halfRange = carouselWidth / 2;
 
-        // Find center card and update all cards
+        // Defensive: if carousel has no valid size yet, skip update
+        if (halfRange <= 0)
+            return;
+
+        const int carouselCenterX = (carCoords.x1 + carCoords.x2) / 2;
+
+        const bool logDebug = should_log_carousel(LogLevel::Debug, g_homeCarouselLogMs, g_homeCarouselLogCount);
+        String logLine;
+        if (logDebug)
+        {
+            logLine.reserve(220);
+            logLine += "[HOME] cX=";
+            logLine += carouselCenterX;
+            logLine += " half=";
+            logLine += halfRange;
+        }
+
         int newIdx = 0;
-        lv_coord_t minDist = 9999;
+        lv_coord_t minDist = CENTER_DISTANCE_MAX;
 
         for (size_t i = 0; i < CARD_COUNT; ++i)
         {
@@ -484,74 +606,155 @@ namespace
             if (!cw.container)
                 continue;
 
-            // Calculate distance from center
-            lv_coord_t cardX = lv_obj_get_x(cw.container);
-            lv_coord_t cardW = lv_obj_get_width(cw.container);
-            lv_coord_t cardCenterX = cardX + cardW / 2 - scrollX;
-            lv_coord_t dist = abs(cardCenterX - carouselW / 2);
+            // Get card bounds in screen coordinates (includes scroll offset)
+            lv_area_t coords;
+            lv_obj_get_coords(cw.container, &coords);
 
-            // Track closest to center
+            // Card width for center calculation
+            const int cardWidth = coords.x2 - coords.x1;
+
+            // Skip cards with invalid dimensions (not yet laid out)
+            if (cardWidth <= 0)
+            {
+                // Card not ready - apply safe defaults and continue
+                lv_obj_set_style_transform_zoom(cw.container, HOME_ZOOM_EDGE, 0);
+                lv_obj_set_style_opa(cw.container, static_cast<lv_opa_t>(OPA_EDGE), 0);
+                lv_obj_clear_flag(cw.container, LV_OBJ_FLAG_HIDDEN);
+                continue;
+            }
+
+            const int cardCenterX = (coords.x1 + coords.x2) / 2;
+            const int dist = abs(cardCenterX - carouselCenterX);
+
+            // Track card closest to center
             if (dist < minDist)
             {
                 minDist = dist;
                 newIdx = static_cast<int>(i);
             }
 
-            // Calculate zoom based on distance (center = 110%, edges = 95%)
-            // Using smaller range to reduce visual distortion
-            float normalizedDist = static_cast<float>(dist) / static_cast<float>(carouselW / 2);
-            normalizedDist = std::min(1.0f, normalizedDist);
+            // Normalize distance: 0.0 = at center, 1.0 = at edge or beyond
+            float normalizedDist = static_cast<float>(dist) / static_cast<float>(halfRange);
+            normalizedDist = std::max(0.0f, std::min(1.0f, normalizedDist));
 
-            // Smooth interpolation: center (0) -> 110%, edge (1) -> 95%
-            // 282 = 110%, 243 = 95%, 256 = 100%
-            int targetZoom = 282 - static_cast<int>(39 * normalizedDist);
+            // Calculate zoom: center = HOME_ZOOM_CENTER (~110%), edge = HOME_ZOOM_EDGE (~95%)
+            int targetZoom = HOME_ZOOM_EDGE + static_cast<int>((1.0f - normalizedDist) * HOME_ZOOM_RANGE);
+            targetZoom = std::max(HOME_ZOOM_EDGE, std::min(HOME_ZOOM_CENTER, targetZoom));
 
-            // Calculate opacity (center = 100%, edges = 80%)
-            int opaValue = 255 - static_cast<int>(51 * normalizedDist); // 255 to 204
-            lv_opa_t targetOpa = static_cast<lv_opa_t>(opaValue);
+            // Calculate opacity: center = 255 (100%), edge = 204 (80%) - NEVER invisible
+            int opaValue = OPA_EDGE + static_cast<int>((1.0f - normalizedDist) * OPA_RANGE);
+            opaValue = std::max(OPA_EDGE, std::min(OPA_CENTER, opaValue));
 
-            // Apply zoom and opacity DIRECTLY (no animation = no flicker)
+            // Apply zoom and opacity
             lv_obj_set_style_transform_zoom(cw.container, static_cast<uint16_t>(targetZoom), 0);
-            lv_obj_set_style_opa(cw.container, targetOpa, 0);
+            lv_obj_set_style_opa(cw.container, static_cast<lv_opa_t>(opaValue), 0);
 
-            // Update icon size based on focus (active card gets larger icon)
-            bool isActive = (static_cast<int>(i) == g_state.cardIndex);
+            // Update icon font size based on active state
+            const bool isActive = (static_cast<int>(i) == g_state.cardIndex);
             if (cw.icon)
             {
                 lv_obj_set_style_text_font(cw.icon,
                                            isActive ? &lv_font_montserrat_32 : &lv_font_montserrat_24, 0);
             }
 
-            // Subtle background color for active card
-            lv_color_t bgColor = isActive ? color_card_hover : color_card;
+            // Update card background based on active state
+            const lv_color_t bgColor = isActive ? color_card_hover : color_card;
             lv_obj_set_style_bg_color(cw.container, bgColor, 0);
 
-            // Ensure card is visible
+            // Ensure card is always visible
             lv_obj_clear_flag(cw.container, LV_OBJ_FLAG_HIDDEN);
+
+            if (logDebug)
+            {
+                logLine += " |";
+                logLine += static_cast<int>(i);
+                logLine += ":";
+                logLine += cardCenterX;
+                logLine += ",d=";
+                logLine += dist;
+                logLine += ",z=";
+                logLine += targetZoom;
+                logLine += ",o=";
+                logLine += opaValue;
+            }
         }
 
-        // Update card index if changed
+        // Update cardIndex if changed
         if (g_state.cardIndex != newIdx)
         {
             g_state.cardIndex = newIdx;
             update_page_indicator();
         }
-    }
 
+        // One-time snapshot log for debugging
+        if (!g_homeSnapshotLogged && isLogLevelEnabled(LogLevel::Info))
+        {
+            String snap;
+            snap.reserve(200);
+            snap += "[HOME] idx=";
+            snap += g_state.cardIndex;
+            snap += " carX=";
+            snap += carouselCenterX;
+            for (size_t i = 0; i < CARD_COUNT && i < 3; ++i)
+            {
+                CardWidgets &cw = g_ui.cards[i];
+                if (!cw.container)
+                    continue;
+                lv_area_t coords;
+                lv_obj_get_coords(cw.container, &coords);
+                snap += " c";
+                snap += static_cast<int>(i);
+                snap += ":";
+                snap += coords.x1;
+                snap += "-";
+                snap += coords.x2;
+            }
+            LOG_INFO("UI", "HOME_SNAP", snap);
+            g_homeSnapshotLogged = true;
+        }
+
+        if (logDebug)
+        {
+            logLine += " -> idx=";
+            logLine += newIdx;
+            LOG_DEBUG("UI", "CAROUSEL", logLine);
+        }
+    } // =======================================================================
+    // DATA CAROUSEL VISUAL UPDATE - Uses lv_obj_get_coords() for flicker-free operation
     // =======================================================================
-    // DATA CAROUSEL VISUAL UPDATE - Direct zoom without animation
-    // =======================================================================
+    // Same approach as home carousel: calculate distance relative to carousel center,
+    // clamp zoom/opacity to safe ranges. Data carousel uses subtler zoom (100%-95%).
+    // NO lv_obj_update_layout() calls here - layout is updated only on screen build.
     void update_data_carousel_visuals()
     {
-        if (!g_ui.dataCarousel)
+        if (!g_ui.dataCarousel || !g_ui.disp)
             return;
 
-        lv_coord_t scrollX = lv_obj_get_scroll_x(g_ui.dataCarousel);
-        lv_coord_t carouselW = lv_obj_get_width(g_ui.dataCarousel);
+        // Get carousel bounds in screen coordinates
+        lv_area_t carCoords{};
+        lv_obj_get_coords(g_ui.dataCarousel, &carCoords);
+        const int carouselWidth = carCoords.x2 - carCoords.x1;
+        const int halfRange = carouselWidth / 2;
 
-        // Find center card and update index
+        // Defensive: if carousel has no valid size yet, skip update
+        if (halfRange <= 0)
+            return;
+
+        const int carouselCenterX = (carCoords.x1 + carCoords.x2) / 2;
+
+        const bool logDebug = should_log_carousel(LogLevel::Debug, g_dataCarouselLogMs, g_dataCarouselLogCount);
+        String logLine;
+        if (logDebug)
+        {
+            logLine.reserve(220);
+            logLine += "[DATA] cX=";
+            logLine += carouselCenterX;
+            logLine += " half=";
+            logLine += halfRange;
+        }
+
         int newIdx = 0;
-        lv_coord_t minDist = 9999;
+        lv_coord_t minDist = CENTER_DISTANCE_MAX;
 
         for (size_t i = 0; i < DATA_PAGE_COUNT; ++i)
         {
@@ -559,30 +762,65 @@ namespace
             if (!pw.container)
                 continue;
 
-            // Calculate distance from center for zoom effect
-            lv_coord_t pageX = lv_obj_get_x(pw.container);
-            lv_coord_t pageW = lv_obj_get_width(pw.container);
-            lv_coord_t pageCenterX = pageX + pageW / 2 - scrollX;
-            lv_coord_t dist = abs(pageCenterX - carouselW / 2);
+            // Get page bounds in screen coordinates (includes scroll offset)
+            lv_area_t coords;
+            lv_obj_get_coords(pw.container, &coords);
 
-            // Track closest to center
+            // Page width for center calculation
+            const int pageWidth = coords.x2 - coords.x1;
+
+            // Skip pages with invalid dimensions (not yet laid out)
+            if (pageWidth <= 0)
+            {
+                // Page not ready - apply safe defaults and continue
+                lv_obj_set_style_transform_zoom(pw.container, DATA_ZOOM_EDGE, 0);
+                lv_obj_set_style_opa(pw.container, static_cast<lv_opa_t>(OPA_EDGE), 0);
+                lv_obj_clear_flag(pw.container, LV_OBJ_FLAG_HIDDEN);
+                continue;
+            }
+
+            const int pageCenterX = (coords.x1 + coords.x2) / 2;
+            const int dist = abs(pageCenterX - carouselCenterX);
+
+            // Track page closest to center
             if (dist < minDist)
             {
                 minDist = dist;
                 newIdx = static_cast<int>(i);
             }
 
-            float normalizedDist = static_cast<float>(dist) / static_cast<float>(carouselW / 2);
-            normalizedDist = std::min(1.0f, normalizedDist);
+            // Normalize distance: 0.0 = at center, 1.0 = at edge or beyond
+            float normalizedDist = static_cast<float>(dist) / static_cast<float>(halfRange);
+            normalizedDist = std::max(0.0f, std::min(1.0f, normalizedDist));
 
-            // Subtle zoom (center = 100%, edges = 95%) - less aggressive than home
-            int targetZoom = 256 - static_cast<int>(13 * normalizedDist); // 100% to ~95%
-            int opaValue = 255 - static_cast<int>(51 * normalizedDist);   // 255 to 204
-            lv_opa_t targetOpa = static_cast<lv_opa_t>(opaValue);
+            // Calculate zoom: center = DATA_ZOOM_CENTER (100%), edge = DATA_ZOOM_EDGE (~95%)
+            int targetZoom = DATA_ZOOM_EDGE + static_cast<int>((1.0f - normalizedDist) * DATA_ZOOM_RANGE);
+            targetZoom = std::max(DATA_ZOOM_EDGE, std::min(DATA_ZOOM_CENTER, targetZoom));
 
+            // Calculate opacity: center = 255 (100%), edge = 204 (80%) - NEVER invisible
+            int opaValue = OPA_EDGE + static_cast<int>((1.0f - normalizedDist) * OPA_RANGE);
+            opaValue = std::max(OPA_EDGE, std::min(OPA_CENTER, opaValue));
+
+            // Apply zoom and opacity
             lv_obj_set_style_transform_zoom(pw.container, static_cast<uint16_t>(targetZoom), 0);
-            lv_obj_set_style_opa(pw.container, targetOpa, 0);
+            lv_obj_set_style_opa(pw.container, static_cast<lv_opa_t>(opaValue), 0);
+
+            // Ensure page is always visible
             lv_obj_clear_flag(pw.container, LV_OBJ_FLAG_HIDDEN);
+
+            if (logDebug)
+            {
+                logLine += " |";
+                logLine += static_cast<int>(i);
+                logLine += ":";
+                logLine += pageCenterX;
+                logLine += ",d=";
+                logLine += dist;
+                logLine += ",z=";
+                logLine += targetZoom;
+                logLine += ",o=";
+                logLine += opaValue;
+            }
         }
 
         // Update page indicator if changed
@@ -591,9 +829,41 @@ namespace
             g_state.dataPageIndex = newIdx;
             update_data_indicator();
         }
-    }
 
-    // =======================================================================
+        // One-time snapshot log for debugging
+        if (!g_dataSnapshotLogged && isLogLevelEnabled(LogLevel::Info))
+        {
+            String snap;
+            snap.reserve(200);
+            snap += "[DATA] idx=";
+            snap += g_state.dataPageIndex;
+            snap += " carX=";
+            snap += carouselCenterX;
+            for (size_t i = 0; i < DATA_PAGE_COUNT && i < 3; ++i)
+            {
+                DataPageWidgets &pw = g_ui.dataPages[i];
+                if (!pw.container)
+                    continue;
+                lv_area_t coords;
+                lv_obj_get_coords(pw.container, &coords);
+                snap += " p";
+                snap += static_cast<int>(i);
+                snap += ":";
+                snap += coords.x1;
+                snap += "-";
+                snap += coords.x2;
+            }
+            LOG_INFO("UI", "DATA_SNAP", snap);
+            g_dataSnapshotLogged = true;
+        }
+
+        if (logDebug)
+        {
+            logLine += " -> idx=";
+            logLine += newIdx;
+            LOG_DEBUG("UI", "DATA_CAR", logLine);
+        }
+    } // =======================================================================
     // STATUS ICONS UPDATE
     // =======================================================================
 
@@ -762,8 +1032,8 @@ namespace
         int pct = (value * 100) / std::max(1, maxValue);
         pct = std::max(0, std::min(100, pct));
 
-        int16_t currentAngle = lv_arc_get_angle_end(arc);
-        int16_t targetAngle = static_cast<int16_t>((pct * 270) / 100); // 0-270 degree arc
+        const int16_t currentAngle = lv_arc_get_angle_end(arc);
+        const int16_t targetAngle = static_cast<int16_t>((pct * ARC_ANGLE_MAX) / 100);
 
         // Smooth animation only if change is significant
         if (abs(currentAngle - targetAngle) > 2)
@@ -1048,14 +1318,14 @@ namespace
         lv_obj_set_layout(w.container, LV_LAYOUT_FLEX);
         lv_obj_set_flex_flow(w.container, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(w.container, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_row(w.container, 10, 0);
-        lv_obj_set_style_pad_top(w.container, 18, 0);
+        lv_obj_set_style_pad_row(w.container, CARD_ROW_SPACING, 0);
+        lv_obj_set_style_pad_top(w.container, CARD_PADDING_TOP, 0);
         lv_obj_add_event_cb(w.container, on_card_click, LV_EVENT_CLICKED, nullptr);
 
         // Circular icon background with gradient-like effect
         w.circle = lv_obj_create(w.container);
         lv_obj_remove_style_all(w.circle);
-        lv_obj_set_size(w.circle, 64, 64);
+        lv_obj_set_size(w.circle, CARD_CIRCLE_SIZE, CARD_CIRCLE_SIZE);
         lv_obj_set_style_bg_color(w.circle, color_card_accent, 0);
         lv_obj_set_style_bg_opa(w.circle, LV_OPA_20, 0);
         lv_obj_set_style_radius(w.circle, LV_RADIUS_CIRCLE, 0);
@@ -1128,18 +1398,18 @@ namespace
         lv_obj_set_layout(g_ui.pageIndicator, LV_LAYOUT_FLEX);
         lv_obj_set_flex_flow(g_ui.pageIndicator, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(g_ui.pageIndicator, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_column(g_ui.pageIndicator, 6, 0);
-        lv_obj_align(g_ui.pageIndicator, LV_ALIGN_BOTTOM_MID, 0, -18);
+        lv_obj_set_style_pad_column(g_ui.pageIndicator, DOT_SPACING, 0);
+        lv_obj_align(g_ui.pageIndicator, LV_ALIGN_BOTTOM_MID, 0, -PAGE_INDICATOR_BOTTOM);
 
         for (size_t i = 0; i < CARD_COUNT; ++i)
         {
             lv_obj_t *dot = lv_obj_create(g_ui.pageIndicator);
             lv_obj_remove_style_all(dot);
             // Pill shape (height < width when active)
-            lv_obj_set_size(dot, 8, 8);
+            lv_obj_set_size(dot, DOT_SIZE, DOT_SIZE);
             lv_obj_set_style_bg_color(dot, color_dot, 0);
             lv_obj_set_style_bg_opa(dot, LV_OPA_60, 0);
-            lv_obj_set_style_radius(dot, 4, 0); // Pill-shaped
+            lv_obj_set_style_radius(dot, DOT_RADIUS, 0); // Pill-shaped
             lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
         }
     }
@@ -1189,14 +1459,14 @@ namespace
         lv_obj_set_size(g_ui.carousel, LV_PCT(100), 200);
         lv_obj_align(g_ui.carousel, LV_ALIGN_CENTER, 0, 15);
         // Center padding to align first/last cards in center
-        lv_coord_t sidePad = (lv_disp_get_hor_res(disp) - CARD_WIDTH) / 2;
+        const lv_coord_t sidePad = (lv_disp_get_hor_res(disp) - CARD_WIDTH) / 2;
         lv_obj_set_style_pad_left(g_ui.carousel, sidePad, 0);
         lv_obj_set_style_pad_right(g_ui.carousel, sidePad, 0);
         lv_obj_set_style_pad_ver(g_ui.carousel, 15, 0);
         lv_obj_set_layout(g_ui.carousel, LV_LAYOUT_FLEX);
         lv_obj_set_flex_flow(g_ui.carousel, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(g_ui.carousel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_column(g_ui.carousel, 16, 0);
+        lv_obj_set_style_pad_column(g_ui.carousel, CARD_COLUMN_SPACING, 0);
         lv_obj_set_scroll_dir(g_ui.carousel, LV_DIR_HOR);
         lv_obj_set_scroll_snap_x(g_ui.carousel, LV_SCROLL_SNAP_CENTER);
         lv_obj_set_scrollbar_mode(g_ui.carousel, LV_SCROLLBAR_MODE_OFF);
@@ -1212,6 +1482,9 @@ namespace
 
         build_page_indicator();
         build_tutorial();
+
+        lv_obj_update_layout(g_ui.root);
+        lv_obj_update_layout(g_ui.carousel);
 
         update_carousel_visuals();
         update_status_icons();
@@ -1363,8 +1636,8 @@ namespace
             w.arc = lv_arc_create(w.container);
             lv_obj_set_size(w.arc, ARC_SIZE, ARC_SIZE);
             lv_obj_align(w.arc, LV_ALIGN_CENTER, 0, 10);
-            lv_arc_set_rotation(w.arc, 135); // Start from bottom-left
-            lv_arc_set_bg_angles(w.arc, 0, 270);
+            lv_arc_set_rotation(w.arc, ARC_ROTATION); // Start from bottom-left
+            lv_arc_set_bg_angles(w.arc, 0, ARC_ANGLE_MAX);
             lv_arc_set_range(w.arc, 0, 100);
             lv_arc_set_value(w.arc, 0);
             lv_obj_remove_style(w.arc, NULL, LV_PART_KNOB);
@@ -1475,25 +1748,25 @@ namespace
             g_ui.dataPages[i] = make_data_page(i);
         }
 
-        // Page indicator for data view - SAME POSITION AS HOME (-18 from bottom)
+        // Page indicator for data view - SAME POSITION AS HOME
         g_ui.dataIndicator = lv_obj_create(g_ui.dataScreen);
         lv_obj_remove_style_all(g_ui.dataIndicator);
         lv_obj_set_size(g_ui.dataIndicator, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
         lv_obj_set_layout(g_ui.dataIndicator, LV_LAYOUT_FLEX);
         lv_obj_set_flex_flow(g_ui.dataIndicator, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(g_ui.dataIndicator, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_column(g_ui.dataIndicator, 6, 0);
-        lv_obj_align(g_ui.dataIndicator, LV_ALIGN_BOTTOM_MID, 0, -18);
+        lv_obj_set_style_pad_column(g_ui.dataIndicator, DOT_SPACING, 0);
+        lv_obj_align(g_ui.dataIndicator, LV_ALIGN_BOTTOM_MID, 0, -PAGE_INDICATOR_BOTTOM);
 
         for (size_t i = 0; i < DATA_PAGE_COUNT; ++i)
         {
             lv_obj_t *dot = lv_obj_create(g_ui.dataIndicator);
             lv_obj_remove_style_all(dot);
             // Pill shape like home indicator
-            lv_obj_set_size(dot, 8, 8);
+            lv_obj_set_size(dot, DOT_SIZE, DOT_SIZE);
             lv_obj_set_style_bg_color(dot, color_dot, 0);
             lv_obj_set_style_bg_opa(dot, LV_OPA_60, 0);
-            lv_obj_set_style_radius(dot, 4, 0);
+            lv_obj_set_style_radius(dot, DOT_RADIUS, 0);
             lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
         }
 
@@ -1514,10 +1787,77 @@ namespace
         lv_scr_load(g_ui.dataScreen);
 
         // Update visuals AFTER screen is loaded
+        lv_obj_update_layout(g_ui.dataScreen);
+        lv_obj_update_layout(g_ui.dataCarousel);
         update_data_indicator();
         update_data_values();
         update_data_carousel_visuals();
         update_status_icons();
+    }
+
+    // =======================================================================
+    // BRIGHTNESS CALLBACKS - Named static functions (refactored from lambdas)
+    // =======================================================================
+    static void on_brightness_changed(lv_event_t *e)
+    {
+        const int val = lv_slider_get_value(static_cast<lv_obj_t *>(lv_event_get_target(e)));
+        cfg.displayBrightness = val;
+        const int pct = (val * 100) / BRIGHTNESS_MAX;
+
+        if (g_ui.brightnessValue)
+        {
+            lv_label_set_text_fmt(g_ui.brightnessValue, "%d%%", pct);
+        }
+        if (g_hooks.setBrightness)
+        {
+            g_hooks.setBrightness(static_cast<uint8_t>(val));
+        }
+
+        // Also update LED bar brightness preview
+        cfg.brightness = val / DISPLAY_TO_LED_SCALE;
+        g_brightnessPreviewActive = true;
+        g_lastBrightnessChangeMs = millis();
+        strip.setBrightness(cfg.brightness);
+        rememberPreviewPixels();
+
+        // Show preview gradient on LED bar
+        for (int i = 0; i < NUM_LEDS; i++)
+        {
+            const int intensity = (i * LED_PREVIEW_GREEN_SCALE) / NUM_LEDS;
+            const int green = intensity * val / LED_PREVIEW_GREEN_SCALE;
+            const int blue = intensity * val / LED_PREVIEW_BLUE_SCALE;
+            strip.setPixelColor(i, strip.Color(0, green, blue));
+        }
+        strip.show();
+    }
+
+    static void on_brightness_released(lv_event_t *)
+    {
+        saveConfig();
+    }
+
+    static void on_brightness_reset(lv_event_t *)
+    {
+        cfg.displayBrightness = DEFAULT_DISPLAY_BRIGHTNESS;
+        cfg.brightness = DEFAULT_LED_BRIGHTNESS;
+
+        if (g_ui.brightnessSlider)
+        {
+            lv_slider_set_value(g_ui.brightnessSlider, DEFAULT_DISPLAY_BRIGHTNESS, LV_ANIM_ON);
+        }
+        if (g_ui.brightnessValue)
+        {
+            lv_label_set_text(g_ui.brightnessValue, "50%");
+        }
+        if (g_hooks.setBrightness)
+        {
+            g_hooks.setBrightness(DEFAULT_DISPLAY_BRIGHTNESS);
+        }
+
+        strip.setBrightness(DEFAULT_LED_BRIGHTNESS);
+        strip.clear();
+        strip.show();
+        saveConfig();
     }
 
     // =======================================================================
@@ -1529,7 +1869,7 @@ namespace
         g_ui.detail = lv_obj_get_parent(g_ui.detailContent);
 
         // Current brightness percentage (large display)
-        int pct = (cfg.displayBrightness * 100) / 255;
+        const int pct = (cfg.displayBrightness * 100) / BRIGHTNESS_MAX;
 
         lv_obj_t *pctLabel = lv_label_create(g_ui.detailContent);
         lv_label_set_text_fmt(pctLabel, "%d%%", pct);
@@ -1542,7 +1882,7 @@ namespace
         lv_obj_t *slider = lv_slider_create(g_ui.detailContent);
         lv_obj_set_width(slider, LV_PCT(85));
         lv_obj_set_height(slider, 10);
-        lv_slider_set_range(slider, 10, 255);
+        lv_slider_set_range(slider, BRIGHTNESS_MIN, BRIGHTNESS_MAX);
         lv_slider_set_value(slider, cfg.displayBrightness, LV_ANIM_OFF);
         lv_obj_set_style_bg_color(slider, lv_color_hex(0x2C2C2E), LV_PART_MAIN);
         lv_obj_set_style_bg_color(slider, color_card_accent, LV_PART_INDICATOR);
@@ -1552,37 +1892,9 @@ namespace
         lv_obj_set_style_radius(slider, 5, LV_PART_INDICATOR);
         g_ui.brightnessSlider = slider;
 
-        lv_obj_add_event_cb(slider, [](lv_event_t *e)
-                            {
-            int val = lv_slider_get_value(static_cast<lv_obj_t *>(lv_event_get_target(e)));
-            cfg.displayBrightness = val;
-            int pct = (val * 100) / 255;
-            if (g_ui.brightnessValue)
-            {
-                lv_label_set_text_fmt(g_ui.brightnessValue, "%d%%", pct);
-            }
-            if (g_hooks.setBrightness)
-            {
-                g_hooks.setBrightness(static_cast<uint8_t>(val));
-            }
-            // Also update LED bar brightness preview
-            cfg.brightness = val / DISPLAY_TO_LED_SCALE;
-            g_brightnessPreviewActive = true;
-            g_lastBrightnessChangeMs = millis();
-            strip.setBrightness(cfg.brightness);
-            rememberPreviewPixels();
-            // Show preview gradient on LED bar
-            for (int i = 0; i < NUM_LEDS; i++)
-            {
-                int intensity = (i * LED_PREVIEW_GREEN_SCALE) / NUM_LEDS;
-                int green = intensity * val / LED_PREVIEW_GREEN_SCALE;
-                int blue = intensity * val / LED_PREVIEW_BLUE_SCALE;
-                strip.setPixelColor(i, strip.Color(0, green, blue));
-            }
-            strip.show(); }, LV_EVENT_VALUE_CHANGED, nullptr);
-
-        lv_obj_add_event_cb(slider, [](lv_event_t *)
-                            { saveConfig(); }, LV_EVENT_RELEASED, nullptr);
+        // Use named static callbacks instead of lambdas
+        lv_obj_add_event_cb(slider, on_brightness_changed, LV_EVENT_VALUE_CHANGED, nullptr);
+        lv_obj_add_event_cb(slider, on_brightness_released, LV_EVENT_RELEASED, nullptr);
 
         // LED bar preview label
         lv_obj_t *previewLabel = lv_label_create(g_ui.detailContent);
@@ -1612,20 +1924,7 @@ namespace
         lv_label_set_text(resetLbl, "Reset");
         lv_obj_set_style_text_color(resetLbl, color_text, 0);
         lv_obj_center(resetLbl);
-        lv_obj_add_event_cb(resetBtn, [](lv_event_t *)
-                            {
-            cfg.displayBrightness = DEFAULT_DISPLAY_BRIGHTNESS;
-            cfg.brightness = DEFAULT_LED_BRIGHTNESS;
-            if (g_ui.brightnessSlider)
-                lv_slider_set_value(g_ui.brightnessSlider, DEFAULT_DISPLAY_BRIGHTNESS, LV_ANIM_ON);
-            if (g_ui.brightnessValue)
-                lv_label_set_text(g_ui.brightnessValue, "50%");
-            if (g_hooks.setBrightness)
-                g_hooks.setBrightness(DEFAULT_DISPLAY_BRIGHTNESS);
-            strip.setBrightness(DEFAULT_LED_BRIGHTNESS);
-            strip.clear();
-            strip.show();
-            saveConfig(); }, LV_EVENT_CLICKED, nullptr);
+        lv_obj_add_event_cb(resetBtn, on_brightness_reset, LV_EVENT_CLICKED, nullptr);
 
         update_status_icons();
         lv_disp_load_scr(g_ui.detail);
@@ -2066,19 +2365,15 @@ void ui_s3_show_logo()
     }
     lv_obj_clear_flag(g_ui.logoOverlay, LV_OBJ_FLAG_HIDDEN);
 
-    // Fade out animation after 2 seconds
+    // Fade out animation after delay
     lv_anim_t a;
     lv_anim_init(&a);
     lv_anim_set_var(&a, g_ui.logoOverlay);
     lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_TRANSP);
-    lv_anim_set_delay(&a, 2000);
-    lv_anim_set_time(&a, 500);
-    lv_anim_set_exec_cb(&a, [](void *obj, int32_t v)
-                        { lv_obj_set_style_opa(static_cast<lv_obj_t *>(obj), static_cast<lv_opa_t>(v), 0); });
-    lv_anim_set_ready_cb(&a, [](lv_anim_t *anim)
-                         {
-        lv_obj_add_flag(static_cast<lv_obj_t *>(anim->var), LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_style_opa(static_cast<lv_obj_t *>(anim->var), LV_OPA_COVER, 0); });
+    lv_anim_set_delay(&a, ANIM_LOGO_DELAY_MS);
+    lv_anim_set_time(&a, ANIM_LOGO_FADE_MS);
+    lv_anim_set_exec_cb(&a, anim_set_opa_cb);
+    lv_anim_set_ready_cb(&a, anim_hide_and_reset_opa);
     lv_anim_start(&a);
 }
 
