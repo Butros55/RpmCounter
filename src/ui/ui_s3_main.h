@@ -8,9 +8,10 @@ struct WifiStatus;
  * Modern carousel-based home UI for the ESP32-S3 AMOLED display.
  *
  * Features:
- * - Minimalist status bar with WiFi/BLE icons only
- * - Horizontal carousel with animated zoom/opacity
- * - Full-screen data pages (RPM, Speed, Gear, Temp) with swipe navigation
+ * - Horizontal (landscape) layout with status bar + LED indicator
+ * - Carousel-style cards with zoom/opacity animations and pill page dots
+ * - Full-screen data pages (RPM, Speed, Gear, Temp) with swipe navigation and mini gauge arcs
+ * - Dedicated screens for WiFi/Bluetooth scans, brightness preview, and LED tests
  * - Clean Apple-style dark theme optimized for AMOLED
  *
  * ui_s3_init() builds the LVGL screen and loads it immediately.
