@@ -2,23 +2,18 @@
 
 #include <lvgl.h>
 
-struct WifiStatus;
+#include "ui_runtime.h"
 
 /**
- * Home/Status UI for the ESP32-S3 AMOLED path.
+ * Shared LVGL UI used by the ESP32-S3 AMOLED path and the desktop simulator.
  *
  * ui_s3_init() builds the LVGL screen and loads it immediately.
- * ui_s3_loop() updates status indicators and detail lists from the live
- * WiFi/BLE state provided by the rest of the application.
+ * ui_s3_loop() refreshes the widgets from a platform-neutral snapshot.
  */
-struct UiDisplayHooks
-{
-    // Optional hook provided by the display driver to change panel backlight.
-    void (*setBrightness)(uint8_t value) = nullptr;
-};
-
-void ui_s3_init(lv_disp_t *disp, const UiDisplayHooks &hooks);
-void ui_s3_loop(const WifiStatus &wifiStatus, bool bleConnected, bool bleConnecting);
+void ui_s3_init(lv_disp_t *disp, const UiDisplayHooks &hooks, const UiRuntimeState &initialState);
+void ui_s3_loop(const UiRuntimeState &state);
 void ui_s3_set_gear(int gear);
 void ui_s3_set_shiftlight(bool active);
 void ui_s3_show_logo();
+void ui_s3_debug_dispatch(UiDebugAction action);
+UiDebugSnapshot ui_s3_debug_snapshot();

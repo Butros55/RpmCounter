@@ -19,6 +19,7 @@
 #include "core/config.h"
 #include "core/state.h"
 #include "hardware/display.h"
+#include "platform/esp32/ui_runtime_esp32.h"
 #include <ui/ui_s3_main.h>
 
 namespace
@@ -612,6 +613,7 @@ void displayClear()
         return;
 
     g_cachedShift = false;
+    g_shiftBlinkActive = false;
     ui_s3_set_shiftlight(false);
     ui_s3_set_gear(g_cachedGear);
 }
@@ -640,6 +642,7 @@ void displaySetGear(int gear)
 void displaySetShiftBlink(bool active)
 {
     g_cachedShift = active;
+    g_shiftBlinkActive = active;
     if (!g_displayReady)
         return;
 
@@ -689,8 +692,16 @@ void display_s3_init()
     startLvglTick();
 
     UiDisplayHooks hooks{};
-    hooks.setBrightness = applyPanelBrightness;
-    ui_s3_init(g_disp, hooks);
+    hooks.setBrightness = [](uint8_t value, void *)
+    {
+        cfg.displayBrightness = value;
+        applyPanelBrightness(value);
+    };
+    hooks.saveSettings = [](const UiSettings &settings, void *)
+    {
+        saveEsp32UiSettings(settings);
+    };
+    ui_s3_init(g_disp, hooks, makeEsp32UiState());
     ui_s3_set_gear(g_cachedGear);
     ui_s3_set_shiftlight(g_cachedShift);
     if (g_logoRequested)
@@ -717,8 +728,6 @@ void display_s3_loop()
     if (!g_displayReady)
         return;
 
-    WifiStatus wifiStatus = getWifiStatus();
-
     const uint32_t now = millis();
     if (g_tickFallback)
     {
@@ -731,7 +740,7 @@ void display_s3_loop()
         g_lastLvglRun = now;
     }
 
-    ui_s3_loop(wifiStatus, g_connected, g_bleConnectInProgress);
+    ui_s3_loop(makeEsp32UiState());
 }
 
 DisplayDebugInfo displayGetDebugInfo()

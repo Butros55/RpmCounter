@@ -13,6 +13,7 @@ int g_currentRpm = 0;
 int g_maxSeenRpm = 0;
 int g_vehicleSpeedKmh = 0;
 int g_estimatedGear = 0;
+bool g_shiftBlinkActive = false;
 
 unsigned long g_lastRpmRequest = 0;
 
@@ -97,6 +98,7 @@ void initGlobalState()
     g_maxSeenRpm = 0;
     g_vehicleSpeedKmh = 0;
     g_estimatedGear = 0;
+    g_shiftBlinkActive = false;
 
     g_lastRpmRequest = 0;
 

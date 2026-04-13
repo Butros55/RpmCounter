@@ -1,15 +1,8 @@
 #include "ui_s3_main.h"
 
-#include <Arduino.h>
 #include <algorithm>
 #include <array>
-#include <vector>
-
-#include "bluetooth/ble_obd.h"
-#include "core/config.h"
-#include "core/state.h"
-#include "core/utils.h"
-#include "core/wifi.h"
+#include <string>
 
 namespace
 {
@@ -25,24 +18,25 @@ namespace
     struct CardDef
     {
         CardScreen screen;
+        UiScreenId screenId;
         const char *title;
+        const char *menuLabel;
         const char *symbol;
     };
 
     constexpr CardDef CARDS[] = {
-        {CardScreen::Brightness, "Brightness", LV_SYMBOL_EYE_OPEN},
-        {CardScreen::Vehicle, "Vehicle", LV_SYMBOL_GPS},
-        {CardScreen::Wifi, "WiFi", LV_SYMBOL_WIFI},
-        {CardScreen::Bluetooth, "Bluetooth", LV_SYMBOL_BLUETOOTH},
-        {CardScreen::Settings, "Settings", LV_SYMBOL_SETTINGS},
+        {CardScreen::Brightness, UiScreenId::Brightness, "Brightness", "Display", LV_SYMBOL_EYE_OPEN},
+        {CardScreen::Vehicle, UiScreenId::Vehicle, "Vehicle", "Vehicle", LV_SYMBOL_GPS},
+        {CardScreen::Wifi, UiScreenId::Wifi, "WiFi", "WiFi", LV_SYMBOL_WIFI},
+        {CardScreen::Bluetooth, UiScreenId::Bluetooth, "Bluetooth", "BLE", LV_SYMBOL_BLUETOOTH},
+        {CardScreen::Settings, UiScreenId::Settings, "Settings", "Settings", LV_SYMBOL_SETTINGS},
     };
 
     constexpr size_t CARD_COUNT = sizeof(CARDS) / sizeof(CARDS[0]);
 
-    struct CardWidgets
+    struct TileWidgets
     {
-        lv_obj_t *container = nullptr;
-        lv_obj_t *circle = nullptr;
+        lv_obj_t *button = nullptr;
         lv_obj_t *icon = nullptr;
         lv_obj_t *label = nullptr;
     };
@@ -51,37 +45,35 @@ namespace
     {
         lv_disp_t *disp = nullptr;
         lv_obj_t *root = nullptr;
-        lv_obj_t *statusBar = nullptr;
         lv_obj_t *wifiIcon = nullptr;
         lv_obj_t *bleIcon = nullptr;
-        lv_obj_t *title = nullptr;
-        lv_obj_t *carousel = nullptr;
-        lv_obj_t *pageIndicator = nullptr;
+        lv_obj_t *heroMeta = nullptr;
+        lv_obj_t *rpmValue = nullptr;
+        lv_obj_t *rpmUnit = nullptr;
+        lv_obj_t *heroSummary = nullptr;
+        lv_obj_t *gearBadge = nullptr;
+        lv_obj_t *speedBadge = nullptr;
+        lv_obj_t *shiftBadge = nullptr;
         lv_obj_t *tutorial = nullptr;
         lv_obj_t *tutorialLabel = nullptr;
-        lv_obj_t *gearBadge = nullptr;
-        lv_obj_t *shiftBadge = nullptr;
-        lv_obj_t *logoOverlay = nullptr;
         lv_obj_t *detail = nullptr;
-        lv_obj_t *detailContent = nullptr;
-        lv_obj_t *wifiList = nullptr;
-        lv_obj_t *bleList = nullptr;
+        lv_obj_t *detailPanel = nullptr;
+        lv_obj_t *detailValue = nullptr;
+        lv_obj_t *detailNote = nullptr;
         lv_obj_t *brightnessSlider = nullptr;
         lv_obj_t *brightnessValue = nullptr;
-        std::array<CardWidgets, CARD_COUNT> cards{};
+        lv_obj_t *logoOverlay = nullptr;
+        std::array<TileWidgets, CARD_COUNT> tiles{};
     };
 
     struct UiState
     {
-        int cardIndex = 0;
+        UiRuntimeState runtime{};
+        int selectedIndex = 0;
         bool inDetail = false;
         bool tutorialVisible = true;
         bool hasInteracted = false;
-        int gear = 0;
-        bool shift = false;
-        WifiStatus lastWifi{};
-        bool bleConnected = false;
-        bool bleConnecting = false;
+        UiScreenId activeScreen = UiScreenId::Home;
     };
 
     UiRefs g_ui;
@@ -89,38 +81,80 @@ namespace
     UiDisplayHooks g_hooks;
 
     lv_style_t styleBg;
-    lv_style_t styleCard;
-    lv_style_t styleMuted;
+    lv_style_t stylePanel;
+    lv_style_t stylePanelAccent;
+    lv_style_t styleTile;
+    lv_style_t styleTileSelected;
     lv_style_t styleBadge;
-    lv_style_t styleCircle;
-    lv_style_t styleDot;
+    lv_style_t styleMuted;
     lv_style_t styleTutorial;
+    lv_style_t styleBackButton;
 
-    const lv_color_t color_bg = lv_color_hex(0x000000);
-    const lv_color_t color_card = lv_color_hex(0x10131b);
-    const lv_color_t color_card_accent = lv_color_hex(0x2D9CDB);
-    const lv_color_t color_muted = lv_color_hex(0x9AA2AD);
+    const lv_color_t color_bg = lv_color_hex(0x05070A);
+    const lv_color_t color_panel = lv_color_hex(0x11151C);
+    const lv_color_t color_panel_alt = lv_color_hex(0x181F29);
+    const lv_color_t color_border = lv_color_hex(0x1F2733);
+    const lv_color_t color_accent = lv_color_hex(0x52C7EA);
     const lv_color_t color_ok = lv_color_hex(0x56F38A);
-    const lv_color_t color_warn = lv_color_hex(0xF5A524);
+    const lv_color_t color_warn = lv_color_hex(0xF5B025);
     const lv_color_t color_error = lv_color_hex(0xF55E61);
-    const lv_color_t color_dot = lv_color_hex(0x2b2f38);
-    const lv_color_t color_dot_active = lv_color_hex(0x5AC8FA);
+    const lv_color_t color_text = lv_color_hex(0xEEF2F7);
+    const lv_color_t color_muted = lv_color_hex(0x9CA7B5);
+
+    int clamp_card_index(int index)
+    {
+        const int count = static_cast<int>(CARD_COUNT);
+        return (index % count + count) % count;
+    }
+
+    uint32_t now_ms()
+    {
+        return lv_tick_get();
+    }
 
     const CardDef &current_card()
     {
-        const int count = static_cast<int>(CARD_COUNT);
-        g_state.cardIndex = (g_state.cardIndex % count + count) % count;
-        return CARDS[g_state.cardIndex];
+        g_state.selectedIndex = clamp_card_index(g_state.selectedIndex);
+        return CARDS[g_state.selectedIndex];
     }
 
-    void mark_interacted()
+    void set_label_text(lv_obj_t *label, const std::string &text)
     {
-        g_state.hasInteracted = true;
-        if (g_state.tutorialVisible && g_ui.tutorial)
+        if (label)
         {
-            g_state.tutorialVisible = false;
-            lv_obj_add_flag(g_ui.tutorial, LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text(label, text.c_str());
         }
+    }
+
+    std::string gear_text(int gear)
+    {
+        return (gear <= 0) ? "N" : std::to_string(gear);
+    }
+
+    std::string bool_text(bool value, const char *whenTrue, const char *whenFalse)
+    {
+        return value ? whenTrue : whenFalse;
+    }
+
+    void sync_runtime_settings()
+    {
+        g_state.runtime.settings.lastMenuIndex = g_state.selectedIndex;
+        g_state.runtime.settings.tutorialSeen = !g_state.tutorialVisible;
+    }
+
+    void persist_settings()
+    {
+        sync_runtime_settings();
+        if (g_hooks.saveSettings)
+        {
+            g_hooks.saveSettings(g_state.runtime.settings, g_hooks.userData);
+        }
+    }
+
+    void apply_runtime_state(const UiRuntimeState &state)
+    {
+        g_state.runtime = state;
+        sync_runtime_settings();
     }
 
     void apply_styles()
@@ -130,152 +164,90 @@ namespace
         lv_style_set_bg_opa(&styleBg, LV_OPA_COVER);
         lv_style_set_pad_all(&styleBg, 0);
 
-        lv_style_init(&styleCard);
-        lv_style_set_bg_color(&styleCard, color_card);
-        lv_style_set_bg_opa(&styleCard, LV_OPA_COVER);
-        lv_style_set_radius(&styleCard, 16);
-        lv_style_set_pad_all(&styleCard, 12);
-        lv_style_set_border_width(&styleCard, 1);
-        lv_style_set_border_color(&styleCard, lv_color_hex(0x1a1f28));
-        lv_style_set_shadow_width(&styleCard, 16);
-        lv_style_set_shadow_color(&styleCard, lv_color_hex(0x0a0d12));
-        lv_style_set_shadow_opa(&styleCard, LV_OPA_40);
-        lv_style_set_shadow_spread(&styleCard, 4);
+        lv_style_init(&stylePanel);
+        lv_style_set_bg_color(&stylePanel, color_panel);
+        lv_style_set_bg_opa(&stylePanel, LV_OPA_COVER);
+        lv_style_set_radius(&stylePanel, 18);
+        lv_style_set_border_width(&stylePanel, 1);
+        lv_style_set_border_color(&stylePanel, color_border);
+        lv_style_set_pad_all(&stylePanel, 12);
+        lv_style_set_shadow_width(&stylePanel, 12);
+        lv_style_set_shadow_color(&stylePanel, lv_color_hex(0x020305));
+        lv_style_set_shadow_opa(&stylePanel, LV_OPA_30);
+        lv_style_set_shadow_spread(&stylePanel, 2);
 
-        lv_style_init(&styleCircle);
-        lv_style_set_radius(&styleCircle, LV_RADIUS_CIRCLE);
-        lv_style_set_bg_color(&styleCircle, lv_color_hex(0x121722));
-        lv_style_set_bg_opa(&styleCircle, LV_OPA_COVER);
-        lv_style_set_border_width(&styleCircle, 2);
-        lv_style_set_border_color(&styleCircle, color_card_accent);
+        lv_style_init(&stylePanelAccent);
+        lv_style_set_bg_color(&stylePanelAccent, color_panel_alt);
+        lv_style_set_bg_opa(&stylePanelAccent, LV_OPA_COVER);
+        lv_style_set_radius(&stylePanelAccent, 14);
+        lv_style_set_border_width(&stylePanelAccent, 2);
+        lv_style_set_border_color(&stylePanelAccent, color_accent);
+        lv_style_set_pad_all(&stylePanelAccent, 10);
+
+        lv_style_init(&styleTile);
+        lv_style_set_bg_color(&styleTile, color_panel);
+        lv_style_set_bg_opa(&styleTile, LV_OPA_COVER);
+        lv_style_set_radius(&styleTile, 16);
+        lv_style_set_border_width(&styleTile, 1);
+        lv_style_set_border_color(&styleTile, color_border);
+        lv_style_set_pad_all(&styleTile, 8);
+
+        lv_style_init(&styleTileSelected);
+        lv_style_set_bg_color(&styleTileSelected, color_panel_alt);
+        lv_style_set_bg_opa(&styleTileSelected, LV_OPA_COVER);
+        lv_style_set_border_width(&styleTileSelected, 2);
+        lv_style_set_border_color(&styleTileSelected, color_accent);
+
+        lv_style_init(&styleBadge);
+        lv_style_set_radius(&styleBadge, 12);
+        lv_style_set_bg_color(&styleBadge, lv_color_hex(0x1D2430));
+        lv_style_set_bg_opa(&styleBadge, LV_OPA_COVER);
+        lv_style_set_pad_left(&styleBadge, 10);
+        lv_style_set_pad_right(&styleBadge, 10);
+        lv_style_set_pad_top(&styleBadge, 6);
+        lv_style_set_pad_bottom(&styleBadge, 6);
+        lv_style_set_text_color(&styleBadge, color_text);
 
         lv_style_init(&styleMuted);
         lv_style_set_text_color(&styleMuted, color_muted);
 
-        lv_style_init(&styleBadge);
-        lv_style_set_radius(&styleBadge, 12);
-        lv_style_set_bg_color(&styleBadge, lv_color_hex(0x1C2028));
-        lv_style_set_bg_opa(&styleBadge, LV_OPA_COVER);
-        lv_style_set_pad_all(&styleBadge, 6);
-        lv_style_set_text_color(&styleBadge, lv_color_hex(0xE8EAED));
-
-        lv_style_init(&styleDot);
-        lv_style_set_radius(&styleDot, LV_RADIUS_CIRCLE);
-        lv_style_set_bg_color(&styleDot, color_dot);
-        lv_style_set_bg_opa(&styleDot, LV_OPA_COVER);
-        lv_style_set_border_width(&styleDot, 0);
-
         lv_style_init(&styleTutorial);
         lv_style_set_radius(&styleTutorial, 12);
-        lv_style_set_bg_color(&styleTutorial, lv_color_hex(0x1A1E26));
+        lv_style_set_bg_color(&styleTutorial, lv_color_hex(0x171B22));
         lv_style_set_bg_opa(&styleTutorial, LV_OPA_80);
-        lv_style_set_pad_all(&styleTutorial, 10);
         lv_style_set_border_width(&styleTutorial, 1);
-        lv_style_set_border_color(&styleTutorial, lv_color_hex(0x2b313d));
-    }
+        lv_style_set_border_color(&styleTutorial, color_border);
+        lv_style_set_pad_all(&styleTutorial, 10);
 
-    void update_page_indicator()
-    {
-        if (!g_ui.pageIndicator)
-            return;
-
-        uint32_t childCount = lv_obj_get_child_cnt(g_ui.pageIndicator);
-        for (uint32_t i = 0; i < childCount; ++i)
-        {
-            lv_obj_t *dot = lv_obj_get_child(g_ui.pageIndicator, i);
-            bool active = static_cast<int>(i) == g_state.cardIndex;
-            lv_obj_set_style_bg_color(dot, active ? color_dot_active : color_dot, 0);
-            lv_obj_set_style_opa(dot, active ? LV_OPA_COVER : LV_OPA_50, 0);
-            lv_obj_set_width(dot, active ? 14 : 8);
-        }
-    }
-
-    void update_carousel_visuals()
-    {
-        if (!g_ui.carousel)
-            return;
-
-        const lv_coord_t contWidth = lv_obj_get_width(g_ui.carousel);
-        const lv_coord_t centerX = -lv_obj_get_scroll_x(g_ui.carousel) + (contWidth / 2);
-
-        int closestIdx = g_state.cardIndex;
-        lv_coord_t closestDist = LV_COORD_MAX;
-
-        for (size_t i = 0; i < CARD_COUNT; ++i)
-        {
-            CardWidgets &cw = g_ui.cards[i];
-            if (!cw.container)
-                continue;
-
-            lv_coord_t cardCenter = lv_obj_get_x(cw.container) + (lv_obj_get_width(cw.container) / 2);
-            lv_coord_t delta = LV_ABS(centerX - cardCenter);
-
-            if (delta < closestDist)
-            {
-                closestDist = delta;
-                closestIdx = static_cast<int>(i);
-            }
-
-            float ratio = static_cast<float>(delta) / static_cast<float>(contWidth / 2 + 1);
-            ratio = std::min(1.0f, ratio);
-
-            int zoom = static_cast<int>(256 * (1.18f - 0.25f * ratio)); // 118% center -> ~88% edge
-            zoom = std::max(200, std::min(zoom, 310));
-            lv_obj_set_style_transform_zoom(cw.container, zoom, 0);
-            lv_obj_set_style_opa(cw.container, 255 - static_cast<int>(140 * ratio), 0);
-            lv_obj_set_style_translate_y(cw.container, static_cast<lv_coord_t>(-10 * (1.0f - ratio)), 0);
-        }
-
-        if (g_state.cardIndex != closestIdx)
-        {
-            g_state.cardIndex = closestIdx;
-            if (g_ui.title)
-            {
-                lv_label_set_text(g_ui.title, current_card().title);
-            }
-            update_page_indicator();
-        }
+        lv_style_init(&styleBackButton);
+        lv_style_set_bg_color(&styleBackButton, lv_color_hex(0x171C25));
+        lv_style_set_bg_opa(&styleBackButton, LV_OPA_COVER);
+        lv_style_set_radius(&styleBackButton, 12);
+        lv_style_set_border_width(&styleBackButton, 1);
+        lv_style_set_border_color(&styleBackButton, color_border);
+        lv_style_set_pad_all(&styleBackButton, 0);
+        lv_style_set_text_color(&styleBackButton, color_text);
     }
 
     void update_status_icons()
     {
         if (g_ui.wifiIcon)
         {
-            // WiFi status visualization:
-            // - Green solid: STA connected OR AP active with clients
-            // - Green blinking: AP active but no clients (waiting for connection)
-            // - Yellow blinking: STA connecting
-            // - Red: AP and STA both inactive (error state)
-
-            bool staConnected = g_state.lastWifi.staConnected;
-            bool apActive = g_state.lastWifi.apActive;
-            bool staConnecting = g_state.lastWifi.staConnecting;
-            int apClients = g_state.lastWifi.apClients;
-
-            lv_color_t col;
+            lv_color_t col = color_error;
             lv_opa_t opa = LV_OPA_COVER;
-
-            if (staConnected)
+            if (g_state.runtime.staConnected)
             {
                 col = color_ok;
             }
-            else if (apActive)
+            else if (g_state.runtime.apActive)
             {
                 col = color_ok;
-                opa = ((millis() / 800) % 2) ? LV_OPA_COVER : LV_OPA_60;
-                if (apClients > 0)
-                {
-                    opa = LV_OPA_COVER;
-                }
+                opa = (g_state.runtime.apClients > 0 || ((now_ms() / 800U) % 2U == 0U)) ? LV_OPA_COVER : LV_OPA_40;
             }
-            else if (staConnecting)
+            else if (g_state.runtime.staConnecting)
             {
                 col = color_warn;
-                opa = ((millis() / 300) % 2) ? LV_OPA_COVER : LV_OPA_40;
-            }
-            else
-            {
-                col = color_error;
+                opa = ((now_ms() / 300U) % 2U == 0U) ? LV_OPA_COVER : LV_OPA_40;
             }
 
             lv_obj_set_style_text_color(g_ui.wifiIcon, col, 0);
@@ -284,25 +256,366 @@ namespace
 
         if (g_ui.bleIcon)
         {
-            lv_color_t col = g_state.bleConnected ? lv_color_hex(0x4DA3FF) : (g_state.bleConnecting ? color_warn : color_error);
-            lv_opa_t opa = (g_state.bleConnecting && (millis() / 400) % 2) ? LV_OPA_40 : LV_OPA_COVER;
+            lv_color_t col = color_error;
+            lv_opa_t opa = LV_OPA_COVER;
+            if (g_state.runtime.bleConnected)
+            {
+                col = lv_color_hex(0x4DA3FF);
+            }
+            else if (g_state.runtime.bleConnecting)
+            {
+                col = color_warn;
+                opa = ((now_ms() / 400U) % 2U == 0U) ? LV_OPA_COVER : LV_OPA_40;
+            }
+
             lv_obj_set_style_text_color(g_ui.bleIcon, col, 0);
             lv_obj_set_style_opa(g_ui.bleIcon, opa, 0);
         }
     }
 
-    void update_badges()
+    void update_tile_selection()
     {
+        for (size_t i = 0; i < CARD_COUNT; ++i)
+        {
+            const bool selected = static_cast<int>(i) == g_state.selectedIndex;
+            TileWidgets &tile = g_ui.tiles[i];
+            if (!tile.button)
+            {
+                continue;
+            }
+
+            lv_obj_set_style_bg_color(tile.button, selected ? color_panel_alt : color_panel, 0);
+            lv_obj_set_style_border_color(tile.button, selected ? color_accent : color_border, 0);
+            lv_obj_set_style_border_width(tile.button, selected ? 2 : 1, 0);
+            lv_obj_set_style_text_color(tile.icon, selected ? color_accent : color_text, 0);
+            lv_obj_set_style_text_color(tile.label, selected ? color_text : color_muted, 0);
+        }
+    }
+
+    std::string hero_meta_text()
+    {
+        std::string meta;
+        switch (g_state.runtime.telemetrySource)
+        {
+        case UiTelemetrySource::SimHubUdp:
+            if (g_state.runtime.telemetryUsingFallback)
+            {
+                meta = "SimHub fallback";
+            }
+            else if (g_state.runtime.telemetryStale)
+            {
+                meta = g_state.runtime.telemetryTimestampMs == 0 ? "SimHub waiting" : "SimHub stale";
+            }
+            else
+            {
+                meta = "SimHub live";
+            }
+            break;
+        case UiTelemetrySource::Simulator:
+            meta = "Simulator";
+            break;
+        case UiTelemetrySource::Esp32Obd:
+        default:
+            meta = g_state.runtime.bleConnected ? "OBD connected" : (g_state.runtime.bleConnecting ? "OBD connecting" : "OBD offline");
+            break;
+        }
+
+        meta += "  |  ";
+        if (g_state.runtime.staConnected)
+        {
+            meta += "WiFi ";
+            meta += g_state.runtime.currentSsid.empty() ? "online" : g_state.runtime.currentSsid;
+        }
+        else if (g_state.runtime.apActive)
+        {
+            meta += "AP ";
+            meta += g_state.runtime.apIp.empty() ? "active" : g_state.runtime.apIp;
+        }
+        else if (g_state.runtime.staConnecting)
+        {
+            meta += "WiFi connecting";
+        }
+        else
+        {
+            meta += "WiFi offline";
+        }
+        return meta;
+    }
+
+    std::string hero_summary_text()
+    {
+        if (!g_state.runtime.ip.empty())
+        {
+            return "IP " + g_state.runtime.ip;
+        }
+        if (g_state.runtime.apActive)
+        {
+            return "AP clients: " + std::to_string(g_state.runtime.apClients);
+        }
+        if (g_state.runtime.staConnecting)
+        {
+            return "Connecting to vehicle network";
+        }
+        return "Ready for live telemetry";
+    }
+
+    void update_home_metrics()
+    {
+        if (g_ui.rpmValue)
+        {
+            lv_label_set_text_fmt(g_ui.rpmValue, "%d", g_state.runtime.rpm);
+            lv_obj_set_style_text_color(g_ui.rpmValue, g_state.runtime.shift ? color_warn : color_text, 0);
+        }
+        if (g_ui.rpmUnit)
+        {
+            lv_label_set_text(g_ui.rpmUnit, "RPM");
+        }
+        if (g_ui.heroMeta)
+        {
+            set_label_text(g_ui.heroMeta, hero_meta_text());
+        }
+        if (g_ui.heroSummary)
+        {
+            set_label_text(g_ui.heroSummary, hero_summary_text());
+        }
         if (g_ui.gearBadge)
         {
-            lv_label_set_text(g_ui.gearBadge, g_state.gear <= 0 ? "N" : String(g_state.gear).c_str());
+            set_label_text(g_ui.gearBadge, "G " + gear_text(g_state.runtime.gear));
+        }
+        if (g_ui.speedBadge)
+        {
+            set_label_text(g_ui.speedBadge, std::to_string(g_state.runtime.speedKmh) + " km/h");
         }
         if (g_ui.shiftBadge)
         {
-            lv_label_set_text(g_ui.shiftBadge, g_state.shift ? "SHIFT" : "Ready");
-            lv_obj_set_style_bg_color(g_ui.shiftBadge, g_state.shift ? color_warn : lv_color_hex(0x1C2028), 0);
-            lv_obj_set_style_text_color(g_ui.shiftBadge, g_state.shift ? lv_color_black() : lv_color_hex(0xE8EAED), 0);
+            lv_label_set_text(g_ui.shiftBadge, g_state.runtime.shift ? "SHIFT" : "Ready");
+            lv_obj_set_style_bg_color(g_ui.shiftBadge, g_state.runtime.shift ? color_warn : lv_color_hex(0x1D2430), 0);
+            lv_obj_set_style_text_color(g_ui.shiftBadge, g_state.runtime.shift ? lv_color_black() : color_text, 0);
         }
+    }
+
+    std::string format_vehicle_info()
+    {
+        std::string lines = "RPM: " + std::to_string(g_state.runtime.rpm);
+        lines += "\nGear: " + gear_text(g_state.runtime.gear);
+        lines += "\nSpeed: " + std::to_string(g_state.runtime.speedKmh) + " km/h";
+        lines += "\nThrottle: " + std::to_string(static_cast<int>(g_state.runtime.throttle * 100.0f)) + "%";
+        lines += "\nShift light: " + bool_text(g_state.runtime.shift, "active", "ready");
+        if (g_state.runtime.telemetrySource == UiTelemetrySource::SimHubUdp)
+        {
+            lines += "\nTelemetry: ";
+            if (g_state.runtime.telemetryUsingFallback)
+            {
+                lines += "SimHub fallback simulator";
+            }
+            else if (g_state.runtime.telemetryStale)
+            {
+                lines += g_state.runtime.telemetryTimestampMs == 0 ? "waiting for data" : "SimHub stale";
+            }
+            else
+            {
+                lines += "SimHub live";
+            }
+        }
+        else if (g_state.runtime.telemetrySource == UiTelemetrySource::Simulator)
+        {
+            lines += "\nTelemetry: internal simulator";
+        }
+        else
+        {
+            lines += "\nBLE: " + std::string(g_state.runtime.bleConnected ? "connected" : (g_state.runtime.bleConnecting ? "connecting" : "offline"));
+        }
+        return lines;
+    }
+
+    std::string format_wifi_info()
+    {
+        std::string lines = "Mode: ";
+        switch (g_state.runtime.wifiMode)
+        {
+        case UiWifiMode::StaOnly:
+            lines += "STA only";
+            break;
+        case UiWifiMode::StaWithApFallback:
+            lines += "STA + AP fallback";
+            break;
+        case UiWifiMode::ApOnly:
+        default:
+            lines += "AP only";
+            break;
+        }
+
+        if (g_state.runtime.staConnected)
+        {
+            lines += "\nConnected: " + g_state.runtime.currentSsid;
+            if (!g_state.runtime.staIp.empty())
+            {
+                lines += "\nIP: " + g_state.runtime.staIp;
+            }
+        }
+        else if (g_state.runtime.staConnecting)
+        {
+            lines += "\nConnecting to " + (g_state.runtime.currentSsid.empty() ? std::string("network") : g_state.runtime.currentSsid);
+        }
+        else if (!g_state.runtime.staLastError.empty())
+        {
+            lines += "\nLast error: " + g_state.runtime.staLastError;
+        }
+
+        if (g_state.runtime.apActive)
+        {
+            lines += "\nAP: " + (g_state.runtime.apIp.empty() ? std::string("active") : g_state.runtime.apIp);
+            lines += "\nClients: " + std::to_string(g_state.runtime.apClients);
+        }
+
+        if (!g_state.runtime.wifiScanResults.empty())
+        {
+            lines += "\n\nNearby:";
+            const size_t count = std::min<size_t>(g_state.runtime.wifiScanResults.size(), 5);
+            for (size_t i = 0; i < count; ++i)
+            {
+                const UiWifiScanItem &item = g_state.runtime.wifiScanResults[i];
+                lines += "\n- " + item.ssid + " (" + std::to_string(item.rssi) + " dBm)";
+            }
+        }
+
+        return lines;
+    }
+
+    std::string format_ble_info()
+    {
+        std::string lines = "Status: ";
+        lines += g_state.runtime.bleConnected ? "connected" : (g_state.runtime.bleConnecting ? "connecting" : "offline");
+
+        if (!g_state.runtime.bleScanResults.empty())
+        {
+            lines += "\n\nDevices:";
+            const size_t count = std::min<size_t>(g_state.runtime.bleScanResults.size(), 5);
+            for (size_t i = 0; i < count; ++i)
+            {
+                const UiBleScanItem &item = g_state.runtime.bleScanResults[i];
+                lines += "\n- " + item.name + " (" + item.address + ")";
+            }
+        }
+
+        return lines;
+    }
+
+    std::string format_settings_info()
+    {
+        std::string lines = "Brightness: " + std::to_string(g_state.runtime.settings.displayBrightness);
+        lines += "\nNight mode: " + std::string(g_state.runtime.settings.nightMode ? "on" : "off");
+        lines += "\nTutorial: " + std::string(g_state.runtime.settings.tutorialSeen ? "hidden" : "shown");
+        lines += "\nLast menu: " + std::string(current_card().title);
+        if (g_state.runtime.telemetrySource == UiTelemetrySource::SimHubUdp)
+        {
+            lines += "\nTelemetry: SimHub";
+        }
+        else if (g_state.runtime.telemetrySource == UiTelemetrySource::Simulator)
+        {
+            lines += "\nTelemetry: internal simulator";
+        }
+        else
+        {
+            lines += "\nTelemetry: ESP32 OBD";
+        }
+        return lines;
+    }
+
+    void clear_detail_refs()
+    {
+        g_ui.detail = nullptr;
+        g_ui.detailPanel = nullptr;
+        g_ui.detailValue = nullptr;
+        g_ui.detailNote = nullptr;
+        g_ui.brightnessSlider = nullptr;
+        g_ui.brightnessValue = nullptr;
+    }
+
+    void destroy_detail_screen()
+    {
+        if (g_ui.detail)
+        {
+            lv_obj_del(g_ui.detail);
+        }
+        clear_detail_refs();
+    }
+
+    void set_active_screen(UiScreenId screen)
+    {
+        g_state.activeScreen = screen;
+        g_state.inDetail = (screen != UiScreenId::Home);
+    }
+
+    void update_detail_views()
+    {
+        if (!g_state.inDetail)
+        {
+            return;
+        }
+
+        switch (g_state.activeScreen)
+        {
+        case UiScreenId::Vehicle:
+            if (g_ui.detailValue)
+            {
+                set_label_text(g_ui.detailValue, format_vehicle_info());
+            }
+            break;
+        case UiScreenId::Wifi:
+            if (g_ui.detailValue)
+            {
+                set_label_text(g_ui.detailValue, format_wifi_info());
+            }
+            break;
+        case UiScreenId::Bluetooth:
+            if (g_ui.detailValue)
+            {
+                set_label_text(g_ui.detailValue, format_ble_info());
+            }
+            break;
+        case UiScreenId::Settings:
+            if (g_ui.detailValue)
+            {
+                set_label_text(g_ui.detailValue, format_settings_info());
+            }
+            break;
+        case UiScreenId::Brightness:
+            if (g_ui.brightnessSlider)
+            {
+                const int currentValue = lv_slider_get_value(g_ui.brightnessSlider);
+                if (currentValue != g_state.runtime.settings.displayBrightness)
+                {
+                    lv_slider_set_value(g_ui.brightnessSlider, g_state.runtime.settings.displayBrightness, LV_ANIM_OFF);
+                }
+            }
+            if (g_ui.brightnessValue)
+            {
+                lv_label_set_text_fmt(g_ui.brightnessValue, "%d", g_state.runtime.settings.displayBrightness);
+            }
+            break;
+        case UiScreenId::Home:
+        default:
+            break;
+        }
+    }
+
+    void mark_interacted()
+    {
+        g_state.hasInteracted = true;
+        if (g_state.tutorialVisible && g_ui.tutorial)
+        {
+            g_state.tutorialVisible = false;
+            lv_obj_add_flag(g_ui.tutorial, LV_OBJ_FLAG_HIDDEN);
+            persist_settings();
+        }
+    }
+
+    void set_selected_index(int index)
+    {
+        g_state.selectedIndex = clamp_card_index(index);
+        sync_runtime_settings();
+        update_tile_selection();
     }
 
     void show_home();
@@ -315,158 +628,23 @@ namespace
 
     void on_detail_gesture(lv_event_t *e)
     {
-        if (lv_event_get_code(e) == LV_EVENT_GESTURE)
+        if (lv_event_get_code(e) != LV_EVENT_GESTURE)
         {
-            if (lv_indev_get_gesture_dir(lv_indev_get_act()) == LV_DIR_RIGHT)
-            {
-                show_home();
-            }
-        }
-    }
-
-    void attach_back_handler(lv_obj_t *obj)
-    {
-        lv_obj_add_event_cb(obj, on_detail_gesture, LV_EVENT_GESTURE, nullptr);
-    }
-
-    void scroll_to_card(int idx, lv_anim_enable_t anim)
-    {
-        if (!g_ui.carousel)
-            return;
-        const int count = static_cast<int>(CARD_COUNT);
-        idx = (idx % count + count) % count;
-        lv_obj_t *target = g_ui.cards[static_cast<size_t>(idx)].container;
-        if (target)
-        {
-            lv_obj_scroll_to_view(target, anim);
-        }
-    }
-
-    void open_detail(const CardDef &def);
-
-    void on_card_click(lv_event_t *e)
-    {
-        lv_obj_t *target = lv_event_get_target(e);
-        size_t idx = 0;
-        for (; idx < CARD_COUNT; ++idx)
-        {
-            if (g_ui.cards[idx].container == target)
-                break;
-        }
-
-        if (idx >= CARD_COUNT)
-            return;
-
-        mark_interacted();
-
-        if (static_cast<int>(idx) != g_state.cardIndex)
-        {
-            scroll_to_card(static_cast<int>(idx), LV_ANIM_ON);
             return;
         }
 
-        open_detail(CARDS[idx]);
-    }
-
-    void on_carousel_scroll(lv_event_t *e)
-    {
-        LV_UNUSED(e);
-        mark_interacted();
-        update_carousel_visuals();
-    }
-
-    void on_gesture(lv_event_t *e)
-    {
-        mark_interacted();
-        if (g_state.inDetail)
-            return;
-
-        lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_get_act());
-        if (dir == LV_DIR_LEFT)
+        lv_indev_t *indev = lv_indev_get_act();
+        if (indev && lv_indev_get_gesture_dir(indev) == LV_DIR_RIGHT)
         {
-            scroll_to_card(g_state.cardIndex + 1, LV_ANIM_ON);
-        }
-        else if (dir == LV_DIR_RIGHT)
-        {
-            scroll_to_card(g_state.cardIndex - 1, LV_ANIM_ON);
+            show_home();
         }
     }
 
-    lv_obj_t *make_detail_base(const char *title)
+    lv_obj_t *make_chip(lv_obj_t *parent)
     {
-        lv_obj_t *scr = lv_obj_create(nullptr);
-        lv_obj_remove_style_all(scr);
-        lv_obj_add_style(scr, &styleBg, 0);
-        lv_obj_set_size(scr, LV_PCT(100), LV_PCT(100));
-        lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_set_style_pad_all(scr, 12, 0);
-
-        lv_obj_add_event_cb(scr, on_detail_gesture, LV_EVENT_GESTURE, nullptr);
-
-        lv_obj_t *header = lv_obj_create(scr);
-        lv_obj_remove_style_all(header);
-        lv_obj_set_size(header, LV_PCT(100), LV_SIZE_CONTENT);
-        lv_obj_set_layout(header, LV_LAYOUT_FLEX);
-        lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(header, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-        lv_obj_t *titleLbl = lv_label_create(header);
-        lv_label_set_text(titleLbl, title);
-        lv_obj_set_style_text_font(titleLbl, &lv_font_montserrat_24, 0);
-
-        lv_obj_t *back = lv_label_create(header);
-        lv_label_set_text(back, LV_SYMBOL_LEFT " Back");
-        lv_obj_add_style(back, &styleMuted, 0);
-        lv_obj_add_event_cb(back, on_back, LV_EVENT_CLICKED, nullptr);
-        attach_back_handler(back);
-
-        lv_obj_t *body = lv_obj_create(scr);
-        lv_obj_remove_style_all(body);
-        lv_obj_set_size(body, LV_PCT(100), LV_PCT(100));
-        lv_obj_set_style_pad_top(body, 8, 0);
-        lv_obj_set_layout(body, LV_LAYOUT_FLEX);
-        lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(body, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-        lv_obj_set_style_pad_row(body, 10, 0);
-
-        return body;
-    }
-
-    CardWidgets make_icon_card(size_t idx)
-    {
-        const CardDef &def = CARDS[idx];
-        CardWidgets w{};
-
-        w.container = lv_obj_create(g_ui.carousel);
-        lv_obj_remove_style_all(w.container);
-        lv_obj_add_style(w.container, &styleCard, 0);
-        lv_obj_set_size(w.container, 128, 156);
-        lv_obj_set_style_bg_opa(w.container, LV_OPA_90, 0);
-        lv_obj_clear_flag(w.container, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_add_flag(w.container, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_layout(w.container, LV_LAYOUT_FLEX);
-        lv_obj_set_flex_flow(w.container, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(w.container, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_row(w.container, 10, 0);
-        lv_obj_add_event_cb(w.container, on_card_click, LV_EVENT_CLICKED, nullptr);
-
-        w.circle = lv_obj_create(w.container);
-        lv_obj_remove_style_all(w.circle);
-        lv_obj_add_style(w.circle, &styleCircle, 0);
-        lv_obj_set_size(w.circle, 84, 84);
-        lv_obj_clear_flag(w.circle, LV_OBJ_FLAG_SCROLLABLE);
-
-        w.icon = lv_label_create(w.circle);
-        lv_label_set_text(w.icon, def.symbol);
-        lv_obj_set_style_text_font(w.icon, &lv_font_montserrat_32, 0);
-        lv_obj_center(w.icon);
-
-        w.label = lv_label_create(w.container);
-        lv_label_set_text(w.label, def.title);
-        lv_obj_add_style(w.label, &styleMuted, 0);
-        lv_obj_set_style_text_font(w.label, &lv_font_montserrat_16, 0);
-
-        return w;
+        lv_obj_t *chip = lv_label_create(parent);
+        lv_obj_add_style(chip, &styleBadge, 0);
+        return chip;
     }
 
     void build_tutorial()
@@ -474,37 +652,75 @@ namespace
         g_ui.tutorial = lv_obj_create(g_ui.root);
         lv_obj_remove_style_all(g_ui.tutorial);
         lv_obj_add_style(g_ui.tutorial, &styleTutorial, 0);
-        lv_obj_set_width(g_ui.tutorial, LV_PCT(94));
-        lv_obj_align(g_ui.tutorial, LV_ALIGN_BOTTOM_MID, 0, -6);
-        lv_obj_set_style_text_color(g_ui.tutorial, color_muted, 0);
+        lv_obj_set_size(g_ui.tutorial, 264, 44);
+        lv_obj_align(g_ui.tutorial, LV_ALIGN_BOTTOM_MID, 0, -8);
         lv_obj_clear_flag(g_ui.tutorial, LV_OBJ_FLAG_SCROLLABLE);
 
         g_ui.tutorialLabel = lv_label_create(g_ui.tutorial);
-        lv_label_set_text(g_ui.tutorialLabel, "Swipe left/right to browse.\nTap the big icon to open.\nSwipe right in menus to go back.");
-        lv_label_set_long_mode(g_ui.tutorialLabel, LV_LABEL_LONG_WRAP);
+        lv_label_set_text(g_ui.tutorialLabel, "Tap a tile to open. Back returns home.");
         lv_obj_set_width(g_ui.tutorialLabel, LV_PCT(100));
+        lv_label_set_long_mode(g_ui.tutorialLabel, LV_LABEL_LONG_WRAP);
         lv_obj_add_style(g_ui.tutorialLabel, &styleMuted, 0);
+
+        if (!g_state.tutorialVisible)
+        {
+            lv_obj_add_flag(g_ui.tutorial, LV_OBJ_FLAG_HIDDEN);
+        }
     }
 
-    void build_page_indicator()
-    {
-        g_ui.pageIndicator = lv_obj_create(g_ui.root);
-        lv_obj_remove_style_all(g_ui.pageIndicator);
-        lv_obj_set_size(g_ui.pageIndicator, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        lv_obj_set_layout(g_ui.pageIndicator, LV_LAYOUT_FLEX);
-        lv_obj_set_flex_flow(g_ui.pageIndicator, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(g_ui.pageIndicator, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_column(g_ui.pageIndicator, 6, 0);
-        lv_obj_align(g_ui.pageIndicator, LV_ALIGN_BOTTOM_MID, 0, -36);
+    void open_detail(const CardDef &def);
 
-        for (size_t i = 0; i < CARD_COUNT; ++i)
+    void on_tile_click(lv_event_t *e)
+    {
+        lv_obj_t *target = lv_event_get_target(e);
+        for (size_t idx = 0; idx < CARD_COUNT; ++idx)
         {
-            lv_obj_t *dot = lv_obj_create(g_ui.pageIndicator);
-            lv_obj_remove_style_all(dot);
-            lv_obj_add_style(dot, &styleDot, 0);
-            lv_obj_set_size(dot, 8, 8);
-            lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
+            if (g_ui.tiles[idx].button == target)
+            {
+                mark_interacted();
+                set_selected_index(static_cast<int>(idx));
+                return;
+            }
         }
+    }
+
+    void on_tile_released(lv_event_t *e)
+    {
+        lv_obj_t *target = lv_event_get_target(e);
+        for (size_t idx = 0; idx < CARD_COUNT; ++idx)
+        {
+            if (g_ui.tiles[idx].button == target)
+            {
+                open_detail(CARDS[idx]);
+                return;
+            }
+        }
+    }
+
+    TileWidgets make_tile(lv_obj_t *parent, size_t idx)
+    {
+        const CardDef &def = CARDS[idx];
+        TileWidgets tile{};
+
+        tile.button = lv_btn_create(parent);
+        lv_obj_remove_style_all(tile.button);
+        lv_obj_add_style(tile.button, &styleTile, 0);
+        lv_obj_set_size(tile.button, 80, 62);
+        lv_obj_clear_flag(tile.button, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_event_cb(tile.button, on_tile_click, LV_EVENT_PRESSED, nullptr);
+        lv_obj_add_event_cb(tile.button, on_tile_released, LV_EVENT_CLICKED, nullptr);
+
+        tile.icon = lv_label_create(tile.button);
+        lv_label_set_text(tile.icon, def.symbol);
+        lv_obj_set_style_text_font(tile.icon, &lv_font_montserrat_24, 0);
+        lv_obj_align(tile.icon, LV_ALIGN_TOP_MID, 0, 4);
+
+        tile.label = lv_label_create(tile.button);
+        lv_label_set_text(tile.label, def.menuLabel);
+        lv_obj_set_style_text_font(tile.label, &lv_font_montserrat_16, 0);
+        lv_obj_align(tile.label, LV_ALIGN_BOTTOM_MID, 0, -6);
+
+        return tile;
     }
 
     void build_home(lv_disp_t *disp)
@@ -514,192 +730,299 @@ namespace
         lv_obj_add_style(g_ui.root, &styleBg, 0);
         lv_obj_set_size(g_ui.root, lv_disp_get_hor_res(disp), lv_disp_get_ver_res(disp));
         lv_obj_clear_flag(g_ui.root, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_add_event_cb(g_ui.root, on_gesture, LV_EVENT_GESTURE, nullptr);
 
-        g_ui.statusBar = lv_obj_create(g_ui.root);
-        lv_obj_remove_style_all(g_ui.statusBar);
-        lv_obj_set_size(g_ui.statusBar, LV_PCT(100), 26);
-        lv_obj_set_layout(g_ui.statusBar, LV_LAYOUT_FLEX);
-        lv_obj_set_flex_flow(g_ui.statusBar, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(g_ui.statusBar, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_left(g_ui.statusBar, 12, 0);
-        lv_obj_set_style_pad_right(g_ui.statusBar, 12, 0);
-        lv_obj_set_style_pad_top(g_ui.statusBar, 6, 0);
-        lv_obj_set_style_pad_bottom(g_ui.statusBar, 2, 0);
+        lv_obj_t *header = lv_obj_create(g_ui.root);
+        lv_obj_remove_style_all(header);
+        lv_obj_set_size(header, 264, 28);
+        lv_obj_align(header, LV_ALIGN_TOP_MID, 0, 8);
+        lv_obj_set_layout(header, LV_LAYOUT_FLEX);
+        lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(header, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
-        lv_obj_t *brand = lv_label_create(g_ui.statusBar);
+        lv_obj_t *brand = lv_label_create(header);
         lv_label_set_text(brand, "ShiftLight");
-        lv_obj_set_style_text_color(brand, lv_color_hex(0xE5E7EB), 0);
+        lv_obj_set_style_text_font(brand, &lv_font_montserrat_24, 0);
+        lv_obj_set_style_text_color(brand, color_text, 0);
 
-        lv_obj_t *statusIcons = lv_obj_create(g_ui.statusBar);
-        lv_obj_remove_style_all(statusIcons);
-        lv_obj_set_layout(statusIcons, LV_LAYOUT_FLEX);
-        lv_obj_set_flex_flow(statusIcons, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(statusIcons, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_column(statusIcons, 8, 0);
+        lv_obj_t *statusRow = lv_obj_create(header);
+        lv_obj_remove_style_all(statusRow);
+        lv_obj_set_layout(statusRow, LV_LAYOUT_FLEX);
+        lv_obj_set_flex_flow(statusRow, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(statusRow, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(statusRow, 8, 0);
 
-        g_ui.wifiIcon = lv_label_create(statusIcons);
+        g_ui.wifiIcon = lv_label_create(statusRow);
         lv_label_set_text(g_ui.wifiIcon, LV_SYMBOL_WIFI);
-        lv_obj_set_style_text_font(g_ui.wifiIcon, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(g_ui.wifiIcon, &lv_font_montserrat_24, 0);
 
-        g_ui.bleIcon = lv_label_create(statusIcons);
+        g_ui.bleIcon = lv_label_create(statusRow);
         lv_label_set_text(g_ui.bleIcon, LV_SYMBOL_BLUETOOTH);
-        lv_obj_set_style_text_font(g_ui.bleIcon, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_font(g_ui.bleIcon, &lv_font_montserrat_24, 0);
 
-        g_ui.title = lv_label_create(g_ui.root);
-        lv_label_set_text(g_ui.title, current_card().title);
-        lv_obj_set_style_text_font(g_ui.title, &lv_font_montserrat_24, 0);
-        lv_obj_set_style_text_color(g_ui.title, lv_color_hex(0xE5E7EB), 0);
-        lv_obj_align(g_ui.title, LV_ALIGN_TOP_MID, 0, 34);
+        lv_obj_t *hero = lv_obj_create(g_ui.root);
+        lv_obj_remove_style_all(hero);
+        lv_obj_add_style(hero, &stylePanelAccent, 0);
+        lv_obj_set_size(hero, 264, 170);
+        lv_obj_align(hero, LV_ALIGN_TOP_MID, 0, 44);
+        lv_obj_clear_flag(hero, LV_OBJ_FLAG_SCROLLABLE);
 
-        g_ui.carousel = lv_obj_create(g_ui.root);
-        lv_obj_remove_style_all(g_ui.carousel);
-        lv_obj_set_size(g_ui.carousel, LV_PCT(100), LV_PCT(64));
-        lv_obj_set_style_pad_hor(g_ui.carousel, 18, 0);
-        lv_obj_set_style_pad_ver(g_ui.carousel, 6, 0);
-        lv_obj_set_layout(g_ui.carousel, LV_LAYOUT_FLEX);
-        lv_obj_set_flex_flow(g_ui.carousel, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(g_ui.carousel, LV_FLEX_ALIGN_SPACE_AROUND, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_column(g_ui.carousel, 18, 0);
-        lv_obj_set_scroll_dir(g_ui.carousel, LV_DIR_HOR);
-        lv_obj_set_scroll_snap_x(g_ui.carousel, LV_SCROLL_SNAP_CENTER);
-        lv_obj_set_scrollbar_mode(g_ui.carousel, LV_SCROLLBAR_MODE_OFF);
-        lv_obj_add_flag(g_ui.carousel, LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SNAPPABLE);
-        lv_obj_add_event_cb(g_ui.carousel, on_carousel_scroll, LV_EVENT_SCROLL, nullptr);
+        g_ui.heroMeta = lv_label_create(hero);
+        lv_obj_add_style(g_ui.heroMeta, &styleMuted, 0);
+        lv_obj_set_width(g_ui.heroMeta, 236);
+        lv_label_set_long_mode(g_ui.heroMeta, LV_LABEL_LONG_WRAP);
+        lv_obj_align(g_ui.heroMeta, LV_ALIGN_TOP_LEFT, 0, 0);
 
-        g_ui.cards.fill(CardWidgets{});
+        g_ui.rpmValue = lv_label_create(hero);
+        lv_obj_set_style_text_font(g_ui.rpmValue, &lv_font_montserrat_48, 0);
+        lv_obj_set_style_text_color(g_ui.rpmValue, color_text, 0);
+        lv_obj_align(g_ui.rpmValue, LV_ALIGN_TOP_LEFT, 0, 42);
+
+        g_ui.rpmUnit = lv_label_create(hero);
+        lv_obj_add_style(g_ui.rpmUnit, &styleMuted, 0);
+        lv_obj_set_style_text_font(g_ui.rpmUnit, &lv_font_montserrat_16, 0);
+        lv_obj_align(g_ui.rpmUnit, LV_ALIGN_TOP_RIGHT, 0, 64);
+
+        g_ui.heroSummary = lv_label_create(hero);
+        lv_obj_add_style(g_ui.heroSummary, &styleMuted, 0);
+        lv_obj_set_width(g_ui.heroSummary, 236);
+        lv_label_set_long_mode(g_ui.heroSummary, LV_LABEL_LONG_WRAP);
+        lv_obj_align(g_ui.heroSummary, LV_ALIGN_TOP_LEFT, 0, 96);
+
+        lv_obj_t *badgeRow = lv_obj_create(hero);
+        lv_obj_remove_style_all(badgeRow);
+        lv_obj_set_size(badgeRow, 236, LV_SIZE_CONTENT);
+        lv_obj_align(badgeRow, LV_ALIGN_BOTTOM_MID, 0, -2);
+        lv_obj_set_layout(badgeRow, LV_LAYOUT_FLEX);
+        lv_obj_set_flex_flow(badgeRow, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(badgeRow, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+        g_ui.gearBadge = make_chip(badgeRow);
+        g_ui.speedBadge = make_chip(badgeRow);
+        g_ui.shiftBadge = make_chip(badgeRow);
+
+        lv_obj_t *menuLabel = lv_label_create(g_ui.root);
+        lv_label_set_text(menuLabel, "Quick Menu");
+        lv_obj_set_style_text_font(menuLabel, &lv_font_montserrat_24, 0);
+        lv_obj_set_style_text_color(menuLabel, color_text, 0);
+        lv_obj_align(menuLabel, LV_ALIGN_TOP_LEFT, 12, 226);
+
+        lv_obj_t *tileGrid = lv_obj_create(g_ui.root);
+        lv_obj_remove_style_all(tileGrid);
+        lv_obj_set_size(tileGrid, 264, 140);
+        lv_obj_align(tileGrid, LV_ALIGN_TOP_MID, 0, 262);
+        lv_obj_set_layout(tileGrid, LV_LAYOUT_FLEX);
+        lv_obj_set_flex_flow(tileGrid, LV_FLEX_FLOW_ROW_WRAP);
+        lv_obj_set_flex_align(tileGrid, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+        lv_obj_set_style_pad_row(tileGrid, 10, 0);
+        lv_obj_set_style_pad_column(tileGrid, 12, 0);
+        lv_obj_clear_flag(tileGrid, LV_OBJ_FLAG_SCROLLABLE);
+
+        g_ui.tiles.fill(TileWidgets{});
         for (size_t i = 0; i < CARD_COUNT; ++i)
         {
-            g_ui.cards[i] = make_icon_card(i);
+            g_ui.tiles[i] = make_tile(tileGrid, i);
         }
 
-        g_ui.gearBadge = lv_label_create(g_ui.root);
-        lv_obj_add_style(g_ui.gearBadge, &styleBadge, 0);
-        lv_obj_align(g_ui.gearBadge, LV_ALIGN_BOTTOM_LEFT, 8, -8);
-
-        g_ui.shiftBadge = lv_label_create(g_ui.root);
-        lv_obj_add_style(g_ui.shiftBadge, &styleBadge, 0);
-        lv_obj_align(g_ui.shiftBadge, LV_ALIGN_BOTTOM_RIGHT, -8, -8);
-
-        build_page_indicator();
         build_tutorial();
-
-        update_carousel_visuals();
         update_status_icons();
-        update_badges();
-        update_page_indicator();
+        update_home_metrics();
+        update_tile_selection();
+    }
+
+    lv_obj_t *make_detail_base(const char *title)
+    {
+        destroy_detail_screen();
+
+        lv_obj_t *scr = lv_obj_create(nullptr);
+        lv_obj_remove_style_all(scr);
+        lv_obj_add_style(scr, &styleBg, 0);
+        lv_obj_set_size(scr, LV_PCT(100), LV_PCT(100));
+        lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_event_cb(scr, on_detail_gesture, LV_EVENT_GESTURE, nullptr);
+
+        lv_obj_t *header = lv_obj_create(scr);
+        lv_obj_remove_style_all(header);
+        lv_obj_set_size(header, 264, 40);
+        lv_obj_align(header, LV_ALIGN_TOP_MID, 0, 10);
+
+        lv_obj_t *backBtn = lv_btn_create(header);
+        lv_obj_remove_style_all(backBtn);
+        lv_obj_add_style(backBtn, &styleBackButton, 0);
+        lv_obj_set_size(backBtn, 72, 36);
+        lv_obj_align(backBtn, LV_ALIGN_LEFT_MID, 0, 0);
+        lv_obj_add_event_cb(backBtn, on_back, LV_EVENT_CLICKED, nullptr);
+
+        lv_obj_t *backLabel = lv_label_create(backBtn);
+        lv_label_set_text(backLabel, LV_SYMBOL_LEFT " Back");
+        lv_obj_center(backLabel);
+
+        lv_obj_t *titleLabel = lv_label_create(header);
+        lv_label_set_text(titleLabel, title);
+        lv_obj_set_style_text_font(titleLabel, &lv_font_montserrat_24, 0);
+        lv_obj_set_style_text_color(titleLabel, color_text, 0);
+        lv_obj_align(titleLabel, LV_ALIGN_RIGHT_MID, 0, 0);
+
+        lv_obj_t *panel = lv_obj_create(scr);
+        lv_obj_remove_style_all(panel);
+        lv_obj_add_style(panel, &stylePanel, 0);
+        lv_obj_set_size(panel, 264, 368);
+        lv_obj_align(panel, LV_ALIGN_TOP_MID, 0, 60);
+        lv_obj_set_scroll_dir(panel, LV_DIR_VER);
+        lv_obj_set_scrollbar_mode(panel, LV_SCROLLBAR_MODE_AUTO);
+        lv_obj_set_layout(panel, LV_LAYOUT_FLEX);
+        lv_obj_set_flex_flow(panel, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(panel, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+        lv_obj_set_style_pad_row(panel, 10, 0);
+
+        g_ui.detail = scr;
+        g_ui.detailPanel = panel;
+        return panel;
     }
 
     void show_home()
     {
         if (!g_ui.root)
+        {
             return;
+        }
+
         lv_disp_load_scr(g_ui.root);
-        g_state.inDetail = false;
-        update_carousel_visuals();
+        set_active_screen(UiScreenId::Home);
         update_status_icons();
-        update_badges();
-        update_page_indicator();
+        update_home_metrics();
+        update_tile_selection();
     }
 
     void open_brightness()
     {
-        g_ui.detailContent = make_detail_base("Brightness");
-        g_ui.detail = lv_obj_get_parent(g_ui.detailContent);
+        lv_obj_t *panel = make_detail_base("Brightness");
 
-        lv_obj_t *slider = lv_slider_create(g_ui.detailContent);
-        lv_obj_set_width(slider, LV_PCT(100));
-        lv_slider_set_range(slider, 10, 255);
-        lv_slider_set_value(slider, cfg.displayBrightness, LV_ANIM_OFF);
-        g_ui.brightnessSlider = slider;
+        lv_obj_t *title = lv_label_create(panel);
+        lv_label_set_text(title, "Display brightness");
+        lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0);
+        lv_obj_set_style_text_color(title, color_text, 0);
 
-        lv_obj_t *value = lv_label_create(g_ui.detailContent);
-        lv_obj_add_style(value, &styleMuted, 0);
-        lv_label_set_text_fmt(value, "%d", cfg.displayBrightness);
-        g_ui.brightnessValue = value;
+        g_ui.brightnessValue = lv_label_create(panel);
+        lv_obj_set_style_text_font(g_ui.brightnessValue, &lv_font_montserrat_48, 0);
+        lv_obj_set_style_text_color(g_ui.brightnessValue, color_accent, 0);
+        lv_label_set_text_fmt(g_ui.brightnessValue, "%d", g_state.runtime.settings.displayBrightness);
 
-        lv_obj_add_event_cb(slider, [](lv_event_t *e)
+        g_ui.brightnessSlider = lv_slider_create(panel);
+        lv_obj_set_width(g_ui.brightnessSlider, 240);
+        lv_slider_set_range(g_ui.brightnessSlider, 10, 255);
+        lv_slider_set_value(g_ui.brightnessSlider, g_state.runtime.settings.displayBrightness, LV_ANIM_OFF);
+
+        lv_obj_add_event_cb(g_ui.brightnessSlider, [](lv_event_t *e)
                             {
-            int val = lv_slider_get_value(static_cast<lv_obj_t *>(lv_event_get_target(e)));
-            cfg.displayBrightness = val;
+            const int value = lv_slider_get_value(static_cast<lv_obj_t *>(lv_event_get_target(e)));
+            g_state.runtime.settings.displayBrightness = value;
             if (g_ui.brightnessValue)
             {
-                lv_label_set_text_fmt(g_ui.brightnessValue, "%d", val);
+                lv_label_set_text_fmt(g_ui.brightnessValue, "%d", value);
             }
             if (g_hooks.setBrightness)
             {
-                g_hooks.setBrightness(static_cast<uint8_t>(val));
+                g_hooks.setBrightness(static_cast<uint8_t>(value), g_hooks.userData);
             } }, LV_EVENT_VALUE_CHANGED, nullptr);
 
-        lv_obj_add_event_cb(slider, [](lv_event_t *)
-                            { saveConfig(); }, LV_EVENT_RELEASED, nullptr);
+        lv_obj_add_event_cb(g_ui.brightnessSlider, [](lv_event_t *)
+                            { persist_settings(); }, LV_EVENT_RELEASED, nullptr);
+
+        g_ui.detailNote = lv_label_create(panel);
+        lv_obj_set_width(g_ui.detailNote, 240);
+        lv_label_set_long_mode(g_ui.detailNote, LV_LABEL_LONG_WRAP);
+        lv_obj_add_style(g_ui.detailNote, &styleMuted, 0);
+        lv_label_set_text(g_ui.detailNote, "The ESP32 panel brightness and the simulator preview use the same shared value.");
 
         lv_disp_load_scr(g_ui.detail);
-        g_state.inDetail = true;
+        set_active_screen(UiScreenId::Brightness);
+        update_detail_views();
     }
 
     void open_vehicle()
     {
-        g_ui.detailContent = make_detail_base("Vehicle");
-        g_ui.detail = lv_obj_get_parent(g_ui.detailContent);
+        lv_obj_t *panel = make_detail_base("Vehicle");
 
-        lv_obj_t *info = lv_label_create(g_ui.detailContent);
-        lv_obj_add_style(info, &styleMuted, 0);
-        lv_label_set_text_fmt(info, "Gear: %s\nShift: %s\nRPM: %s\nSpeed: %s",
-                              g_state.gear <= 0 ? "N" : String(g_state.gear).c_str(),
-                              g_state.shift ? "ON" : "off",
-                              "n/a", // TODO: feed live RPM from core module
-                              "n/a"); // TODO: feed live speed from core module
+        g_ui.detailValue = lv_label_create(panel);
+        lv_obj_set_width(g_ui.detailValue, 240);
+        lv_label_set_long_mode(g_ui.detailValue, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_font(g_ui.detailValue, &lv_font_montserrat_24, 0);
+        lv_obj_set_style_text_color(g_ui.detailValue, color_text, 0);
+
+        g_ui.detailNote = lv_label_create(panel);
+        lv_obj_set_width(g_ui.detailNote, 240);
+        lv_label_set_long_mode(g_ui.detailNote, LV_LABEL_LONG_WRAP);
+        lv_obj_add_style(g_ui.detailNote, &styleMuted, 0);
+        lv_label_set_text(g_ui.detailNote, "Live telemetry is shared between ESP32 and simulator. This view is intended for quick validation during UI work.");
 
         lv_disp_load_scr(g_ui.detail);
-        g_state.inDetail = true;
+        set_active_screen(UiScreenId::Vehicle);
+        update_detail_views();
     }
 
     void open_wifi()
     {
-        g_ui.detailContent = make_detail_base("WiFi");
-        g_ui.detail = lv_obj_get_parent(g_ui.detailContent);
+        lv_obj_t *panel = make_detail_base("WiFi");
 
-        lv_obj_t *status = lv_label_create(g_ui.detailContent);
-        lv_label_set_text(status, "Scan nearby networks or configure via WebUI.");
-        lv_obj_add_style(status, &styleMuted, 0);
+        g_ui.detailValue = lv_label_create(panel);
+        lv_obj_set_width(g_ui.detailValue, 240);
+        lv_label_set_long_mode(g_ui.detailValue, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_color(g_ui.detailValue, color_text, 0);
 
-        g_ui.wifiList = lv_label_create(g_ui.detailContent);
-        lv_obj_add_style(g_ui.wifiList, &styleMuted, 0);
-        lv_label_set_text(g_ui.wifiList, "No scan yet");
+        g_ui.detailNote = lv_label_create(panel);
+        lv_obj_set_width(g_ui.detailNote, 240);
+        lv_label_set_long_mode(g_ui.detailNote, LV_LABEL_LONG_WRAP);
+        lv_obj_add_style(g_ui.detailNote, &styleMuted, 0);
+        lv_label_set_text(g_ui.detailNote, "Use the Web UI on hardware for configuration. The simulator exposes representative connection states and scan results.");
 
         lv_disp_load_scr(g_ui.detail);
-        g_state.inDetail = true;
+        set_active_screen(UiScreenId::Wifi);
+        update_detail_views();
     }
 
     void open_ble()
     {
-        g_ui.detailContent = make_detail_base("Bluetooth");
-        g_ui.detail = lv_obj_get_parent(g_ui.detailContent);
+        lv_obj_t *panel = make_detail_base("Bluetooth");
 
-        g_ui.bleList = lv_label_create(g_ui.detailContent);
-        lv_obj_add_style(g_ui.bleList, &styleMuted, 0);
-        lv_label_set_text(g_ui.bleList, "OBD dongle pairing via phone");
+        g_ui.detailValue = lv_label_create(panel);
+        lv_obj_set_width(g_ui.detailValue, 240);
+        lv_label_set_long_mode(g_ui.detailValue, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_color(g_ui.detailValue, color_text, 0);
+
+        g_ui.detailNote = lv_label_create(panel);
+        lv_obj_set_width(g_ui.detailNote, 240);
+        lv_label_set_long_mode(g_ui.detailNote, LV_LABEL_LONG_WRAP);
+        lv_obj_add_style(g_ui.detailNote, &styleMuted, 0);
+        lv_label_set_text(g_ui.detailNote, "The simulator keeps BLE behavior deterministic, which makes UI states and later tests reproducible.");
 
         lv_disp_load_scr(g_ui.detail);
-        g_state.inDetail = true;
+        set_active_screen(UiScreenId::Bluetooth);
+        update_detail_views();
     }
 
     void open_settings()
     {
-        g_ui.detailContent = make_detail_base("Settings");
-        g_ui.detail = lv_obj_get_parent(g_ui.detailContent);
+        lv_obj_t *panel = make_detail_base("Settings");
 
-        lv_obj_t *txt = lv_label_create(g_ui.detailContent);
-        lv_label_set_text(txt, "ShiftLight / RpmCounter\nVersion: debug build\nSwipe right to go back");
-        lv_obj_add_style(txt, &styleMuted, 0);
+        g_ui.detailValue = lv_label_create(panel);
+        lv_obj_set_width(g_ui.detailValue, 240);
+        lv_label_set_long_mode(g_ui.detailValue, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_color(g_ui.detailValue, color_text, 0);
+
+        g_ui.detailNote = lv_label_create(panel);
+        lv_obj_set_width(g_ui.detailNote, 240);
+        lv_label_set_long_mode(g_ui.detailNote, LV_LABEL_LONG_WRAP);
+        lv_obj_add_style(g_ui.detailNote, &styleMuted, 0);
+        lv_label_set_text(g_ui.detailNote, "This page summarizes the UI-facing settings. Extend the shared runtime state here when additional simulator controls are needed.");
 
         lv_disp_load_scr(g_ui.detail);
-        g_state.inDetail = true;
+        set_active_screen(UiScreenId::Settings);
+        update_detail_views();
     }
 
     void open_detail(const CardDef &def)
     {
+        mark_interacted();
         switch (def.screen)
         {
         case CardScreen::Brightness:
@@ -720,94 +1043,149 @@ namespace
             break;
         }
     }
+
+    void delete_logo_overlay(lv_timer_t *timer)
+    {
+        lv_obj_t *overlay = static_cast<lv_obj_t *>(timer->user_data);
+        if (overlay)
+        {
+            lv_obj_del(overlay);
+        }
+        if (g_ui.logoOverlay == overlay)
+        {
+            g_ui.logoOverlay = nullptr;
+        }
+        lv_timer_del(timer);
+    }
 } // namespace
 
-void ui_s3_init(lv_disp_t *disp, const UiDisplayHooks &hooks)
+void ui_s3_init(lv_disp_t *disp, const UiDisplayHooks &hooks, const UiRuntimeState &initialState)
 {
     g_hooks = hooks;
+    g_ui = UiRefs{};
+    g_state = UiState{};
+    g_state.runtime = initialState;
+    g_state.selectedIndex = clamp_card_index(initialState.settings.lastMenuIndex);
+    g_state.tutorialVisible = !initialState.settings.tutorialSeen;
+    g_ui.disp = disp;
+    sync_runtime_settings();
+
     apply_styles();
     build_home(disp);
     lv_disp_load_scr(g_ui.root);
+    set_active_screen(UiScreenId::Home);
+    update_status_icons();
+    update_home_metrics();
+    update_tile_selection();
 }
 
-void ui_s3_loop(const WifiStatus &wifiStatus, bool bleConnected, bool bleConnecting)
+void ui_s3_loop(const UiRuntimeState &state)
 {
-    g_state.lastWifi = wifiStatus;
-    g_state.bleConnected = bleConnected;
-    g_state.bleConnecting = bleConnecting;
-
+    apply_runtime_state(state);
     update_status_icons();
-    update_badges();
-
-    if (g_state.inDetail && g_ui.wifiList)
-    {
-        if (wifiStatus.scanResults.empty())
-        {
-            lv_label_set_text(g_ui.wifiList, "Nearby networks: none");
-        }
-        else
-        {
-            String lines = "Nearby:\n";
-            size_t count = std::min<size_t>(wifiStatus.scanResults.size(), 5);
-            for (size_t i = 0; i < count; ++i)
-            {
-                lines += "- ";
-                lines += wifiStatus.scanResults[i].ssid;
-                lines += " (";
-                lines += wifiStatus.scanResults[i].rssi;
-                lines += "dBm)\n";
-            }
-            lv_label_set_text(g_ui.wifiList, lines.c_str());
-        }
-    }
-
-    if (g_state.inDetail && g_ui.bleList)
-    {
-        const auto &res = getBleScanResults();
-        if (res.empty())
-        {
-            lv_label_set_text(g_ui.bleList, "Scan via phone to pair OBD dongle");
-        }
-        else
-        {
-            String lines = "Nearby:\n";
-            size_t count = std::min<size_t>(res.size(), 5);
-            for (size_t i = 0; i < count; ++i)
-            {
-                lines += "- ";
-                lines += res[i].name;
-                lines += " (";
-                lines += res[i].address;
-                lines += ")\n";
-            }
-            lv_label_set_text(g_ui.bleList, lines.c_str());
-        }
-    }
+    update_home_metrics();
+    update_tile_selection();
+    update_detail_views();
 }
 
 void ui_s3_set_gear(int gear)
 {
-    g_state.gear = gear;
-    update_badges();
+    g_state.runtime.gear = gear;
+    update_home_metrics();
+    update_detail_views();
 }
 
 void ui_s3_set_shiftlight(bool active)
 {
-    g_state.shift = active;
-    update_badges();
+    g_state.runtime.shift = active;
+    update_home_metrics();
+    update_detail_views();
 }
 
 void ui_s3_show_logo()
 {
-    if (!g_ui.root)
-        return;
-    if (!g_ui.logoOverlay)
+    if (g_ui.logoOverlay)
     {
-        g_ui.logoOverlay = lv_label_create(g_ui.root);
-        lv_label_set_text(g_ui.logoOverlay, "ShiftLight");
-        lv_obj_set_style_text_font(g_ui.logoOverlay, &lv_font_montserrat_32, 0);
-        lv_obj_align(g_ui.logoOverlay, LV_ALIGN_CENTER, 0, 0);
-        lv_obj_set_style_text_color(g_ui.logoOverlay, lv_color_hex(0xE5E7EB), 0);
+        lv_obj_del(g_ui.logoOverlay);
+        g_ui.logoOverlay = nullptr;
     }
-    lv_obj_clear_flag(g_ui.logoOverlay, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_t *overlay = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(overlay);
+    lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(overlay, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(overlay, LV_OPA_70, 0);
+    lv_obj_clear_flag(overlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *panel = lv_obj_create(overlay);
+    lv_obj_remove_style_all(panel);
+    lv_obj_add_style(panel, &stylePanelAccent, 0);
+    lv_obj_set_size(panel, 200, 104);
+    lv_obj_center(panel);
+
+    lv_obj_t *title = lv_label_create(panel);
+    lv_label_set_text(title, "ShiftLight");
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_32, 0);
+    lv_obj_set_style_text_color(title, color_text, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 12);
+
+    lv_obj_t *subtitle = lv_label_create(panel);
+    lv_label_set_text(subtitle, "UI preview");
+    lv_obj_add_style(subtitle, &styleMuted, 0);
+    lv_obj_align(subtitle, LV_ALIGN_BOTTOM_MID, 0, -14);
+
+    g_ui.logoOverlay = overlay;
+    lv_timer_t *timer = lv_timer_create(delete_logo_overlay, 1200, overlay);
+    lv_timer_set_repeat_count(timer, 1);
+}
+
+void ui_s3_debug_dispatch(UiDebugAction action)
+{
+    switch (action)
+    {
+    case UiDebugAction::PreviousCard:
+        if (g_state.inDetail)
+        {
+            show_home();
+        }
+        else
+        {
+            set_selected_index(g_state.selectedIndex - 1);
+        }
+        break;
+    case UiDebugAction::NextCard:
+        if (!g_state.inDetail)
+        {
+            set_selected_index(g_state.selectedIndex + 1);
+        }
+        break;
+    case UiDebugAction::OpenSelectedCard:
+        if (!g_state.inDetail)
+        {
+            open_detail(current_card());
+        }
+        break;
+    case UiDebugAction::GoHome:
+        show_home();
+        break;
+    case UiDebugAction::ShowLogo:
+        ui_s3_show_logo();
+        break;
+    }
+}
+
+UiDebugSnapshot ui_s3_debug_snapshot()
+{
+    UiDebugSnapshot snapshot{};
+    snapshot.activeScreen = g_state.activeScreen;
+    snapshot.selectedCardIndex = g_state.selectedIndex;
+    snapshot.inDetail = g_state.inDetail;
+    snapshot.displayBrightness = g_state.runtime.settings.displayBrightness;
+    snapshot.gear = g_state.runtime.gear;
+    snapshot.rpm = g_state.runtime.rpm;
+    snapshot.speedKmh = g_state.runtime.speedKmh;
+    snapshot.shift = g_state.runtime.shift;
+    snapshot.bleConnected = g_state.runtime.bleConnected;
+    snapshot.staConnected = g_state.runtime.staConnected;
+    return snapshot;
 }

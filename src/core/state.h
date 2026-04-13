@@ -37,6 +37,7 @@ extern int g_currentRpm;
 extern int g_maxSeenRpm;
 extern int g_vehicleSpeedKmh;
 extern int g_estimatedGear;
+extern bool g_shiftBlinkActive;
 
 extern unsigned long g_lastRpmRequest;
 

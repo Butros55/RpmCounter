@@ -7,6 +7,8 @@
 #include <Adafruit_ST7789.h>
 #include <math.h>
 
+#include "core/state.h"
+
 constexpr int TFT_MOSI = 23;
 constexpr int TFT_SCLK = 18;
 constexpr int TFT_CS = 15;
@@ -145,6 +147,7 @@ void displayClear()
     if (!g_displayInitialized)
         return;
 
+    g_shiftBlinkActive = false;
     tft.fillScreen(ST77XX_BLACK);
 }
 
@@ -212,6 +215,7 @@ void displaySetShiftBlink(bool active)
         return;
 
     g_displayBlink = active;
+    g_shiftBlinkActive = active;
     renderGearDisplay();
 }
 
