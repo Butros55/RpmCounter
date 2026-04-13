@@ -6,6 +6,8 @@
 #include "web/web_ui.h"
 #include "hardware/led_bar.h"
 #include "hardware/logo_anim.h"
+#include "telemetry/telemetry_manager.h"
+#include "telemetry/usb_sim_bridge.h"
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
 #include "hardware/display_s3.h"
 #else
@@ -37,6 +39,9 @@ void setup()
     Serial.println("[BOOT] Setting up WiFi...");
     setupWifiFromConfig(cfg);
 
+    Serial.println("[BOOT] Initializing telemetry...");
+    initTelemetry();
+
     Serial.println("[BOOT] Starting WebServer...");
     initWebUi();
 
@@ -65,7 +70,9 @@ void loop()
     display_s3_loop();
 #endif
     webUiLoop();
+    usbSimBridgeLoop();
     wifiLoop();
+    telemetryLoop();
     bleObdLoop();
     ledBarLoop();
     logoAnimLoop();

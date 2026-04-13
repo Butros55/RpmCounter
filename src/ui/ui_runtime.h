@@ -18,7 +18,11 @@ enum class UiScreenId : uint8_t
     Vehicle,
     Wifi,
     Bluetooth,
-    Settings
+    Settings,
+    Focus,
+    DisplayPicker,
+    SourcePicker,
+    WebLink
 };
 
 enum class UiDebugAction : uint8_t
@@ -34,7 +38,32 @@ enum class UiTelemetrySource : uint8_t
 {
     Esp32Obd = 0,
     Simulator,
-    SimHubUdp
+    SimHubNetwork,
+    UsbBridge
+};
+
+enum class UiTelemetryPreference : uint8_t
+{
+    Auto = 0,
+    Obd,
+    SimHub
+};
+
+enum class UiDisplayFocusMetric : uint8_t
+{
+    Rpm = 0,
+    Gear,
+    Speed
+};
+
+enum class UiUsbState : uint8_t
+{
+    Disabled = 0,
+    Disconnected,
+    WaitingForBridge,
+    WaitingForData,
+    Live,
+    Error
 };
 
 struct UiSettings
@@ -43,6 +72,8 @@ struct UiSettings
     bool tutorialSeen = false;
     int lastMenuIndex = 0;
     bool nightMode = true;
+    UiTelemetryPreference telemetryPreference = UiTelemetryPreference::Auto;
+    UiDisplayFocusMetric displayFocus = UiDisplayFocusMetric::Rpm;
 };
 
 struct UiWifiScanItem
@@ -83,8 +114,18 @@ struct UiRuntimeState
     UiTelemetrySource telemetrySource = UiTelemetrySource::Esp32Obd;
     bool telemetryStale = false;
     bool telemetryUsingFallback = false;
+    bool simHubConfigured = false;
+    bool simHubReachable = false;
     float throttle = 0.0f;
     uint32_t telemetryTimestampMs = 0;
+    std::string simHubEndpoint;
+    UiUsbState usbState = UiUsbState::Disabled;
+    bool usbConnected = false;
+    bool usbBridgeConnected = false;
+    bool wifiSuppressed = false;
+    bool bleSuppressed = false;
+    std::string usbHost;
+    std::string usbError;
 
     int gear = 0;
     int rpm = 0;
@@ -105,6 +146,7 @@ struct UiDebugSnapshot
     bool bleConnected = false;
     bool staConnected = false;
     UiTelemetrySource telemetrySource = UiTelemetrySource::Esp32Obd;
+    UiTelemetryPreference telemetryPreference = UiTelemetryPreference::Auto;
     bool telemetryStale = false;
     bool telemetryUsingFallback = false;
 };

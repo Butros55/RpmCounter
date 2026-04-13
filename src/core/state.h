@@ -25,6 +25,34 @@ struct BleDeviceInfo
     String address;
 };
 
+enum class ActiveTelemetrySource : uint8_t
+{
+    None = 0,
+    Obd,
+    SimHubNetwork,
+    UsbSim
+};
+
+enum class SimHubConnectionState : uint8_t
+{
+    Disabled = 0,
+    WaitingForHost,
+    WaitingForNetwork,
+    WaitingForData,
+    Live,
+    Error
+};
+
+enum class UsbBridgeConnectionState : uint8_t
+{
+    Disabled = 0,
+    Disconnected,
+    WaitingForBridge,
+    WaitingForData,
+    Live,
+    Error
+};
+
 extern BleClientHandle *g_client;
 extern BleRemoteCharacteristicHandle *g_charWrite;
 extern BleRemoteCharacteristicHandle *g_charNotify;
@@ -37,7 +65,39 @@ extern int g_currentRpm;
 extern int g_maxSeenRpm;
 extern int g_vehicleSpeedKmh;
 extern int g_estimatedGear;
+extern float g_currentThrottle;
+extern bool g_pitLimiterActive;
 extern bool g_shiftBlinkActive;
+extern ActiveTelemetrySource g_activeTelemetrySource;
+
+extern int g_obdCurrentRpm;
+extern int g_obdMaxSeenRpm;
+extern int g_obdVehicleSpeedKmh;
+extern int g_obdEstimatedGear;
+extern unsigned long g_lastObdTelemetryMs;
+
+extern int g_simHubCurrentRpm;
+extern int g_simHubMaxSeenRpm;
+extern int g_simHubVehicleSpeedKmh;
+extern int g_simHubGear;
+extern float g_simHubThrottle;
+extern bool g_simHubPitLimiterActive;
+extern unsigned long g_lastSimHubTelemetryMs;
+extern bool g_simHubEverReceived;
+extern bool g_simHubReachable;
+extern bool g_simHubWaitingForData;
+extern SimHubConnectionState g_simHubConnectionState;
+
+extern bool g_usbSerialConnected;
+extern bool g_usbBridgeConnected;
+extern bool g_usbBridgeWebActive;
+extern bool g_usbTelemetryEverReceived;
+extern unsigned long g_lastUsbBridgeHeartbeatMs;
+extern unsigned long g_lastUsbTelemetryMs;
+extern unsigned long g_lastUsbRpcMs;
+extern UsbBridgeConnectionState g_usbBridgeConnectionState;
+extern String g_usbBridgeHost;
+extern String g_usbBridgeLastError;
 
 extern unsigned long g_lastRpmRequest;
 

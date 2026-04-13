@@ -41,6 +41,7 @@
 #define LV_THEME_DEFAULT_LIGHT 1
 
 #define LV_USE_GESTURE 1
+#define LV_USE_QRCODE 1
 
 #endif /*LV_CONF_H*/
 

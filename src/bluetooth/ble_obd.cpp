@@ -23,6 +23,7 @@
 #include "core/utils.h"
 #include "hardware/display.h"
 #include "core/logging.h"
+#include "telemetry/telemetry_manager.h"
 
 namespace
 {
@@ -69,33 +70,31 @@ namespace
 
     void updateGearEstimate()
     {
-        if (g_vehicleSpeedKmh < 2 || g_currentRpm < 500)
+        if (g_obdVehicleSpeedKmh < 2 || g_obdCurrentRpm < 500)
         {
-            if (g_estimatedGear != 0)
+            if (g_obdEstimatedGear != 0)
             {
-                g_estimatedGear = 0;
-                displaySetGear(g_estimatedGear);
+                g_obdEstimatedGear = 0;
             }
             return;
         }
 
-        float ratio = (float)g_currentRpm / (float)max(g_vehicleSpeedKmh, 1);
+        float ratio = (float)g_obdCurrentRpm / (float)max(g_obdVehicleSpeedKmh, 1);
         int candidate = pickGearFromRatio(ratio);
         unsigned long now = millis();
 
-        if (candidate == g_estimatedGear)
+        if (candidate == g_obdEstimatedGear)
         {
             return;
         }
 
-        if (abs(candidate - g_estimatedGear) > 1 && (now - lastGearDecisionMs) < 300)
+        if (abs(candidate - g_obdEstimatedGear) > 1 && (now - lastGearDecisionMs) < 300)
         {
             return;
         }
 
-        g_estimatedGear = candidate;
+        g_obdEstimatedGear = candidate;
         lastGearDecisionMs = now;
-        displaySetGear(g_estimatedGear);
     }
 
     void processObdLine(const String &lineIn)
@@ -136,16 +135,21 @@ namespace
                 int raw = (a << 8) | b;
                 int rpm = raw / 4;
 
-                if (rpm > g_maxSeenRpm)
+                if (rpm > g_obdMaxSeenRpm)
                 {
-                    g_maxSeenRpm = rpm;
+                    g_obdMaxSeenRpm = rpm;
                 }
 
-                g_currentRpm = rpm;
-                // Only log RPM changes (skip if same as before to reduce spam)\n                static int lastLoggedRpm = -1;\n                if (abs(rpm - lastLoggedRpm) >= 100)  // Log if RPM changed by 100+\n                {\n                    Serial.printf(\"[OBD] RPM: %d  (max: %d)\\n\", rpm, g_maxSeenRpm);\n                    lastLoggedRpm = rpm;\n                }
+                g_obdCurrentRpm = rpm;
+                static int lastLoggedRpm = -1;
+                if (abs(rpm - lastLoggedRpm) >= 100)
+                {
+                    Serial.printf("[OBD] RPM: %d  (max: %d)\n", rpm, g_obdMaxSeenRpm);
+                    lastLoggedRpm = rpm;
+                }
 
                 unsigned long nowMs = millis();
-                g_lastObdMs = nowMs;
+                g_lastObdTelemetryMs = nowMs;
 
                 bool ignitionBefore = g_ignitionOn;
                 bool engineBefore = g_engineRunning;
@@ -179,9 +183,10 @@ namespace
                     }
                 }
 
+                telemetryOnObdSample(g_obdCurrentRpm, g_obdVehicleSpeedKmh, g_obdEstimatedGear, nowMs);
                 if (!g_testActive && !g_animationActive)
                 {
-                    updateRpmBar(rpm);
+                    updateRpmBar(g_currentRpm);
                 }
             }
         }
@@ -192,11 +197,15 @@ namespace
             int value = hexByte(compact, speedIdx + 4);
             if (value >= 0)
             {
-                g_vehicleSpeedKmh = value;
+                g_obdVehicleSpeedKmh = value;
             }
         }
 
         updateGearEstimate();
+        if (g_lastObdTelemetryMs > 0)
+        {
+            telemetryOnObdSample(g_obdCurrentRpm, g_obdVehicleSpeedKmh, g_obdEstimatedGear, g_lastObdTelemetryMs);
+        }
     }
 
     static void notifyCallback(BleRemoteCharacteristic * /*characteristic*/, uint8_t *pData, size_t length, bool /*isNotify*/)
@@ -273,8 +282,7 @@ namespace
             g_charNotify = nullptr;
             g_ignitionOn = false;
             g_engineRunning = false;
-            g_vehicleSpeedKmh = 0;
-            g_estimatedGear = 0;
+            telemetryOnObdDisconnected();
             displaySetGear(0);
             displaySetShiftBlink(false);
             setStatusLED(false);
@@ -582,7 +590,7 @@ void initBle()
     BleDeviceClass::setPower(ESP_PWR_LVL_P7); // „normaler“ ESP32
 #endif
 
-    if (g_autoReconnect)
+    if (g_autoReconnect && telemetryShouldAllowObd())
     {
         g_lastBleRetryMs = millis();
         startConnectTask(false);
@@ -593,10 +601,29 @@ void bleObdLoop()
 {
     unsigned long now = millis();
     const unsigned long HTTP_GRACE_MS = 5000;
+    const bool allowAutomaticObd = telemetryShouldAllowObd();
 
     g_bleConnectInProgress = g_connectTaskRunning || g_manualConnectActive;
 
-    if (g_manualConnectRequested && !g_manualConnectActive)
+    if (!allowAutomaticObd)
+    {
+        g_manualConnectRequested = false;
+        g_manualConnectActive = false;
+        g_manualConnectFailed = false;
+        g_autoReconnectPaused = true;
+        g_forceImmediateReconnect = false;
+        g_bleConnectInProgress = g_connectTaskRunning;
+        if (g_connected && g_client != nullptr)
+        {
+            g_client->disconnect();
+        }
+    }
+    else if (g_autoReconnectPaused && !g_manualConnectActive)
+    {
+        g_autoReconnectPaused = false;
+    }
+
+    if (allowAutomaticObd && g_manualConnectRequested && !g_manualConnectActive)
     {
         g_manualConnectActive = true;
         g_manualConnectFailed = false;
@@ -610,7 +637,7 @@ void bleObdLoop()
         g_manualConnectRequested = false;
     }
 
-    if (g_manualConnectActive && !g_connected && g_manualConnectAttempts > 0 && !g_connectTaskRunning && (now - g_lastBleRetryMs > MANUAL_CONNECT_RETRY_DELAY_MS))
+    if (allowAutomaticObd && g_manualConnectActive && !g_connected && g_manualConnectAttempts > 0 && !g_connectTaskRunning && (now - g_lastBleRetryMs > MANUAL_CONNECT_RETRY_DELAY_MS))
     {
         g_lastBleRetryMs = now;
         LOG_INFO("BLE", "BLE_MANUAL_ATTEMPT", String("attempts_left=") + String(g_manualConnectAttempts));
@@ -618,7 +645,7 @@ void bleObdLoop()
     }
 
     bool autoReconnectReady = shouldAutoReconnectNow(now,
-                                                     g_autoReconnect,
+                                                     g_autoReconnect && allowAutomaticObd,
                                                      g_autoReconnectPaused,
                                                      g_connected,
                                                      g_connectTaskRunning,
@@ -645,7 +672,7 @@ void bleObdLoop()
         startConnectTask(false);
     }
 
-    if (!g_testActive && g_connected && g_charWrite && (now - g_lastRpmRequest > RPM_INTERVAL_MS))
+    if (allowAutomaticObd && !g_testActive && g_connected && g_charWrite && (now - g_lastRpmRequest > RPM_INTERVAL_MS))
     {
         static uint8_t speedDivider = 0;
         g_lastRpmRequest = now;
@@ -659,7 +686,7 @@ void bleObdLoop()
         }
     }
 
-    while (Serial.available())
+    while (allowAutomaticObd && Serial.available())
     {
         char c = (char)Serial.read();
         Serial.write(c);

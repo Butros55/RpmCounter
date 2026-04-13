@@ -36,5 +36,7 @@ void wifiLoop();
 WifiStatus getWifiStatus();
 bool requestWifiConnect(const String &ssid, const String &password, WifiMode mode);
 void requestWifiDisconnect();
+void setWifiSuspendedForUsb(bool suspended);
+bool isWifiSuspendedForUsb();
 
 #endif // WIFI_MANAGER_H

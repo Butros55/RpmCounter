@@ -379,7 +379,7 @@ int main()
     waitingApp.configureTelemetry(waitingConfig);
     std::this_thread::sleep_for(std::chrono::milliseconds(80));
     waitingApp.tick(100);
-    expect_true(waitingApp.state().telemetrySource == UiTelemetrySource::SimHubUdp, "HTTP mode should mark SimHub as source");
+    expect_true(waitingApp.state().telemetrySource == UiTelemetrySource::SimHubNetwork, "HTTP mode should mark SimHub as source");
     expect_true(waitingApp.state().telemetryStale, "HTTP mode without data should be stale");
     expect_true(!waitingApp.state().telemetryUsingFallback, "HTTP mode should not use simulator fallback by default");
     expect_true(waitingApp.state().rpm == 0, "HTTP waiting state should not inject demo RPM");

@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ShiftLight USB Bridge</title>
+  <style>
+    :root{--bg:#070a0f;--panel:#11161e;--panel2:#171f2a;--line:#243041;--text:#edf2f7;--muted:#9aa8ba;--accent:#56c8ea;--ok:#5ff39a;--warn:#f5b024;--bad:#f55e61;--radius:18px;--shadow:0 10px 30px rgba(0,0,0,.22)}
+    *{box-sizing:border-box}html,body{margin:0;padding:0;background:linear-gradient(180deg,#06080c 0%,#0a1017 100%);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}body{min-height:100vh}
+    .shell{max-width:1140px;margin:0 auto;padding:18px 16px 96px}.hero,.layout,.stack,.grid-two,.metric-grid,.info-list,.field-grid{display:grid;gap:14px}.hero-card,.panel{background:rgba(17,22,30,.96);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}.hero-card{padding:18px}.panel{padding:16px}
+    .hero-head,.panel-head,.info-row,.toggle,.actions-inner{display:flex;justify-content:space-between;gap:12px}.hero-head,.panel-head{align-items:flex-start}.info-row,.toggle,.actions-inner{align-items:center}.kicker{font-size:.72rem;letter-spacing:.18em;text-transform:uppercase;color:var(--accent)}.hero-title{font-size:1.9rem;line-height:1.05;font-weight:700;letter-spacing:-.04em;margin:6px 0 0}.hero-copy,.panel-copy,.field-note,.actions-copy{color:var(--muted);font-size:.94rem;line-height:1.45;margin-top:6px}.section-title{font-size:1.05rem;font-weight:650}
+    .pill-row,.button-row{display:flex;gap:8px;flex-wrap:wrap}.pill{display:inline-flex;align-items:center;gap:8px;border-radius:999px;border:1px solid var(--line);padding:8px 12px;background:#0c1017;font-size:.88rem}.pill::before{content:'';width:8px;height:8px;border-radius:50%;background:var(--muted)}.pill.ok::before{background:var(--ok)}.pill.warn::before{background:var(--warn)}.pill.bad::before{background:var(--bad)}.pill.neutral::before{background:var(--accent)}
+    .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:16px}.metric{padding:14px;border-radius:16px;background:#0c1118;border:1px solid #1b2633}.metric-label{font-size:.8rem;color:var(--muted);text-transform:uppercase;letter-spacing:.12em}.metric-value{font-size:clamp(1.8rem,7vw,3rem);line-height:1;font-weight:700;margin-top:8px}.metric-sub{margin-top:6px;color:var(--muted);font-size:.9rem}
+    .grid-two,.field-grid.two{grid-template-columns:1fr}.field label{display:block;font-size:.88rem;color:var(--muted);margin-bottom:6px}input,select{width:100%;background:#0c1118;border:1px solid #223144;color:var(--text);border-radius:14px;padding:12px 14px;font:inherit;outline:none}input:focus,select:focus{border-color:var(--accent)}input[type=range]{padding:0;background:transparent;border:none}
+    .range-row{display:flex;align-items:center;gap:12px}.range-value{min-width:52px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}.toggle{padding:12px 14px;border:1px solid #223144;background:#0c1118;border-radius:14px}.toggle input{width:auto;transform:scale(1.15)}.info-row{padding:10px 0;border-bottom:1px solid rgba(36,48,65,.7)}.info-row:last-child{border-bottom:none;padding-bottom:0}.info-label{color:var(--muted)}.info-value{text-align:right}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.hidden{display:none!important}
+    .actions{position:fixed;left:0;right:0;bottom:0;padding:12px 14px;background:rgba(7,10,15,.92);border-top:1px solid rgba(36,48,65,.85)}.actions-copy strong{display:block;color:var(--text);margin-bottom:4px}button{appearance:none;border:none;border-radius:14px;padding:12px 16px;font:inherit;font-weight:650;cursor:pointer}.btn-primary{background:var(--accent);color:#031018}.btn-secondary{background:#182230;color:var(--text);border:1px solid #253347}.btn-ghost{background:transparent;color:var(--muted);border:1px solid #253347}.btn-primary[disabled]{opacity:.45;cursor:not-allowed}
+    .toast{position:fixed;top:16px;right:16px;z-index:20;background:#0d141d;border:1px solid var(--line);padding:12px 14px;border-radius:14px;box-shadow:var(--shadow)}.toast.ok{border-color:rgba(95,243,154,.45)}.toast.bad{border-color:rgba(245,94,97,.45)}
+    @media (min-width:820px){.hero{grid-template-columns:1.2fr .8fr}.layout{grid-template-columns:1.1fr .9fr}.grid-two,.field-grid.two{grid-template-columns:1fr 1fr}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div class="hero-card">
+        <div class="hero-head">
+          <div>
+            <div class="kicker">USB Sim Bridge</div>
+            <div class="hero-title">ShiftLight am PC</div>
+            <div class="hero-copy">Lokale USB-Oberflaeche fuer den ESP32. Der PC liest SimHub und schiebt Telemetrie per USB-CDC auf das Board. WiFi und BLE werden in diesem Pfad am ESP unterdrueckt.</div>
+          </div>
+          <div class="pill-row">
+            <span class="pill neutral" id="pillTelemetry">Initialisiere</span>
+            <span class="pill warn" id="pillUsb">USB</span>
+            <span class="pill warn" id="pillSimHub">SimHub</span>
+          </div>
+        </div>
+        <div class="metric-grid">
+          <div class="metric"><div class="metric-label">RPM</div><div class="metric-value" id="metricRpm">0</div><div class="metric-sub" id="metricShift">Ready</div></div>
+          <div class="metric"><div class="metric-label">Gang</div><div class="metric-value" id="metricGear">N</div><div class="metric-sub" id="metricSpeed">0 km/h</div></div>
+          <div class="metric"><div class="metric-label">Throttle</div><div class="metric-value" id="metricThrottle">0%</div><div class="metric-sub" id="metricTransport">USB</div></div>
+          <div class="metric"><div class="metric-label">ESP Port</div><div class="metric-value" style="font-size:1.1rem;line-height:1.15" id="metricPort">Suche...</div><div class="metric-sub" id="metricMode">Noch kein Status</div></div>
+        </div>
+      </div>
+      <div class="hero-card">
+        <div class="panel-head">
+          <div><div class="section-title">Live Status</div><div class="panel-copy">USB ersetzt in diesem Modus WLAN und Bluetooth-Anzeigen. Sobald die Bridge verbunden ist, zeigt das ESP-Display ein USB-Badge statt WiFi/BLE.</div></div>
+        </div>
+        <div class="info-list">
+          <div class="info-row"><div class="info-label">Aktive Quelle</div><div class="info-value" id="statusSource">-</div></div>
+          <div class="info-row"><div class="info-label">USB</div><div class="info-value" id="statusUsb">-</div></div>
+          <div class="info-row"><div class="info-label">SimHub</div><div class="info-value" id="statusSimHub">-</div></div>
+          <div class="info-row"><div class="info-label">WiFi am ESP</div><div class="info-value" id="statusWifi">-</div></div>
+          <div class="info-row"><div class="info-label">OBD am ESP</div><div class="info-value" id="statusObd">-</div></div>
+        </div>
+      </div>
+    </section>
+    <section class="layout">
+      <div class="panel">
+        <div class="panel-head">
+          <div><div class="section-title">ESP Einstellungen</div><div class="panel-copy">Diese Werte werden direkt per USB-RPC auf den ESP geschrieben. Fuer den Automatikbetrieb reichen meistens Quelle = Auto und Sim Link = Auto oder USB.</div></div>
+        </div>
+        <form id="configForm" class="stack">
+          <div class="grid-two">
+            <div class="field">
+              <label for="telemetryPreference">Bevorzugte Quelle</label>
+              <select id="telemetryPreference" name="telemetryPreference">
+                <option value="0">Automatisch</option>
+                <option value="1">Nur OBD / BLE</option>
+                <option value="2">Nur Sim / PC</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="simTransport">Sim Link</label>
+              <select id="simTransport" name="simTransport">
+                <option value="0">Automatisch</option>
+                <option value="1">USB Serial Bridge</option>
+                <option value="2">Netzwerk / SimHub API</option>
+              </select>
+            </div>
+          </div>
+          <div class="grid-two">
+            <div class="field">
+              <label for="displayFocus">Grosses Fahr-Element</label>
+              <select id="displayFocus" name="displayFocus">
+                <option value="0">RPM</option>
+                <option value="1">Gang</option>
+                <option value="2">Geschwindigkeit</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="displayBrightness">Display Helligkeit</label>
+              <div class="range-row">
+                <input type="range" id="displayBrightness" name="displayBrightness" min="10" max="255" value="220">
+                <div class="range-value" id="brightnessValue">220</div>
+              </div>
+            </div>
+          </div>
+          <div class="grid-two">
+            <label class="toggle">
+              <span><strong>Night mode</strong><br><span class="field-note">Dunkleres Display-Theme</span></span>
+              <input type="checkbox" id="nightMode" name="nightMode">
+            </label>
+            <label class="toggle">
+              <span><strong>mph Anzeige</strong><br><span class="field-note">Nur fuer US-Skalen</span></span>
+              <input type="checkbox" id="useMph" name="useMph">
+            </label>
+          </div>
+          <div class="grid-two">
+            <div class="field">
+              <label for="simHubHost">SimHub Host</label>
+              <input type="text" id="simHubHost" name="simHubHost" placeholder="127.0.0.1">
+              <div class="field-note">Nur fuer den Netzwerkpfad relevant. Im USB-Modus liest der PC selbst lokal aus SimHub.</div>
+            </div>
+            <div class="field-grid two">
+              <div class="field"><label for="simHubPort">SimHub Port</label><input type="number" id="simHubPort" name="simHubPort" min="1" max="65535" value="8888"></div>
+              <div class="field"><label for="simHubPollMs">Polling</label><input type="number" id="simHubPollMs" name="simHubPollMs" min="25" max="1000" value="75"></div>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      <div class="stack">
+        <div class="panel">
+          <div class="panel-head">
+            <div><div class="section-title">Bridge Diagnose</div><div class="panel-copy">Hilfreich fuer den ersten Setup auf dem PC.</div></div>
+          </div>
+          <div class="info-list">
+            <div class="info-row"><div class="info-label">Serieller Port</div><div class="info-value mono" id="diagPort">-</div></div>
+            <div class="info-row"><div class="info-label">Bridge Host</div><div class="info-value" id="diagHost">-</div></div>
+            <div class="info-row"><div class="info-label">Letzter Fehler</div><div class="info-value" id="diagError">-</div></div>
+            <div class="info-row"><div class="info-label">Letztes SimHub Paket</div><div class="info-value" id="diagAge">-</div></div>
+          </div>
+          <div class="button-row" style="margin-top:14px">
+            <button type="button" class="btn btn-secondary" id="refreshBtn">Status aktualisieren</button>
+            <button type="button" class="btn btn-ghost" id="reloadConfigBtn">ESP Config lesen</button>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head">
+            <div><div class="section-title">Schnellstart</div><div class="panel-copy">Die Bridge stellt die Weboberflaeche lokal unter <span class="mono">localhost</span> bereit. Kein WiFi-Access-Point am ESP noetig.</div></div>
+          </div>
+          <div class="info-list">
+            <div class="info-row"><div class="info-label">1</div><div class="info-value">ESP per USB anschliessen und die neue Firmware flashen</div></div>
+            <div class="info-row"><div class="info-label">2</div><div class="info-value">SimHub starten und ACC in eine laufende Session bringen</div></div>
+            <div class="info-row"><div class="info-label">3</div><div class="info-value">Diese USB-Bridge offen lassen und die Seite hier nutzen</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="actions">
+    <div class="actions-inner">
+      <div class="actions-copy" id="saveCopy"><strong>Status</strong>Warte auf Aenderungen.</div>
+      <div class="button-row">
+        <button type="button" class="btn btn-ghost" id="resetBtn">Reset</button>
+        <button type="button" class="btn btn-primary" id="saveBtn" disabled>Auf ESP speichern</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast hidden" id="toast"></div>
+  <script>
+    const state = { config: null, usbReady: false };
+    const $ = (selector) => document.querySelector(selector);
+    const form = $('#configForm');
+    const saveBtn = $('#saveBtn');
+    const saveCopy = $('#saveCopy');
+    const brightness = $('#displayBrightness');
+    const brightnessValue = $('#brightnessValue');
+    const toast = $('#toast');
+    function setText(id, text){ const el = $('#'+id); if(el) el.textContent = text; }
+    function setPill(id, tone, text){ const el = $('#'+id); if(!el) return; el.className = 'pill ' + tone; el.textContent = text; }
+    function showToast(text, tone){ toast.textContent = text; toast.className = 'toast ' + tone; setTimeout(() => { toast.className = 'toast hidden'; }, 2200); }
+    function formObject(){
+      const fd = new FormData(form);
+      return {
+        telemetryPreference: Number(fd.get('telemetryPreference')),
+        simTransport: Number(fd.get('simTransport')),
+        displayFocus: Number(fd.get('displayFocus')),
+        displayBrightness: Number(fd.get('displayBrightness')),
+        nightMode: $('#nightMode').checked,
+        useMph: $('#useMph').checked,
+        simHubHost: String(fd.get('simHubHost') || ''),
+        simHubPort: Number(fd.get('simHubPort')),
+        simHubPollMs: Number(fd.get('simHubPollMs')),
+      };
+    }
+    function syncDirty(){
+      const dirty = JSON.stringify(formObject()) !== JSON.stringify(state.config || {});
+      saveBtn.disabled = !dirty || !state.usbReady;
+      if(!state.usbReady){
+        saveCopy.innerHTML = '<strong>USB wird aufgebaut</strong>Speichern ist verfuegbar, sobald die Bridge am ESP live ist.';
+        return;
+      }
+      saveCopy.innerHTML = dirty ? '<strong>Ungespeicherte Aenderungen</strong>Neue Werte werden direkt per USB auf den ESP geschrieben.' : '<strong>Status</strong>Warte auf Aenderungen.';
+    }
+    function applyConfig(data){
+      if(!data || data.ok === false) return;
+      state.config = {
+        telemetryPreference: Number(data.telemetryPreference ?? 0),
+        simTransport: Number(data.simTransport ?? 0),
+        displayFocus: Number(data.displayFocus ?? 0),
+        displayBrightness: Number(data.displayBrightness ?? 220),
+        nightMode: !!data.nightMode,
+        useMph: !!data.useMph,
+        simHubHost: data.simHubHost || '',
+        simHubPort: Number(data.simHubPort ?? 8888),
+        simHubPollMs: Number(data.simHubPollMs ?? 75),
+      };
+      $('#telemetryPreference').value = String(state.config.telemetryPreference);
+      $('#simTransport').value = String(state.config.simTransport);
+      $('#displayFocus').value = String(state.config.displayFocus);
+      brightness.value = String(state.config.displayBrightness);
+      brightnessValue.textContent = String(state.config.displayBrightness);
+      $('#nightMode').checked = state.config.nightMode;
+      $('#useMph').checked = state.config.useMph;
+      $('#simHubHost').value = state.config.simHubHost;
+      $('#simHubPort').value = String(state.config.simHubPort);
+      $('#simHubPollMs').value = String(state.config.simHubPollMs);
+      syncDirty();
+    }
+    function applyStatus(data){
+      if(!data) return;
+      state.usbReady = !!(data.usbConnected && data.usbBridgeConnected && data.usbLive);
+      const rawThrottle = Number(data.throttle ?? 0);
+      const throttlePct = Math.round(rawThrottle > 1 ? rawThrottle : rawThrottle * 100);
+      setPill('pillTelemetry', data.activeTelemetryLabel === 'USB Sim' ? 'ok' : (data.activeTelemetryLabel === 'OBD' ? 'warn' : 'neutral'), data.activeTelemetryLabel || 'Keine');
+      setPill('pillUsb', data.usbLive ? 'ok' : (data.usbConnected ? 'warn' : 'bad'), data.usbStateLabel || 'USB');
+      setPill('pillSimHub', data.simHubLive ? 'ok' : (data.simHubReachable ? 'warn' : 'bad'), data.simHubStateLabel || 'SimHub');
+      setText('metricRpm', String(data.rpm ?? 0));
+      setText('metricGear', data.gearText || 'N');
+      setText('metricSpeed', String((data.speed ?? 0) + ' km/h'));
+      setText('metricThrottle', String(throttlePct) + '%');
+      setText('metricTransport', data.transportLabel || 'USB');
+      setText('metricShift', data.shiftState || 'Ready');
+      setText('metricPort', data.port || 'Kein ESP gefunden');
+      setText('metricMode', data.modeSummary || 'Noch kein Status');
+      setText('statusSource', data.activeTelemetryLabel || '-');
+      setText('statusUsb', data.usbStateLabel || '-');
+      setText('statusSimHub', data.simHubStateLabel || '-');
+      setText('statusWifi', data.wifiSummary || '-');
+      setText('statusObd', data.obdSummary || '-');
+      setText('diagPort', data.port || '-');
+      setText('diagHost', data.usbHost || data.host || '-');
+      setText('diagError', data.lastError || '-');
+      setText('diagAge', data.lastTelemetryAgeLabel || '-');
+      syncDirty();
+    }
+    async function loadStatus(){ const res = await fetch('/api/status', { cache:'no-store' }); applyStatus(await res.json()); }
+    async function loadConfig(){
+      const res = await fetch('/api/config', { cache:'no-store' });
+      const data = await res.json();
+      if(data.ok === false){ showToast(data.error || 'Config konnte nicht geladen werden', 'bad'); return; }
+      applyConfig(data);
+    }
+    async function saveConfig(){
+      if(!state.usbReady){ showToast('USB-Bridge ist noch nicht live. Bitte kurz warten.', 'bad'); return; }
+      const res = await fetch('/api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(formObject()) });
+      const data = await res.json();
+      if(data.ok === false){ showToast(data.error || 'Speichern fehlgeschlagen', 'bad'); return; }
+      applyConfig(data); await loadStatus(); showToast('ESP Konfiguration gespeichert', 'ok');
+    }
+    form.addEventListener('input', syncDirty);
+    brightness.addEventListener('input', () => { brightnessValue.textContent = brightness.value; syncDirty(); });
+    $('#saveBtn').addEventListener('click', saveConfig);
+    $('#resetBtn').addEventListener('click', () => applyConfig(state.config));
+    $('#refreshBtn').addEventListener('click', () => loadStatus().catch(() => {}));
+    $('#reloadConfigBtn').addEventListener('click', () => loadConfig().catch(() => {}));
+    Promise.all([loadStatus(), loadConfig()]).catch((err) => showToast(err.message || 'Initialisierung fehlgeschlagen', 'bad'));
+    setInterval(() => loadStatus().catch(() => {}), 200);
+  </script>
+</body>
+</html>

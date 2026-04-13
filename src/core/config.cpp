@@ -14,6 +14,33 @@ namespace
         }
         return static_cast<WifiMode>(raw);
     }
+
+    TelemetryPreference clampTelemetryPreference(uint32_t raw)
+    {
+        if (raw > static_cast<uint32_t>(TelemetryPreference::SimHub))
+        {
+            return TelemetryPreference::Auto;
+        }
+        return static_cast<TelemetryPreference>(raw);
+    }
+
+    SimTransportPreference clampSimTransportPreference(uint32_t raw)
+    {
+        if (raw > static_cast<uint32_t>(SimTransportPreference::Network))
+        {
+            return SimTransportPreference::Auto;
+        }
+        return static_cast<SimTransportPreference>(raw);
+    }
+
+    DisplayFocusMetric clampDisplayFocusMetric(uint32_t raw)
+    {
+        if (raw > static_cast<uint32_t>(DisplayFocusMetric::Speed))
+        {
+            return DisplayFocusMetric::Rpm;
+        }
+        return static_cast<DisplayFocusMetric>(raw);
+    }
 }
 
 AppConfig cfg;
@@ -42,7 +69,13 @@ void initConfig()
     cfg.uiTutorialSeen = false;
     cfg.uiLastMenuIndex = 0;
     cfg.uiNightMode = true;
+    cfg.uiDisplayFocus = DisplayFocusMetric::Rpm;
     cfg.useMph = false;
+    cfg.telemetryPreference = TelemetryPreference::Auto;
+    cfg.simTransportPreference = SimTransportPreference::Auto;
+    cfg.simHubHost = "";
+    cfg.simHubPort = 8888;
+    cfg.simHubPollMs = 75;
     cfg.greenColor = {0, 255, 0};
     cfg.yellowColor = {255, 180, 0};
     cfg.redColor = {255, 0, 0};
@@ -84,12 +117,18 @@ void loadConfig()
     if (cfg.blinkStartPct < cfg.yellowEndPct)
         cfg.blinkStartPct = cfg.yellowEndPct;
     cfg.brightness = clampInt(prefs.getInt("brightness", cfg.brightness), 0, 255);
-    cfg.mode = clampInt(prefs.getInt("mode", cfg.mode), 0, 2);
+    cfg.mode = clampInt(prefs.getInt("mode", cfg.mode), 0, 3);
     cfg.displayBrightness = clampInt(prefs.getInt("dispBright", cfg.displayBrightness), 10, 255);
     cfg.uiTutorialSeen = prefs.getBool("uiTutSeen", cfg.uiTutorialSeen);
     cfg.uiLastMenuIndex = clampInt(prefs.getInt("uiMenuIdx", cfg.uiLastMenuIndex), 0, 5);
     cfg.uiNightMode = prefs.getBool("uiNight", cfg.uiNightMode);
+    cfg.uiDisplayFocus = clampDisplayFocusMetric(prefs.getUInt("uiFocus", static_cast<uint32_t>(cfg.uiDisplayFocus)));
     cfg.useMph = prefs.getBool("useMph", cfg.useMph);
+    cfg.telemetryPreference = clampTelemetryPreference(prefs.getUInt("telePref", static_cast<uint32_t>(cfg.telemetryPreference)));
+    cfg.simTransportPreference = clampSimTransportPreference(prefs.getUInt("simTrans", static_cast<uint32_t>(cfg.simTransportPreference)));
+    cfg.simHubHost = prefs.getString("simHost", cfg.simHubHost);
+    cfg.simHubPort = static_cast<uint16_t>(clampInt(prefs.getUInt("simPort", cfg.simHubPort), 1, 65535));
+    cfg.simHubPollMs = static_cast<uint16_t>(clampInt(prefs.getUInt("simPoll", cfg.simHubPollMs), 25, 1000));
 
     cfg.logoOnIgnitionOn = prefs.getBool("logoIgnOn", cfg.logoOnIgnitionOn);
     cfg.logoOnEngineStart = prefs.getBool("logoEngStart", cfg.logoOnEngineStart);
@@ -139,7 +178,13 @@ void saveConfig()
     prefs.putBool("uiTutSeen", cfg.uiTutorialSeen);
     prefs.putInt("uiMenuIdx", cfg.uiLastMenuIndex);
     prefs.putBool("uiNight", cfg.uiNightMode);
+    prefs.putUInt("uiFocus", static_cast<uint32_t>(cfg.uiDisplayFocus));
     prefs.putBool("useMph", cfg.useMph);
+    prefs.putUInt("telePref", static_cast<uint32_t>(cfg.telemetryPreference));
+    prefs.putUInt("simTrans", static_cast<uint32_t>(cfg.simTransportPreference));
+    prefs.putString("simHost", cfg.simHubHost);
+    prefs.putUInt("simPort", cfg.simHubPort);
+    prefs.putUInt("simPoll", cfg.simHubPollMs);
 
     prefs.putBool("logoIgnOn", cfg.logoOnIgnitionOn);
     prefs.putBool("logoEngStart", cfg.logoOnEngineStart);

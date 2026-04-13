@@ -30,6 +30,27 @@ enum WifiMode
     STA_WITH_AP_FALLBACK = 2
 };
 
+enum class TelemetryPreference : uint8_t
+{
+    Auto = 0,
+    Obd = 1,
+    SimHub = 2
+};
+
+enum class SimTransportPreference : uint8_t
+{
+    Auto = 0,
+    UsbSerial = 1,
+    Network = 2
+};
+
+enum class DisplayFocusMetric : uint8_t
+{
+    Rpm = 0,
+    Gear = 1,
+    Speed = 2
+};
+
 struct AppConfig
 {
     bool autoScaleMaxRpm;
@@ -46,7 +67,13 @@ struct AppConfig
     bool uiTutorialSeen;
     int uiLastMenuIndex;
     bool uiNightMode;
+    DisplayFocusMetric uiDisplayFocus;
     bool useMph;
+    TelemetryPreference telemetryPreference;
+    SimTransportPreference simTransportPreference;
+    String simHubHost;
+    uint16_t simHubPort;
+    uint16_t simHubPollMs;
     RgbColor greenColor;
     RgbColor yellowColor;
     RgbColor redColor;

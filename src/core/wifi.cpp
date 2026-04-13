@@ -47,6 +47,7 @@ namespace
     WifiRuntimeState g_wifi;
     bool g_wifiEventsRegistered = false;
     WiFiEventId_t g_wifiEventId = 0;
+    bool g_wifiSuspendedForUsb = false;
 
     String trimmed(const String &value)
     {
@@ -178,6 +179,18 @@ namespace
         g_wifi.staConnecting = false;
         g_wifi.currentSsid = "";
         g_wifi.staIp = "";
+    }
+
+    void clearWifiRuntime()
+    {
+        clearStaState();
+        g_wifi.apActive = false;
+        g_wifi.apClients = 0;
+        g_wifi.apIp = "";
+        g_wifi.lastIp = "";
+        g_wifi.scanRunning = false;
+        g_wifi.scanResults.clear();
+        g_wifi.staLastError = "";
     }
 
     bool startSoftAp(const AppConfig &config, WifiMode activeMode)
@@ -371,6 +384,12 @@ bool startStaMode(const AppConfig &config, uint32_t timeoutMs)
 
 void setupWifiFromConfig(const AppConfig &config)
 {
+    if (g_wifiSuspendedForUsb)
+    {
+        clearWifiRuntime();
+        return;
+    }
+
     ensureWifiEventsRegistered();
     WiFi.setSleep(false);
     g_wifi.configuredMode = config.wifiMode;
@@ -517,6 +536,12 @@ WifiStatus getWifiStatus()
 
 void wifiLoop()
 {
+    if (g_wifiSuspendedForUsb)
+    {
+        clearWifiRuntime();
+        return;
+    }
+
     unsigned long now = millis();
     wl_status_t status = WiFi.status();
     refreshApState();
@@ -655,4 +680,33 @@ void wifiLoop()
         }
         WiFi.scanDelete();
     }
+}
+
+void setWifiSuspendedForUsb(bool suspended)
+{
+    if (g_wifiSuspendedForUsb == suspended)
+    {
+        return;
+    }
+
+    g_wifiSuspendedForUsb = suspended;
+    if (suspended)
+    {
+        if (WiFi.getMode() != WIFI_OFF)
+        {
+            WiFi.disconnect(true, true);
+            WiFi.mode(WIFI_OFF);
+        }
+        clearWifiRuntime();
+        LOG_INFO("WIFI", "WIFI_USB_SUSPEND", "WiFi suspended for USB sim mode");
+        return;
+    }
+
+    LOG_INFO("WIFI", "WIFI_USB_RESUME", "WiFi resumed after USB sim mode");
+    setupWifiFromConfig(cfg);
+}
+
+bool isWifiSuspendedForUsb()
+{
+    return g_wifiSuspendedForUsb;
 }

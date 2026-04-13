@@ -1,11 +1,13 @@
 #include "ui_runtime_esp32.h"
 
 #include <Arduino.h>
+#include <string>
 
 #include "bluetooth/ble_obd.h"
 #include "core/config.h"
 #include "core/state.h"
 #include "core/wifi.h"
+#include "telemetry/usb_sim_bridge.h"
 
 namespace
 {
@@ -27,6 +29,54 @@ namespace
             return UiWifiMode::ApOnly;
         }
     }
+
+    UiTelemetryPreference toUiTelemetryPreference(TelemetryPreference preference)
+    {
+        switch (preference)
+        {
+        case TelemetryPreference::Obd:
+            return UiTelemetryPreference::Obd;
+        case TelemetryPreference::SimHub:
+            return UiTelemetryPreference::SimHub;
+        case TelemetryPreference::Auto:
+        default:
+            return UiTelemetryPreference::Auto;
+        }
+    }
+
+    UiDisplayFocusMetric toUiDisplayFocusMetric(DisplayFocusMetric metric)
+    {
+        switch (metric)
+        {
+        case DisplayFocusMetric::Gear:
+            return UiDisplayFocusMetric::Gear;
+        case DisplayFocusMetric::Speed:
+            return UiDisplayFocusMetric::Speed;
+        case DisplayFocusMetric::Rpm:
+        default:
+            return UiDisplayFocusMetric::Rpm;
+        }
+    }
+
+    UiUsbState toUiUsbState(UsbBridgeConnectionState state)
+    {
+        switch (state)
+        {
+        case UsbBridgeConnectionState::Disconnected:
+            return UiUsbState::Disconnected;
+        case UsbBridgeConnectionState::WaitingForBridge:
+            return UiUsbState::WaitingForBridge;
+        case UsbBridgeConnectionState::WaitingForData:
+            return UiUsbState::WaitingForData;
+        case UsbBridgeConnectionState::Live:
+            return UiUsbState::Live;
+        case UsbBridgeConnectionState::Error:
+            return UiUsbState::Error;
+        case UsbBridgeConnectionState::Disabled:
+        default:
+            return UiUsbState::Disabled;
+        }
+    }
 }
 
 UiRuntimeState makeEsp32UiState()
@@ -36,6 +86,8 @@ UiRuntimeState makeEsp32UiState()
     state.settings.tutorialSeen = cfg.uiTutorialSeen;
     state.settings.lastMenuIndex = cfg.uiLastMenuIndex;
     state.settings.nightMode = cfg.uiNightMode;
+    state.settings.telemetryPreference = toUiTelemetryPreference(cfg.telemetryPreference);
+    state.settings.displayFocus = toUiDisplayFocusMetric(cfg.uiDisplayFocus);
 
     const WifiStatus wifiStatus = getWifiStatus();
     state.wifiMode = toUiWifiMode(wifiStatus.mode);
@@ -57,6 +109,7 @@ UiRuntimeState makeEsp32UiState()
 
     state.bleConnected = g_connected;
     state.bleConnecting = g_bleConnectInProgress;
+    state.bleSuppressed = usbSimShouldBlockObd();
     const std::vector<BleDeviceInfo> &bleScanResults = getBleScanResults();
     state.bleScanResults.reserve(bleScanResults.size());
     for (const BleDeviceInfo &item : bleScanResults)
@@ -68,11 +121,35 @@ UiRuntimeState makeEsp32UiState()
     state.rpm = g_currentRpm;
     state.speedKmh = g_vehicleSpeedKmh;
     state.shift = g_shiftBlinkActive;
-    state.telemetrySource = UiTelemetrySource::Esp32Obd;
-    state.telemetryStale = false;
+    if (g_activeTelemetrySource == ActiveTelemetrySource::UsbSim)
+    {
+        state.telemetrySource = UiTelemetrySource::UsbBridge;
+    }
+    else if (g_activeTelemetrySource == ActiveTelemetrySource::SimHubNetwork ||
+             (cfg.telemetryPreference != TelemetryPreference::Obd && cfg.simHubHost.length() > 0))
+    {
+        state.telemetrySource = UiTelemetrySource::SimHubNetwork;
+    }
+    else
+    {
+        state.telemetrySource = UiTelemetrySource::Esp32Obd;
+    }
+    state.telemetryStale = (g_activeTelemetrySource == ActiveTelemetrySource::None);
     state.telemetryUsingFallback = false;
-    state.throttle = 0.0f;
-    state.telemetryTimestampMs = millis();
+    state.simHubConfigured = cfg.simHubHost.length() > 0;
+    state.simHubReachable = g_simHubReachable;
+    state.throttle = g_currentThrottle;
+    state.telemetryTimestampMs = (g_activeTelemetrySource == ActiveTelemetrySource::SimHubNetwork || g_activeTelemetrySource == ActiveTelemetrySource::UsbSim) ? g_lastSimHubTelemetryMs : g_lastObdTelemetryMs;
+    if (cfg.simHubHost.length() > 0)
+    {
+        state.simHubEndpoint = toStdString(cfg.simHubHost) + ":" + std::to_string(cfg.simHubPort);
+    }
+    state.usbState = toUiUsbState(g_usbBridgeConnectionState);
+    state.usbConnected = g_usbSerialConnected;
+    state.usbBridgeConnected = g_usbBridgeConnected;
+    state.wifiSuppressed = isWifiSuspendedForUsb();
+    state.usbHost = toStdString(g_usbBridgeHost);
+    state.usbError = toStdString(g_usbBridgeLastError);
     return state;
 }
 
@@ -82,5 +159,31 @@ void saveEsp32UiSettings(const UiSettings &settings)
     cfg.uiTutorialSeen = settings.tutorialSeen;
     cfg.uiLastMenuIndex = settings.lastMenuIndex;
     cfg.uiNightMode = settings.nightMode;
+    switch (settings.displayFocus)
+    {
+    case UiDisplayFocusMetric::Gear:
+        cfg.uiDisplayFocus = DisplayFocusMetric::Gear;
+        break;
+    case UiDisplayFocusMetric::Speed:
+        cfg.uiDisplayFocus = DisplayFocusMetric::Speed;
+        break;
+    case UiDisplayFocusMetric::Rpm:
+    default:
+        cfg.uiDisplayFocus = DisplayFocusMetric::Rpm;
+        break;
+    }
+    switch (settings.telemetryPreference)
+    {
+    case UiTelemetryPreference::Obd:
+        cfg.telemetryPreference = TelemetryPreference::Obd;
+        break;
+    case UiTelemetryPreference::SimHub:
+        cfg.telemetryPreference = TelemetryPreference::SimHub;
+        break;
+    case UiTelemetryPreference::Auto:
+    default:
+        cfg.telemetryPreference = TelemetryPreference::Auto;
+        break;
+    }
     saveConfig();
 }

@@ -13,7 +13,39 @@ int g_currentRpm = 0;
 int g_maxSeenRpm = 0;
 int g_vehicleSpeedKmh = 0;
 int g_estimatedGear = 0;
+float g_currentThrottle = 0.0f;
+bool g_pitLimiterActive = false;
 bool g_shiftBlinkActive = false;
+ActiveTelemetrySource g_activeTelemetrySource = ActiveTelemetrySource::None;
+
+int g_obdCurrentRpm = 0;
+int g_obdMaxSeenRpm = 0;
+int g_obdVehicleSpeedKmh = 0;
+int g_obdEstimatedGear = 0;
+unsigned long g_lastObdTelemetryMs = 0;
+
+int g_simHubCurrentRpm = 0;
+int g_simHubMaxSeenRpm = 0;
+int g_simHubVehicleSpeedKmh = 0;
+int g_simHubGear = 0;
+float g_simHubThrottle = 0.0f;
+bool g_simHubPitLimiterActive = false;
+unsigned long g_lastSimHubTelemetryMs = 0;
+bool g_simHubEverReceived = false;
+bool g_simHubReachable = false;
+bool g_simHubWaitingForData = false;
+SimHubConnectionState g_simHubConnectionState = SimHubConnectionState::Disabled;
+
+bool g_usbSerialConnected = false;
+bool g_usbBridgeConnected = false;
+bool g_usbBridgeWebActive = false;
+bool g_usbTelemetryEverReceived = false;
+unsigned long g_lastUsbBridgeHeartbeatMs = 0;
+unsigned long g_lastUsbTelemetryMs = 0;
+unsigned long g_lastUsbRpcMs = 0;
+UsbBridgeConnectionState g_usbBridgeConnectionState = UsbBridgeConnectionState::Disabled;
+String g_usbBridgeHost;
+String g_usbBridgeLastError;
 
 unsigned long g_lastRpmRequest = 0;
 
@@ -98,7 +130,39 @@ void initGlobalState()
     g_maxSeenRpm = 0;
     g_vehicleSpeedKmh = 0;
     g_estimatedGear = 0;
+    g_currentThrottle = 0.0f;
+    g_pitLimiterActive = false;
     g_shiftBlinkActive = false;
+    g_activeTelemetrySource = ActiveTelemetrySource::None;
+
+    g_obdCurrentRpm = 0;
+    g_obdMaxSeenRpm = 0;
+    g_obdVehicleSpeedKmh = 0;
+    g_obdEstimatedGear = 0;
+    g_lastObdTelemetryMs = 0;
+
+    g_simHubCurrentRpm = 0;
+    g_simHubMaxSeenRpm = 0;
+    g_simHubVehicleSpeedKmh = 0;
+    g_simHubGear = 0;
+    g_simHubThrottle = 0.0f;
+    g_simHubPitLimiterActive = false;
+    g_lastSimHubTelemetryMs = 0;
+    g_simHubEverReceived = false;
+    g_simHubReachable = false;
+    g_simHubWaitingForData = false;
+    g_simHubConnectionState = SimHubConnectionState::Disabled;
+
+    g_usbSerialConnected = false;
+    g_usbBridgeConnected = false;
+    g_usbBridgeWebActive = false;
+    g_usbTelemetryEverReceived = false;
+    g_lastUsbBridgeHeartbeatMs = 0;
+    g_lastUsbTelemetryMs = 0;
+    g_lastUsbRpcMs = 0;
+    g_usbBridgeConnectionState = UsbBridgeConnectionState::Disabled;
+    g_usbBridgeHost = "";
+    g_usbBridgeLastError = "";
 
     g_lastRpmRequest = 0;
 

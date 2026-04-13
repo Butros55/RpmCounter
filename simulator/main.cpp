@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <sstream>
 #include <string>
 
 #include <SDL.h>
@@ -90,7 +91,7 @@ namespace
     {
         if (config.mode == TelemetryInputMode::SimHub)
         {
-            return state.telemetrySource == UiTelemetrySource::SimHubUdp && !state.telemetryStale;
+            return state.telemetrySource == UiTelemetrySource::SimHubNetwork && !state.telemetryStale;
         }
 
         return true;
@@ -150,12 +151,62 @@ namespace
             return false;
         }
     }
+
+    void dispatch_startup_action(const std::string &rawToken)
+    {
+        std::string token = rawToken;
+        std::transform(token.begin(), token.end(), token.begin(), [](unsigned char ch)
+                       { return static_cast<char>(std::tolower(ch)); });
+
+        if (token == "left" || token == "prev" || token == "previous")
+        {
+            ui_s3_debug_dispatch(UiDebugAction::PreviousCard);
+        }
+        else if (token == "right" || token == "next")
+        {
+            ui_s3_debug_dispatch(UiDebugAction::NextCard);
+        }
+        else if (token == "enter" || token == "open" || token == "select")
+        {
+            ui_s3_debug_dispatch(UiDebugAction::OpenSelectedCard);
+        }
+        else if (token == "esc" || token == "home")
+        {
+            ui_s3_debug_dispatch(UiDebugAction::GoHome);
+        }
+        else if (token == "logo" || token == "showlogo")
+        {
+            ui_s3_debug_dispatch(UiDebugAction::ShowLogo);
+        }
+    }
+
+    void apply_startup_actions(const std::string &actions)
+    {
+        if (actions.empty())
+        {
+            return;
+        }
+
+        std::stringstream parser(actions);
+        std::string token;
+        while (std::getline(parser, token, ','))
+        {
+            token.erase(std::remove_if(token.begin(), token.end(), [](unsigned char ch)
+                                       { return std::isspace(ch) != 0; }),
+                        token.end());
+            if (!token.empty())
+            {
+                dispatch_startup_action(token);
+            }
+        }
+    }
 }
 
 int main()
 {
     const TelemetryServiceConfig telemetryConfig = load_telemetry_config();
     const std::string captureFramePath = env_string_value("SIM_CAPTURE_FRAME_PATH");
+    const std::string startupActions = env_string_value("SIM_UI_ACTIONS");
     const bool exitOnCapture = env_flag_enabled("SIM_EXIT_ON_CAPTURE", false);
     lv_init();
 
@@ -180,6 +231,7 @@ int main()
     };
 
     ui_s3_init(window.display(), hooks, app.state());
+    apply_startup_actions(startupActions);
 
     std::cout << "Telemetry mode: "
               << (telemetryConfig.mode == TelemetryInputMode::Simulator ? "internal simulator" : "SimHub")
@@ -201,6 +253,10 @@ int main()
     if (!captureFramePath.empty())
     {
         std::cout << "Frame capture path: " << captureFramePath << '\n';
+    }
+    if (!startupActions.empty())
+    {
+        std::cout << "Startup UI actions: " << startupActions << '\n';
     }
     std::cout << "ShiftLight simulator controls:\n";
     std::cout << "  Mouse drag/click: navigate LVGL UI\n";

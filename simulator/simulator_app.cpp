@@ -1,12 +1,13 @@
 #include "simulator_app.h"
 
 #include <algorithm>
+#include <string>
 
 namespace
 {
     UiTelemetrySource to_ui_telemetry_source(TelemetryInputMode mode)
     {
-        return mode == TelemetryInputMode::SimHub ? UiTelemetrySource::SimHubUdp : UiTelemetrySource::Simulator;
+        return mode == TelemetryInputMode::SimHub ? UiTelemetrySource::SimHubNetwork : UiTelemetrySource::Simulator;
     }
 }
 
@@ -37,6 +38,7 @@ void SimulatorApp::reset()
     state_.settings.tutorialSeen = false;
     state_.settings.lastMenuIndex = 0;
     state_.settings.nightMode = true;
+    state_.settings.telemetryPreference = (telemetryConfig_.mode == TelemetryInputMode::SimHub) ? UiTelemetryPreference::SimHub : UiTelemetryPreference::Auto;
     state_.wifiMode = UiWifiMode::StaWithApFallback;
 
     shiftOverrideEnabled_ = false;
@@ -142,6 +144,12 @@ void SimulatorApp::applyTelemetryFrame()
     state_.speedKmh = frame.speedKmh;
     state_.gear = frame.gear;
     state_.shift = frame.rpm >= 5600;
+    state_.simHubConfigured = telemetryConfig_.mode == TelemetryInputMode::SimHub;
+    state_.simHubReachable = !frame.stale;
+    state_.simHubEndpoint = telemetryConfig_.mode == TelemetryInputMode::SimHub
+                                ? (telemetryConfig_.simHubTransport == SimHubTransport::HttpApi ? "127.0.0.1:" + std::to_string(telemetryConfig_.httpPort)
+                                                                                                 : "127.0.0.1:" + std::to_string(telemetryConfig_.udpPort))
+                                : std::string();
 
     if (shiftOverrideEnabled_)
     {

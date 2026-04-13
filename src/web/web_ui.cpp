@@ -13,6 +13,9 @@
 #include "core/state.h"
 #include "hardware/display.h"
 #include "core/logging.h"
+#include "telemetry/telemetry_manager.h"
+#include "telemetry/usb_sim_bridge.h"
+#include "web_ui_pages.h"
 #include <core/utils.h>
 
 namespace
@@ -102,6 +105,104 @@ namespace
         case AP_ONLY:
         default:
             return "AP_ONLY";
+        }
+    }
+
+    String telemetryPreferenceToString(TelemetryPreference preference)
+    {
+        switch (preference)
+        {
+        case TelemetryPreference::Obd:
+            return "OBD";
+        case TelemetryPreference::SimHub:
+            return "SIM";
+        case TelemetryPreference::Auto:
+        default:
+            return "AUTO";
+        }
+    }
+
+    String telemetryPreferenceLabel(TelemetryPreference preference)
+    {
+        switch (preference)
+        {
+        case TelemetryPreference::Obd:
+            return "Nur OBD";
+        case TelemetryPreference::SimHub:
+            return "Nur Sim / PC";
+        case TelemetryPreference::Auto:
+        default:
+            return "Automatisch";
+        }
+    }
+
+    String simTransportPreferenceToString(SimTransportPreference preference)
+    {
+        switch (preference)
+        {
+        case SimTransportPreference::UsbSerial:
+            return "USB";
+        case SimTransportPreference::Network:
+            return "NETWORK";
+        case SimTransportPreference::Auto:
+        default:
+            return "AUTO";
+        }
+    }
+
+    String activeTelemetrySourceLabel(ActiveTelemetrySource source)
+    {
+        switch (source)
+        {
+        case ActiveTelemetrySource::Obd:
+            return "OBD";
+        case ActiveTelemetrySource::SimHubNetwork:
+            return "SimHub";
+        case ActiveTelemetrySource::UsbSim:
+            return "USB Sim";
+        case ActiveTelemetrySource::None:
+        default:
+            return "Keine";
+        }
+    }
+
+    String usbBridgeStateLabel(UsbBridgeConnectionState state)
+    {
+        switch (state)
+        {
+        case UsbBridgeConnectionState::Disconnected:
+            return "USB getrennt";
+        case UsbBridgeConnectionState::WaitingForBridge:
+            return "Warte auf Bridge";
+        case UsbBridgeConnectionState::WaitingForData:
+            return "Warte auf Telemetrie";
+        case UsbBridgeConnectionState::Live:
+            return "USB live";
+        case UsbBridgeConnectionState::Error:
+            return "USB Fehler";
+        case UsbBridgeConnectionState::Disabled:
+        default:
+            return "USB aus";
+        }
+    }
+
+    String simHubConnectionStateLabel(SimHubConnectionState state)
+    {
+        switch (state)
+        {
+        case SimHubConnectionState::WaitingForHost:
+            return "Host fehlt";
+        case SimHubConnectionState::WaitingForNetwork:
+            return "WLAN fehlt";
+        case SimHubConnectionState::WaitingForData:
+            return "Warte auf SimHub-Daten";
+        case SimHubConnectionState::Live:
+            return "Live";
+        case SimHubConnectionState::Error:
+            return "Verbindung fehlgeschlagen";
+        case SimHubConnectionState::Disabled:
+        default:
+            return "Deaktiviert";
         }
     }
 
@@ -294,7 +395,11 @@ namespace
         page += "<option value='2'";
         if (cfg.mode == 2)
             page += " selected";
-        page += ">Überempfindlich</option>";
+        page += ">Aggressiv</option>";
+        page += "<option value='3'";
+        if (cfg.mode == 3)
+            page += " selected";
+        page += ">GT3 / Endurance</option>";
         page += "</select>";
 
         page += F("<label for='brightness_slider'>Brightness (0-255)</label>");
@@ -712,7 +817,7 @@ namespace
                   " if(ledsOn<0) ledsOn=0;"
                   " if(ledsOn>count) ledsOn=count;"
                   " let shiftBlink=false;"
-                  " if(useBlink && (mode===1||mode===2) && fraction>=blinkStart){"
+                  " if(useBlink && (mode===1||mode===2||mode===3) && fraction>=blinkStart){"
                   "   const now=Date.now();"
                   "   if(now-lastLedBlinkTs>100){"
                   "     lastLedBlinkTs=now;"
@@ -723,30 +828,51 @@ namespace
                   "   ledBlinkState=false;"
                   " }"
                   " const mode2FullBlink=useBlink && mode===2 && fraction>=blinkStart;"
+                  " const mode3GtBlink=useBlink && mode===3 && fraction>=blinkStart;"
                   " const gCol=document.getElementById('greenColorInput').value;"
                   " const yCol=document.getElementById('yellowColorInput').value;"
                   " const rCol=document.getElementById('redColorInput').value;"
-                  " for(let i=0;i<count;i++){"
-                  "   let col='#000000';"
-                  "   if(i<ledsOn){"
-                  "     let pos=count>1 ? (i/(count-1)) : 0;"
-                  "     if(mode2FullBlink){"
+                  " if(mode===3){"
+                  "   const pairCount=Math.ceil(count/2);"
+                  "   const pairsOn=Math.round(fraction*pairCount);"
+                  "   for(let i=0;i<count;i++){"
+                  "     let col='#000000';"
+                  "     if(mode3GtBlink){"
                   "       col=ledBlinkState?rCol:'#000000';"
                   "     }else{"
-                  "       if(pos<greenEnd){"
-                  "         col=gCol;"
-                  "       }else if(pos<yellowEnd){"
-                  "         col=yCol;"
+                  "       const rank=Math.min(i,count-1-i);"
+                  "       if(rank<pairsOn){"
+                  "         const pos=pairCount>1 ? (rank/(pairCount-1)) : 1;"
+                  "         if(pos<greenEnd){ col=gCol; }"
+                  "         else if(pos<yellowEnd){ col=yCol; }"
+                  "         else{ col=rCol; }"
+                  "       }"
+                  "     }"
+                  "     dots[i].style.backgroundColor=col;"
+                  "   }"
+                  " }else{"
+                  "   for(let i=0;i<count;i++){"
+                  "     let col='#000000';"
+                  "     if(i<ledsOn){"
+                  "       let pos=count>1 ? (i/(count-1)) : 0;"
+                  "       if(mode2FullBlink){"
+                  "         col=ledBlinkState?rCol:'#000000';"
                   "       }else{"
-                  "         if(useBlink && mode===1 && shiftBlink){"
-                  "           col=ledBlinkState?rCol:'#000000';"
+                  "         if(pos<greenEnd){"
+                  "           col=gCol;"
+                  "         }else if(pos<yellowEnd){"
+                  "           col=yCol;"
                   "         }else{"
-                  "           col=rCol;"
+                  "           if(useBlink && mode===1 && shiftBlink){"
+                  "             col=ledBlinkState?rCol:'#000000';"
+                  "           }else{"
+                  "             col=rCol;"
+                  "           }"
                   "         }"
                   "       }"
                   "     }"
+                  "     dots[i].style.backgroundColor=col;"
                   "   }"
-                  "   dots[i].style.backgroundColor=col;"
                   " }"
                   " const blinkContainer=document.getElementById('blinkStartContainer');"
                   " if(mode===0){"
@@ -1026,6 +1152,8 @@ namespace
         String vin = readVehicleVin();
         String model = readVehicleModel();
         String diag = readVehicleDiagStatus();
+        String activeTelemetry = activeTelemetrySourceLabel(g_activeTelemetrySource);
+        String simHubState = simHubConnectionStateLabel(g_simHubConnectionState);
 
         String page;
         page.reserve(11000);
@@ -1182,6 +1310,33 @@ namespace
             page += " checked";
         page += "><span class='slider'></span></label></div>";
         page += F("<div class='small'>Schaltet zusätzliche Debug- und OBD-Einstellungen frei.</div></div>");
+
+        // --- Telemetrie ---
+        page += F("<div class='section'><div class='section-title'>Telemetrie</div>");
+        page += "<div class='row small'>Aktive Quelle: <strong>" + htmlEscape(activeTelemetry) + "</strong></div>";
+        page += "<div class='row small'>SimHub-Status: <strong>" + htmlEscape(simHubState) + "</strong></div>";
+        page += F("<label for='telemetryPreference'>Bevorzugte Quelle</label>");
+        page += "<div class='select-wrap'><select name='telemetryPreference' id='telemetryPreference' class='wifi-mode-select'>";
+        page += "<option value='0'";
+        if (cfg.telemetryPreference == TelemetryPreference::Auto)
+            page += " selected";
+        page += ">Automatisch (SimHub bevorzugen, sonst OBD)</option>";
+        page += "<option value='1'";
+        if (cfg.telemetryPreference == TelemetryPreference::Obd)
+            page += " selected";
+        page += ">Nur OBD/BLE</option>";
+        page += "<option value='2'";
+        if (cfg.telemetryPreference == TelemetryPreference::SimHub)
+            page += " selected";
+        page += ">Nur SimHub</option>";
+        page += "</select></div>";
+        page += F("<label for='simHubHost'>SimHub Host / PC-IP</label>");
+        page += "<input type='text' name='simHubHost' id='simHubHost' placeholder='z.B. 192.168.178.50' value='" + htmlEscape(cfg.simHubHost) + "'>";
+        page += F("<label for='simHubPort'>SimHub Port</label>");
+        page += "<input type='number' name='simHubPort' id='simHubPort' min='1' max='65535' value='" + String(cfg.simHubPort) + "'>";
+        page += F("<label for='simHubPollMs'>Poll-Intervall (ms)</label>");
+        page += "<input type='number' name='simHubPollMs' id='simHubPollMs' min='25' max='1000' value='" + String(cfg.simHubPollMs) + "'>";
+        page += F("<div class='small'>PC und ESP32 muessen sich im selben Netzwerk sehen. Kein SimHub-Arduino-Device notwendig; der ESP32 liest SimHub direkt ueber dessen HTTP-API.</div></div>");
 
         // --- WLAN ---
         page += F("<div class='section'><div class='section-title'>WLAN</div>");
@@ -1993,7 +2148,7 @@ namespace
     void handleRoot()
     {
         markHttpActivity("WEB_ROOT");
-        server.send(200, "text/html", htmlPage());
+        server.send(200, "text/html", buildDashboardPage());
     }
 
     void handleBrightness()
@@ -2017,7 +2172,7 @@ namespace
         if (server.hasArg("mode"))
         {
             int m = server.arg("mode").toInt();
-            if (m < 0 || m > 2)
+            if (m < 0 || m > 3)
                 m = 0;
             cfg.mode = m;
         }
@@ -2110,6 +2265,40 @@ namespace
         cfg.apPassword = apPass;
     }
 
+    void applyTelemetryConfigFromRequest()
+    {
+        if (server.hasArg("telemetryPreference"))
+        {
+            const int rawPreference = clampInt(server.arg("telemetryPreference").toInt(), 0, 2);
+            cfg.telemetryPreference = static_cast<TelemetryPreference>(rawPreference);
+        }
+
+        if (server.hasArg("simTransport"))
+        {
+            const int rawTransport = clampInt(server.arg("simTransport").toInt(), 0, 2);
+            cfg.simTransportPreference = static_cast<SimTransportPreference>(rawTransport);
+        }
+
+        if (server.hasArg("displayFocus"))
+        {
+            const int rawFocus = clampInt(server.arg("displayFocus").toInt(), 0, 2);
+            cfg.uiDisplayFocus = static_cast<DisplayFocusMetric>(rawFocus);
+        }
+
+        cfg.simHubHost = argTrimmed("simHubHost", cfg.simHubHost);
+        cfg.simHubPort = static_cast<uint16_t>(clampInt(server.arg("simHubPort").toInt(), 1, 65535));
+        if (!server.hasArg("simHubPort"))
+        {
+            cfg.simHubPort = 8888;
+        }
+
+        cfg.simHubPollMs = static_cast<uint16_t>(clampInt(server.arg("simHubPollMs").toInt(), 25, 1000));
+        if (!server.hasArg("simHubPollMs"))
+        {
+            cfg.simHubPollMs = 75;
+        }
+    }
+
     void handleSave()
     {
         markHttpActivity("WEB_SAVE");
@@ -2139,6 +2328,11 @@ namespace
     void handleConnect()
     {
         markHttpActivity("WEB_CONNECT");
+        if (!telemetryShouldAllowObd())
+        {
+            server.send(409, "text/plain", "OBD ist im Sim / USB Modus deaktiviert.");
+            return;
+        }
         g_autoReconnect = true;
         g_forceImmediateReconnect = true;
         g_lastBleRetryMs = 0;
@@ -2167,6 +2361,7 @@ namespace
         json += ",\"maxRpm\":" + String(g_maxSeenRpm);
         json += ",\"speed\":" + String(g_vehicleSpeedKmh);
         json += ",\"gear\":" + String(g_estimatedGear);
+        json += ",\"pitLimiter\":" + String(g_pitLimiterActive ? "true" : "false");
         json += ",\"lastTx\":\"" + jsonEscape(g_lastTxInfo) + "\"";
         json += ",\"lastObd\":\"" + jsonEscape(g_lastObdInfo) + "\"";
         json += ",\"connected\":" + String(g_connected ? "true" : "false");
@@ -2181,6 +2376,20 @@ namespace
         json += ",\"vehicleInfoRequestRunning\":" + String(g_vehicleInfoRequestRunning ? "true" : "false");
         json += ",\"vehicleInfoReady\":" + String(ready ? "true" : "false");
         json += ",\"vehicleInfoAge\":" + String(vehicleAge);
+        json += ",\"telemetryPreference\":\"" + telemetryPreferenceToString(cfg.telemetryPreference) + "\"";
+        json += ",\"simTransport\":\"" + simTransportPreferenceToString(cfg.simTransportPreference) + "\"";
+        json += ",\"activeTelemetry\":\"" + activeTelemetrySourceLabel(g_activeTelemetrySource) + "\"";
+        json += ",\"simHubState\":\"" + jsonEscape(simHubConnectionStateLabel(g_simHubConnectionState)) + "\"";
+        json += ",\"usbState\":\"" + jsonEscape(usbBridgeStateLabel(g_usbBridgeConnectionState)) + "\"";
+        json += ",\"usbConnected\":" + String(g_usbSerialConnected ? "true" : "false");
+        json += ",\"usbBridgeConnected\":" + String(g_usbBridgeConnected ? "true" : "false");
+        json += ",\"usbBridgeWebActive\":" + String(g_usbBridgeWebActive ? "true" : "false");
+        json += ",\"usbHost\":\"" + jsonEscape(g_usbBridgeHost) + "\"";
+        json += ",\"usbError\":\"" + jsonEscape(g_usbBridgeLastError) + "\"";
+        json += ",\"wifiSuspended\":" + String(isWifiSuspendedForUsb() ? "true" : "false");
+        json += ",\"obdAllowed\":" + String(telemetryShouldAllowObd() ? "true" : "false");
+        json += ",\"displayFocus\":" + String(static_cast<int>(cfg.uiDisplayFocus));
+        json += ",\"simHubConfigured\":" + String(cfg.simHubHost.length() > 0 ? "true" : "false");
         json += ",\"bleConnectInProgress\":" + String(g_bleConnectInProgress ? "true" : "false");
         json += ",\"bleConnectTargetAddr\":\"" + jsonEscape(g_bleConnectTargetAddr) + "\"";
         json += ",\"bleConnectTargetName\":\"" + jsonEscape(g_bleConnectTargetName) + "\"";
@@ -2357,7 +2566,7 @@ namespace
     {
         markHttpActivity("WEB_SETTINGS_GET");
         bool saved = server.hasArg("saved");
-        server.send(200, "text/html", settingsPage(saved));
+        server.send(200, "text/html", buildSettingsPage(saved));
     }
 
     void handleSettingsSave()
@@ -2372,6 +2581,7 @@ namespace
             g_lastBleRetryMs = 0;
         }
 
+        applyTelemetryConfigFromRequest();
         applyWifiConfigFromRequest();
         saveConfig();
         setupWifiFromConfig(cfg);
