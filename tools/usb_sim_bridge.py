@@ -103,7 +103,7 @@ class UsbSimBridge:
             return "USB-Link wurde vom ESP getrennt. Board neu verbinden und Serial Monitor schliessen."
         return text
 
-    def _bridge_recently_seen(self, timeout: float = 4.5) -> bool:
+    def _bridge_recently_seen(self, timeout: float = 8.0) -> bool:
         latest = max(self.last_hello_monotonic, self.last_status_ok_monotonic)
         return latest > 0.0 and (time.monotonic() - latest) <= timeout
 
@@ -199,7 +199,6 @@ class UsbSimBridge:
             raise SerialException("serial not open")
         with self.tx_lock:
             self.serial.write((line + "\n").encode("utf-8"))
-            self.serial.flush()
 
     def _process_line(self, line: str) -> None:
         if not line:
@@ -283,8 +282,8 @@ class UsbSimBridge:
                             "maxrpm": simhub.maxrpm,
                         })
                         self._send_line(f"USBSIM TELEMETRY {payload}")
-                    next_tx = now + 0.02
-                time.sleep(0.02)
+                    next_tx = now + 0.016
+                time.sleep(0.01)
             except (SerialException, OSError) as exc:
                 self.log(f"serial error: {exc}")
                 self._close_serial(self._friendly_serial_error(exc))
@@ -344,15 +343,15 @@ class UsbSimBridge:
         next_config = 0.0
         while not self.stop_event.is_set():
             if not self.serial:
-                time.sleep(0.35)
+                time.sleep(0.2)
                 continue
             try:
                 now = time.monotonic()
                 if self.last_hello_monotonic <= 0 and (now - self.serial_open_monotonic) < 2.2:
-                    time.sleep(0.12)
+                    time.sleep(0.08)
                     continue
 
-                status = self._rpc("STATUS", timeout=1.2)
+                status = self._rpc("STATUS", timeout=0.9)
                 with self.state_lock:
                     self.last_status_ok_monotonic = now
                     self.esp.bridge_connected = True
@@ -373,17 +372,17 @@ class UsbSimBridge:
                     self.esp.maxrpm = int(status.get("maxRpm", 0) or 0)
                     self.esp.error = str(status.get("usbError", "")) or self.esp.error
                 if now >= next_config or not self.config_cache:
-                    config = self._rpc("CONFIG_GET", timeout=1.2)
+                    config = self._rpc("CONFIG_GET", timeout=1.5)
                     with self.state_lock:
                         self.config_cache = config
-                    next_config = now + 4.0
+                    next_config = now + 8.0
             except RuntimeError as exc:
                 with self.state_lock:
                     self.esp.bridge_connected = self._bridge_recently_seen()
                     if self.esp.bridge_connected and self.esp.usb_state in {"USB getrennt", "USB disconnected"}:
                         self.esp.usb_state = "Warte auf Status"
                     self.esp.error = str(exc)
-            time.sleep(0.9)
+            time.sleep(0.25)
 
     def get_simhub(self) -> SimHubState:
         with self.state_lock:

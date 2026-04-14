@@ -371,17 +371,6 @@ void updateRpmBar(int rpm)
     strip.show();
     displaySetShiftBlink(displayBlink);
 
-    static unsigned long lastLogMs = 0;
-    if (now - lastLogMs > 500)
-    {
-        lastLogMs = now;
-        Serial.print("[LED] rpm=");
-        Serial.print(rpm);
-        Serial.print(" fraction=");
-        Serial.print(fraction, 2);
-        Serial.print(" ledsOn=");
-        Serial.println(ledsOn);
-    }
 }
 
 void ledBarLoop()

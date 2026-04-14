@@ -12,7 +12,7 @@ namespace
 {
     constexpr unsigned long OBD_FRESH_TIMEOUT_MS = 1200;
     constexpr unsigned long SIMHUB_FRESH_TIMEOUT_MS = 2000;
-    constexpr unsigned long TELEMETRY_SOURCE_HOLD_MS = 2500;
+    constexpr unsigned long TELEMETRY_SOURCE_HOLD_MS = 8000;
 
     bool isObdFresh(unsigned long nowMs)
     {

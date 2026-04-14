@@ -69,8 +69,8 @@ void loop()
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
     display_s3_loop();
 #endif
-    webUiLoop();
     usbSimBridgeLoop();
+    webUiLoop();
     wifiLoop();
     telemetryLoop();
     bleObdLoop();

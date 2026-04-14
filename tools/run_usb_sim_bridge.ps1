@@ -33,10 +33,27 @@ if ($existingBridge) {
     Start-Sleep -Milliseconds 600
 }
 
-$serialMonitor = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -match 'platformio.exe.*--target monitor' }
-if ($serialMonitor) {
-    Write-Warning "PlatformIO Serial Monitor laeuft noch und blockiert oft COM-Ports. Bitte schliessen, falls USB getrennt oder RPC timeout angezeigt wird."
+$pioWorkers = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.CommandLine -match 'platformio.exe.*--target monitor' -or
+        $_.CommandLine -match 'platformio.exe.*--target upload' -or
+        $_.CommandLine -match 'pio device monitor' -or
+        $_.CommandLine -match 'esptool'
+    }
+if ($pioWorkers) {
+    Write-Host "Stopping active PlatformIO/Upload serial workers..." -ForegroundColor Yellow
+    $pioWorkers | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Seconds 2
+}
+
+if ($SerialPort) {
+    for ($attempt = 0; $attempt -lt 10; $attempt++) {
+        $modeOutput = & cmd /c "mode $SerialPort" 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            break
+        }
+        Start-Sleep -Milliseconds 700
+    }
 }
 
 Set-Location $repoRoot

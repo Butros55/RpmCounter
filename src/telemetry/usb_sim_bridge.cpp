@@ -11,9 +11,9 @@
 
 namespace
 {
-    constexpr unsigned long USB_BRIDGE_HEARTBEAT_TIMEOUT_MS = 1600;
-    constexpr unsigned long USB_TELEMETRY_FRESH_TIMEOUT_MS = 2000;
-    constexpr unsigned long USB_BRIDGE_STICKY_TIMEOUT_MS = 5000;
+    constexpr unsigned long USB_BRIDGE_HEARTBEAT_TIMEOUT_MS = 3200;
+    constexpr unsigned long USB_TELEMETRY_FRESH_TIMEOUT_MS = 3500;
+    constexpr unsigned long USB_BRIDGE_STICKY_TIMEOUT_MS = 12000;
     constexpr size_t USB_LINE_BUFFER_LIMIT = 384;
 
     String g_usbRxLine;
@@ -187,7 +187,6 @@ namespace
     void sendProtocolLine(const String &line)
     {
         usbStream().println(line);
-        usbStream().flush();
     }
 
     void sendRpcResponse(int requestId, const String &json)
@@ -451,7 +450,7 @@ bool usbSimTransportEnabled()
 
 bool usbSimBridgeOnline()
 {
-    return g_usbBridgeConnected;
+    return usbBridgeRecentlyActive(millis());
 }
 
 bool usbSimTelemetryFresh(unsigned long nowMs)
@@ -465,6 +464,14 @@ bool usbSimShouldBlockObd()
 {
     const unsigned long nowMs = millis();
     const bool usbStickyActive = usbBridgeRecentlyActive(nowMs);
+    const bool explicitUsbSimMode =
+        cfg.telemetryPreference == TelemetryPreference::SimHub &&
+        cfg.simTransportPreference == SimTransportPreference::UsbSerial;
+
+    if (explicitUsbSimMode)
+    {
+        return true;
+    }
 
     if (cfg.telemetryPreference == TelemetryPreference::SimHub)
     {
@@ -483,10 +490,18 @@ bool usbSimShouldSuspendWifi()
 {
     const unsigned long nowMs = millis();
     const bool usbStickyActive = usbBridgeRecentlyActive(nowMs);
+    const bool explicitUsbSimMode =
+        cfg.telemetryPreference == TelemetryPreference::SimHub &&
+        cfg.simTransportPreference == SimTransportPreference::UsbSerial;
 
     if (cfg.simTransportPreference == SimTransportPreference::Network)
     {
         return false;
+    }
+
+    if (explicitUsbSimMode)
+    {
+        return true;
     }
 
     if (cfg.telemetryPreference == TelemetryPreference::SimHub)
