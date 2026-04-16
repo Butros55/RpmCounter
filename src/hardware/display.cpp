@@ -191,6 +191,11 @@ void displayShowTestLogo()
     tft.drawCircle(cx, cy, emblemRadius, ST77XX_WHITE);
 }
 
+void displayShowSimSessionTransition(SimSessionTransitionType)
+{
+    // Sim-session overlays are S3-only. The legacy ST7789 path stays unchanged.
+}
+
 void displaySetGear(int gear)
 {
     if (!g_displayInitialized)

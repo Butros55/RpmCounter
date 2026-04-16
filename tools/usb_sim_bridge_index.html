@@ -26,7 +26,7 @@
           <div>
             <div class="kicker">USB Sim Bridge</div>
             <div class="hero-title">ShiftLight am PC</div>
-            <div class="hero-copy">Lokale USB-Oberflaeche fuer den ESP32. Der PC liest SimHub und schiebt Telemetrie per USB-CDC auf das Board. Nur in USB-only wird der ESP exklusiv auf USB festgelegt, Auto darf sauber auf Netzwerk ausweichen.</div>
+            <div class="hero-copy">Lokale USB-Oberflaeche fuer den ESP32. Der PC liest SimHub und schiebt Telemetrie per USB-CDC auf das Board. USB-only fixiert nur die Telemetrie auf USB, die ESP-Weboberflaeche ueber WLAN bleibt erreichbar.</div>
           </div>
           <div class="pill-row">
             <span class="pill neutral" id="pillTelemetry">Initialisiere</span>
@@ -135,6 +135,8 @@
             <div class="info-row"><div class="info-label">Seq / Dups</div><div class="info-value mono" id="diagUsbSeq">-</div></div>
             <div class="info-row"><div class="info-label">LED Filter</div><div class="info-value mono" id="diagLedFilter">-</div></div>
             <div class="info-row"><div class="info-label">LED Render</div><div class="info-value mono" id="diagLedRender">-</div></div>
+            <div class="info-row"><div class="info-label">Snapshot</div><div class="info-value mono" id="diagSnapshot">-</div></div>
+            <div class="info-row"><div class="info-label">Sim Session</div><div class="info-value mono" id="diagSimSession">-</div></div>
             <div class="info-row"><div class="info-label">Bridge TX</div><div class="info-value mono" id="diagBridgeGap">-</div></div>
             <div class="info-row"><div class="info-label">Netzwerk Debug</div><div class="info-value mono" id="diagNetErr">-</div></div>
           </div>
@@ -271,7 +273,9 @@
       setText('diagUsbGap', `${data.espUsbTelemetryLastGapMs ?? 0} / ${data.espUsbTelemetryMaxGapMs ?? 0} ms (${data.espUsbTelemetryGapEvents ?? 0})`);
       setText('diagUsbSeq', `seq ${data.espUsbTelemetrySeq ?? 0} | gap ${data.espUsbTelemetrySeqGapEvents ?? 0}/${data.espUsbTelemetrySeqGapFrames ?? 0} | dup ${data.espUsbTelemetrySeqDuplicates ?? 0}`);
       setText('diagLedFilter', `${data.espLedRawRpm ?? 0} -> ${data.espLedFilteredRpm ?? 0} rpm | adj ${data.espLedFilterAdjusts ?? 0}`);
-      setText('diagLedRender', `show ${data.espLedFrameShows ?? 0} | skip ${data.espLedFrameSkips ?? 0} | mode ${data.espLedRenderMode || '-'} | start ${data.espLedStartRpm ?? 0}`);
+      setText('diagLedRender', `show ${data.espLedFrameShows ?? 0} | skip ${data.espLedFrameSkips ?? 0} | mode ${data.espLedRenderMode || '-'} | writer ${data.espLedLastWriter || '-'} | race ${data.espLedSnapshotChangedDuringRender ?? 0} | ext ${data.espLedExternalWriteAttempts ?? 0}`);
+      setText('diagSnapshot', `v${data.espTelemetrySnapshotVersion ?? 0} | ${data.espTelemetrySnapshotSource || '-'} | age ${data.espTelemetrySnapshotAgeMs ?? 0} ms | ${data.espTelemetrySnapshotFresh ? 'fresh' : 'stale'}`);
+      setText('diagSimSession', `${data.espSimSessionState || '-'} | ${data.espSimSessionLastTransition || '-'} | src ${data.espTelemetryLastSourceTransition || '-'}`);
       setText('diagBridgeGap', `${data.bridgeLastTelemetryGapMs ?? 0} / ${data.bridgeMaxTelemetryGapMs ?? 0} ms | tx ${data.bridgeTelemetryTxCount ?? 0} | rpc ${data.bridgeStatusRpcErrors ?? 0}`);
       setText('diagNetErr', `ok ${data.espSimHubPollOk ?? 0} err ${data.espSimHubPollErr ?? 0} suppr ${data.espSimHubSuppressedWhileUsb ?? 0} ${data.espSimHubLastError ? '| ' + data.espSimHubLastError : ''}`);
       syncDirty();

@@ -86,6 +86,7 @@ class UsbSimBridge:
         self.simhub = SimHubState()
         self.esp = EspState()
         self.config_cache: dict[str, Any] = {}
+        self.last_esp_web_base_url = ""
         self.telemetry_seq = 0
         self.telemetry_tx_count = 0
         self.telemetry_tx_error_count = 0
@@ -468,6 +469,9 @@ class UsbSimBridge:
                     f"usb={current.usb_state} source={current.active_telemetry} "
                     f"transport={current.sim_transport_mode} fallback={current.telemetry_fallback}"
                 )
+                wifi_ip = str(status.get("wifiIp", "") or "").strip()
+                if wifi_ip and wifi_ip not in {"0.0.0.0", "-", "Nicht verbunden"}:
+                    self._remember_esp_web_base_url(f"http://{wifi_ip}")
                 self._log_esp_status_change(previous, current)
                 if now >= next_config or not self.config_cache:
                     config = self._rpc("CONFIG_GET", timeout=1.5)
@@ -495,14 +499,27 @@ class UsbSimBridge:
         with self.state_lock:
             return dict(self.config_cache)
 
-    def get_esp_web_base_url(self) -> str | None:
+    def _remember_esp_web_base_url(self, base_url: str) -> None:
+        with self.state_lock:
+            self.last_esp_web_base_url = base_url
+
+    def get_esp_web_base_urls(self) -> list[str]:
         with self.state_lock:
             raw = dict(self.esp.raw)
+            cached = self.last_esp_web_base_url
 
         wifi_ip = str(raw.get("wifiIp", "") or "").strip()
-        if not wifi_ip or wifi_ip in {"0.0.0.0", "-", "Nicht verbunden"}:
-            return None
-        return f"http://{wifi_ip}"
+        candidates: list[str] = []
+        if wifi_ip and wifi_ip not in {"0.0.0.0", "-", "Nicht verbunden"}:
+            candidates.append(f"http://{wifi_ip}")
+        if cached:
+            candidates.append(cached)
+
+        unique: list[str] = []
+        for candidate in candidates:
+            if candidate not in unique:
+                unique.append(candidate)
+        return unique
 
     def default_config(self) -> dict[str, Any]:
         return {
@@ -602,7 +619,7 @@ class UsbSimBridge:
         else:
             mode_summary = "Auto: warte auf Quelle"
         if transport_mode == "USB_ONLY":
-            wifi_summary = "USB-only pausiert WLAN"
+            wifi_summary = "WLAN aktiv (USB-only Telemetrie)"
         else:
             wifi_summary = "WLAN aktiv" if not esp.wifi_suspended else "WLAN pausiert"
         if not esp.obd_allowed:
@@ -677,7 +694,21 @@ class UsbSimBridge:
             "espLedPitLimiterOnly": bool(esp.raw.get("ledPitLimiterOnly", False)),
             "espLedDiagnosticMode": str(esp.raw.get("ledDiagnosticMode", "") or ""),
             "espLedRenderMode": str(esp.raw.get("ledRenderMode", "") or ""),
+            "espLedLastWriter": str(esp.raw.get("ledLastWriter", "") or ""),
             "espLedLastShowAgeMs": int(esp.raw.get("ledLastShowAgeMs", 0) or 0),
+            "espLedLastFrameHash": int(esp.raw.get("ledLastFrameHash", 0) or 0),
+            "espLedExternalWriteAttempts": int(esp.raw.get("ledExternalWriteAttempts", 0) or 0),
+            "espLedSnapshotChangedDuringRender": int(esp.raw.get("ledSnapshotChangedDuringRender", 0) or 0),
+            "espLedDeterministicSweepActive": bool(esp.raw.get("ledDeterministicSweepActive", False)),
+            "espTelemetrySnapshotVersion": int(esp.raw.get("telemetrySnapshotVersion", 0) or 0),
+            "espTelemetrySnapshotAgeMs": int(esp.raw.get("telemetrySnapshotAgeMs", 0) or 0),
+            "espTelemetrySnapshotSource": str(esp.raw.get("telemetrySnapshotSource", "") or ""),
+            "espTelemetrySnapshotFresh": bool(esp.raw.get("telemetrySnapshotFresh", False)),
+            "espSimSessionState": str(esp.raw.get("simSessionState", "") or ""),
+            "espTelemetrySourceTransitionCount": int(esp.raw.get("telemetrySourceTransitionCount", 0) or 0),
+            "espTelemetryLastSourceTransition": str(esp.raw.get("telemetryLastSourceTransition", "") or ""),
+            "espSimSessionTransitionCount": int(esp.raw.get("simSessionTransitionCount", 0) or 0),
+            "espSimSessionLastTransition": str(esp.raw.get("simSessionLastTransition", "") or ""),
             "gearSource": str(esp.raw.get("gearSource", "") or ""),
             "espWifiIp": str(esp.raw.get("wifiIp", "") or ""),
             "espSimHubPollOk": int(esp.raw.get("simHubPollOk", 0) or 0),
@@ -817,14 +848,9 @@ def create_app(bridge: UsbSimBridge) -> Flask:
         return location
 
     def proxy_esp_request(path: str) -> Response | None:
-        base_url = bridge.get_esp_web_base_url()
-        if not base_url:
+        base_urls = bridge.get_esp_web_base_urls()
+        if not base_urls:
             return None
-
-        target = base_url + path
-        query = request.query_string.decode("utf-8", errors="ignore")
-        if query:
-            target += "?" + query
 
         headers: dict[str, str] = {}
         for name in ("Content-Type", "Accept"):
@@ -833,31 +859,40 @@ def create_app(bridge: UsbSimBridge) -> Flask:
                 headers[name] = value
 
         data = request.get_data() if request.method in {"POST", "PUT", "PATCH"} else None
-        upstream = urllib.request.Request(target, data=data if data else None, headers=headers, method=request.method)
-        try:
-            with urllib.request.urlopen(upstream, timeout=3.0) as response:
-                body = response.read()
-                response_headers: dict[str, str] = {}
-                content_type = response.headers.get("Content-Type")
+        query = request.query_string.decode("utf-8", errors="ignore")
+
+        for base_url in base_urls:
+            target = base_url + path
+            if query:
+                target += "?" + query
+            upstream = urllib.request.Request(target, data=data if data else None, headers=headers, method=request.method)
+            try:
+                with urllib.request.urlopen(upstream, timeout=1.5) as response:
+                    body = response.read()
+                    response_headers: dict[str, str] = {}
+                    content_type = response.headers.get("Content-Type")
+                    if content_type:
+                        response_headers["Content-Type"] = content_type
+                    location = response.headers.get("Location")
+                    if location:
+                        response_headers["Location"] = rewrite_location(location, base_url)
+                    bridge._remember_esp_web_base_url(base_url)
+                    return Response(body, status=response.status, headers=response_headers)
+            except urllib.error.HTTPError as exc:
+                body = exc.read()
+                response_headers = {}
+                content_type = exc.headers.get("Content-Type")
                 if content_type:
                     response_headers["Content-Type"] = content_type
-                location = response.headers.get("Location")
+                location = exc.headers.get("Location")
                 if location:
                     response_headers["Location"] = rewrite_location(location, base_url)
-                return Response(body, status=response.status, headers=response_headers)
-        except urllib.error.HTTPError as exc:
-            body = exc.read()
-            response_headers = {}
-            content_type = exc.headers.get("Content-Type")
-            if content_type:
-                response_headers["Content-Type"] = content_type
-            location = exc.headers.get("Location")
-            if location:
-                response_headers["Location"] = rewrite_location(location, base_url)
-            return Response(body, status=exc.code, headers=response_headers)
-        except Exception as exc:
-            bridge.log(f"esp proxy failed path={path}: {exc}")
-            return None
+                bridge._remember_esp_web_base_url(base_url)
+                return Response(body, status=exc.code, headers=response_headers)
+            except Exception as exc:
+                bridge.log(f"esp proxy failed base={base_url} path={path}: {exc}")
+
+        return None
 
     def fallback_compat_route(path: str):
         if request.method == "GET" and path in {"/", "/settings", "/settings/"}:

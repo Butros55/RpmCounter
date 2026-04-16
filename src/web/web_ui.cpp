@@ -339,14 +339,15 @@ namespace
         return out;
     }
 
-    void enforceOrder(int &g, int &y, int &b)
+    void enforceOrder(int &g, int &y, int &r, int &b)
     {
         g = clampInt(g, 0, 100);
         if (y < g)
             y = g;
         y = clampInt(y, 0, 100);
-        if (b < y)
-            b = y;
+        if (r < y)
+            r = y;
+        r = clampInt(r, 0, 100);
         b = clampInt(b, 0, 100);
     }
 
@@ -483,8 +484,13 @@ namespace
         page += "<input type='range' name='yellowEndPct' min='0' max='100' value='" + String(cfg.yellowEndPct) + "' id='yellowEndSlider' data-display='yellowEndVal'>";
         page += "<div class='small'>Wert: <span id='yellowEndVal'>" + String(cfg.yellowEndPct) + "%</span></div></div>";
 
+        page += "<div class='range-group' id='redEndContainer'>";
+        page += "<label class='rpm-label' id='redEndLabel'><span class='rpm-label-title'>Shift / Warnung</span><span class='rpm-label-range'>Fest rot bis (% von Max RPM)</span></label>";
+        page += "<input type='range' name='redEndPct' min='0' max='100' value='" + String(cfg.redEndPct) + "' id='redEndSlider' data-display='redEndVal'>";
+        page += "<div class='small'>Wert: <span id='redEndVal'>" + String(cfg.redEndPct) + "%</span></div></div>";
+
         page += "<div class='range-group' id='blinkStartContainer'>";
-        page += "<label class='rpm-label' id='blinkStartLabel'><span class='rpm-label-title'>Shift / Warnung</span><span class='rpm-label-range'>Start (% von Max RPM)</span></label>";
+        page += "<label class='rpm-label' id='blinkStartLabel'><span class='rpm-label-title'>Blink Start</span><span class='rpm-label-range'>Fruehester Blinkpunkt (% von Max RPM)</span></label>";
         page += "<input type='range' name='blinkStartPct' min='0' max='100' value='" + String(cfg.blinkStartPct) + "' id='blinkStartSlider' data-display='blinkStartVal'>";
         page += "<div class='small'>Wert: <span id='blinkStartVal'>" + String(cfg.blinkStartPct) + "%</span></div></div>";
 
@@ -692,10 +698,12 @@ namespace
                   "function enforceSliderOrder(changedId){"
                   " const g=document.getElementById('greenEndSlider');"
                   " const y=document.getElementById('yellowEndSlider');"
+                  " const r=document.getElementById('redEndSlider');"
                   " const b=document.getElementById('blinkStartSlider');"
-                  " if(!g||!y||!b) return;"
+                  " if(!g||!y||!r||!b) return;"
                   " let gv=parseInt(g.value||'0');"
                   " let yv=parseInt(y.value||'0');"
+                  " let rv=parseInt(r.value||'0');"
                   " let bv=parseInt(b.value||'0');"
                   " const sync=(el,val)=>{"
                   "   if(parseInt(el.value)!=val){"
@@ -705,14 +713,15 @@ namespace
                   " };"
                   " if(changedId==='greenEndSlider'){"
                   "   if(yv<gv){yv=gv;sync(y,yv);}"
-                  "   if(bv<yv){bv=yv;sync(b,bv);}"
+                  "   if(rv<yv){rv=yv;sync(r,rv);}"
                   " }else if(changedId==='yellowEndSlider'){"
-                  "   if(yv<gv){gv=yv;sync(g,gv);}"
-                  "   if(bv<yv){bv=yv;sync(b,bv);}"
-                  " }else if(changedId==='blinkStartSlider'){"
-                  "   if(bv<yv){yv=bv;sync(y,yv);}"
-                  "   if(yv<gv){gv=yv;sync(g,gv);}"
+                  "   if(yv<gv){yv=gv;sync(y,yv);}"
+                  "   if(rv<yv){rv=yv;sync(r,rv);}"
+                  " }else if(changedId==='redEndSlider'){"
+                  "   if(rv<yv){rv=yv;sync(r,rv);}"
                   " }"
+                  " bv=Math.max(0,Math.min(100,bv));"
+                  " sync(b,bv);"
                   "}"
 
                   "function updateAutoscaleUi(){"
@@ -754,17 +763,21 @@ namespace
                   "function getThresholds(){"
                   " const gv=parseInt(document.getElementById('greenEndSlider').value||'0');"
                   " const yv=parseInt(document.getElementById('yellowEndSlider').value||'0');"
+                  " const rv=parseInt(document.getElementById('redEndSlider').value||'0');"
                   " const bv=parseInt(document.getElementById('blinkStartSlider').value||'0');"
                   " let greenEnd=gv/100.0;"
                   " let yellowEnd=yv/100.0;"
+                  " let redEnd=rv/100.0;"
                   " let blinkStart=bv/100.0;"
                   " if(greenEnd<0) greenEnd=0;"
                   " if(greenEnd>1) greenEnd=1;"
                   " if(yellowEnd<greenEnd) yellowEnd=greenEnd;"
                   " if(yellowEnd>1) yellowEnd=1;"
-                  " if(blinkStart<yellowEnd) blinkStart=yellowEnd;"
+                  " if(redEnd<yellowEnd) redEnd=yellowEnd;"
+                  " if(redEnd>1) redEnd=1;"
+                  " if(blinkStart<0) blinkStart=0;"
                   " if(blinkStart>1) blinkStart=1;"
-                  " return {greenEnd,yellowEnd,blinkStart};"
+                  " return {greenEnd,yellowEnd,redEnd,blinkStart};"
                   "}"
 
                   "function computeSimFraction(t){"
@@ -844,12 +857,14 @@ namespace
                   " const thr=getThresholds();"
                   " const greenEnd=thr.greenEnd;"
                   " const yellowEnd=thr.yellowEnd;"
+                  " const redEnd=thr.redEnd;"
                   " const blinkStart=thr.blinkStart;"
+                  " const blinkTrigger=Math.max(redEnd,blinkStart);"
                   " let ledsOn=Math.round(fraction*count);"
                   " if(ledsOn<0) ledsOn=0;"
                   " if(ledsOn>count) ledsOn=count;"
                   " let shiftBlink=false;"
-                  " if(useBlink && (mode===1||mode===2||mode===3) && fraction>=blinkStart){"
+                  " if(useBlink && (mode===1||mode===2||mode===3) && fraction>=blinkTrigger){"
                   "   const now=Date.now();"
                   "   if(now-lastLedBlinkTs>100){"
                   "     lastLedBlinkTs=now;"
@@ -859,8 +874,8 @@ namespace
                   " }else{"
                   "   ledBlinkState=false;"
                   " }"
-                  " const mode2FullBlink=useBlink && mode===2 && fraction>=blinkStart;"
-                  " const mode3GtBlink=useBlink && mode===3 && fraction>=blinkStart;"
+                  " const mode2FullBlink=useBlink && mode===2 && fraction>=blinkTrigger;"
+                  " const mode3GtBlink=useBlink && mode===3 && fraction>=blinkTrigger;"
                   " const gCol=document.getElementById('greenColorInput').value;"
                   " const yCol=document.getElementById('yellowColorInput').value;"
                   " const rCol=document.getElementById('redColorInput').value;"
@@ -946,7 +961,7 @@ namespace
                   "function handleSliderChange(ev){"
                   " enforceSliderOrder(ev.target.id);"
                   " updateSliderDisplay(ev.target);"
-                  " if(ev.target.id==='blinkStartSlider'){"
+                  " if(ev.target.id==='redEndSlider'||ev.target.id==='blinkStartSlider'){"
                   "   triggerBlinkPreview();"
                   " }else{"
                   "   updateLedPreview();"
@@ -975,7 +990,7 @@ namespace
                   " const cfg=["
                   "   {k:'green',slot:1,labelId:'greenEndLabel',hiddenId:'greenLabelHidden',nameId:'color1Name'},"
                   "   {k:'yellow',slot:2,labelId:'yellowEndLabel',hiddenId:'yellowLabelHidden',nameId:'color2Name'},"
-                  "   {k:'red',slot:3,labelId:'blinkStartLabel',hiddenId:'redLabelHidden',nameId:'color3Name'}"
+                  "   {k:'red',slot:3,labelId:'redEndLabel',hiddenId:'redLabelHidden',nameId:'color3Name'}"
                   " ];"
                   " cfg.forEach(c=>{"
                   "   const inp=document.getElementById(c.k+'ColorInput');"
@@ -1127,7 +1142,7 @@ namespace
                   "     c.addEventListener('change',()=>{updateColorUi();markDirty();});"
                   "   }"
                   " });"
-                  " ['greenEndSlider','yellowEndSlider','blinkStartSlider'].forEach(id=>{"
+                  " ['greenEndSlider','yellowEndSlider','redEndSlider','blinkStartSlider'].forEach(id=>{"
                   "   const el=document.getElementById(id);"
                   "   if(el){"
                   "     updateSliderDisplay(el);"
@@ -2196,10 +2211,8 @@ namespace
             }
             ambientLightOnConfigChanged();
             ledBarRefreshBrightness();
-            strip.show();
-            g_brightnessPreviewActive = true;
             g_lastBrightnessChangeMs = millis();
-            showMLogoPreview();
+            ledBarRequestBrightnessPreview();
         }
         server.send(200, "text/plain", "OK");
     }
@@ -2227,6 +2240,13 @@ namespace
         {
             cfg.ambientLightSclPin = clampInt(server.arg("ambientLightSclPin").toInt(), 0, 48);
         }
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+        if (cfg.ambientLightSdaPin == 21 && cfg.ambientLightSclPin == 22)
+        {
+            cfg.ambientLightSdaPin = AMBIENT_LIGHT_DEFAULT_SDA;
+            cfg.ambientLightSclPin = AMBIENT_LIGHT_DEFAULT_SCL;
+        }
+#endif
         if (server.hasArg("autoBrightnessStrengthPct"))
         {
             cfg.autoBrightnessStrengthPct = clampInt(server.arg("autoBrightnessStrengthPct").toInt(), 25, 200);
@@ -2261,16 +2281,20 @@ namespace
 
         int gPct = cfg.greenEndPct;
         int yPct = cfg.yellowEndPct;
+        int rPct = cfg.redEndPct;
         int bPct = cfg.blinkStartPct;
         if (server.hasArg("greenEndPct"))
             gPct = server.arg("greenEndPct").toInt();
         if (server.hasArg("yellowEndPct"))
             yPct = server.arg("yellowEndPct").toInt();
+        if (server.hasArg("redEndPct"))
+            rPct = server.arg("redEndPct").toInt();
         if (server.hasArg("blinkStartPct"))
             bPct = server.arg("blinkStartPct").toInt();
-        enforceOrder(gPct, yPct, bPct);
+        enforceOrder(gPct, yPct, rPct, bPct);
         cfg.greenEndPct = gPct;
         cfg.yellowEndPct = yPct;
+        cfg.redEndPct = rPct;
         cfg.blinkStartPct = bPct;
 
         if (server.hasArg("greenColor"))
@@ -2387,12 +2411,30 @@ namespace
         if (server.method() == HTTP_POST)
         {
             applyConfigFromRequest(true);
-            g_testActive = true;
-            g_testStartMs = millis();
+            int maxRpm = 4000;
             if (cfg.autoScaleMaxRpm)
-                g_testMaxRpm = (g_maxSeenRpm > 0) ? g_maxSeenRpm : 4000;
+                maxRpm = (g_maxSeenRpm > 0) ? g_maxSeenRpm : 4000;
             else
-                g_testMaxRpm = (cfg.fixedMaxRpm > 0) ? cfg.fixedMaxRpm : 4000;
+                maxRpm = (cfg.fixedMaxRpm > 0) ? cfg.fixedMaxRpm : 4000;
+            ledBarStartTestSweep(LedTestSweepMode::Expressive, maxRpm);
+            server.send(200, "text/plain", "OK");
+            return;
+        }
+        server.send(405, "text/plain", "Method Not Allowed");
+    }
+
+    void handleTestDiagnostic()
+    {
+        markHttpActivity("WEB_TEST_DIAG");
+        if (server.method() == HTTP_POST)
+        {
+            applyConfigFromRequest(true);
+            int maxRpm = 4000;
+            if (cfg.autoScaleMaxRpm)
+                maxRpm = (g_maxSeenRpm > 0) ? g_maxSeenRpm : 4000;
+            else
+                maxRpm = (cfg.fixedMaxRpm > 0) ? cfg.fixedMaxRpm : 4000;
+            ledBarStartTestSweep(LedTestSweepMode::Deterministic, maxRpm);
             server.send(200, "text/plain", "OK");
             return;
         }
@@ -2428,16 +2470,19 @@ namespace
         int vehicleAge = 0;
         bool ready = g_vehicleInfoAvailable;
         const AmbientLightDebugInfo ambientInfo = ambientLightGetDebugInfo();
+        const TelemetryDebugInfo telemetryInfo = telemetryGetDebugInfo();
+        const LedRenderHistoryInfo ledHistory = ledBarGetRenderHistoryInfo();
+        const TelemetryRenderSnapshot &telemetrySnapshot = telemetryInfo.snapshot;
         if (g_vehicleInfoAvailable && g_vehicleInfoLastUpdate > 0)
             vehicleAge = static_cast<int>((now - g_vehicleInfoLastUpdate) / 1000UL);
 
         String json = "{";
-        json += "\"rpm\":" + String(g_currentRpm);
-        json += ",\"maxRpm\":" + String(g_maxSeenRpm);
-        json += ",\"speed\":" + String(g_vehicleSpeedKmh);
-        json += ",\"gear\":" + String(g_estimatedGear);
+        json += "\"rpm\":" + String(telemetrySnapshot.rpm);
+        json += ",\"maxRpm\":" + String(telemetrySnapshot.maxSeenRpm);
+        json += ",\"speed\":" + String(telemetrySnapshot.speedKmh);
+        json += ",\"gear\":" + String(telemetrySnapshot.gear);
         json += ",\"gearSource\":\"" + jsonEscape(gearSourceLabel()) + "\"";
-        json += ",\"pitLimiter\":" + String(g_pitLimiterActive ? "true" : "false");
+        json += ",\"pitLimiter\":" + String(telemetrySnapshot.pitLimiter ? "true" : "false");
         json += ",\"lastTx\":\"" + jsonEscape(g_lastTxInfo) + "\"";
         json += ",\"lastObd\":\"" + jsonEscape(g_lastObdInfo) + "\"";
         json += ",\"connected\":" + String(g_connected ? "true" : "false");
@@ -2457,6 +2502,17 @@ namespace
         json += ",\"simTransportMode\":\"" + simTransportModeToString(resolveSimRuntimeTransportMode(cfg.telemetryPreference, cfg.simTransportPreference)) + "\"";
         json += ",\"telemetryFallback\":" + String(telemetrySourceIsFallback(g_activeTelemetrySource, cfg.telemetryPreference, cfg.simTransportPreference) ? "true" : "false");
         json += ",\"activeTelemetry\":\"" + activeTelemetrySourceLabel(g_activeTelemetrySource) + "\"";
+        json += ",\"telemetrySnapshotVersion\":" + String(telemetrySnapshot.version);
+        json += ",\"telemetrySnapshotAgeMs\":" + String(telemetrySnapshot.sampleTimestampMs > 0 ? (now - telemetrySnapshot.sampleTimestampMs) : 0);
+        json += ",\"telemetrySnapshotSource\":\"" + jsonEscape(String(telemetrySourceName(telemetrySnapshot.source))) + "\"";
+        json += ",\"telemetrySnapshotFresh\":" + String(telemetrySnapshot.telemetryFresh ? "true" : "false");
+        json += ",\"simSessionState\":\"" + jsonEscape(String(simSessionStateName(telemetrySnapshot.simSessionState))) + "\"";
+        json += ",\"telemetrySourceTransitionCount\":" + String(telemetryInfo.sourceTransitionCount);
+        json += ",\"telemetryLastSourceTransition\":\"" + jsonEscape(String(telemetrySourceName(telemetryInfo.lastSourceTransition.fromSource)) + " -> " + telemetrySourceName(telemetryInfo.lastSourceTransition.toSource)) + "\"";
+        json += ",\"telemetryLastSourceTransitionHold\":" + String(telemetryInfo.lastSourceTransition.holdApplied ? "true" : "false");
+        json += ",\"telemetryLastSourceTransitionFallback\":" + String(telemetryInfo.lastSourceTransition.fallbackActive ? "true" : "false");
+        json += ",\"simSessionTransitionCount\":" + String(telemetryInfo.simSessionTransitionCount);
+        json += ",\"simSessionLastTransition\":\"" + jsonEscape(String(simSessionTransitionTypeName(telemetryInfo.lastSimSessionTransition.transition))) + "\"";
         json += ",\"simHubState\":\"" + jsonEscape(simHubConnectionStateLabel(g_simHubConnectionState)) + "\"";
         json += ",\"usbState\":\"" + jsonEscape(usbBridgeStateLabel(g_usbBridgeConnectionState)) + "\"";
         json += ",\"usbConnected\":" + String(g_usbSerialConnected ? "true" : "false");
@@ -2499,22 +2555,37 @@ namespace
         json += ",\"ledPitLimiterOnly\":" + String(g_ledRenderDebug.pitLimiterOnly ? "true" : "false");
         json += ",\"ledDiagnosticMode\":\"" + jsonEscape(String(ledBarGetDiagnosticModeName())) + "\"";
         json += ",\"ledRenderMode\":\"" + jsonEscape(String(ledBarGetLastRenderModeName())) + "\"";
+        json += ",\"ledLastWriter\":\"" + jsonEscape(String(ledBarGetLastWriterName())) + "\"";
         json += ",\"ledLastShowAgeMs\":" + String(g_ledRenderDebug.lastShowMs > 0 ? (now - g_ledRenderDebug.lastShowMs) : 0);
+        json += ",\"ledLastFrameHash\":" + String(ledHistory.lastEvent.frameHash);
+        json += ",\"ledExternalWriteAttempts\":" + String(ledHistory.externalWriteAttempts);
+        json += ",\"ledSnapshotChangedDuringRender\":" + String(ledHistory.snapshotChangedDuringRender);
+        json += ",\"ledDeterministicSweepActive\":" + String(ledHistory.deterministicSweepActive ? "true" : "false");
         json += ",\"rpmStartRpm\":" + String(cfg.rpmStartRpm);
         json += ",\"ledManualBrightness\":" + String(cfg.brightness);
         json += ",\"ledAppliedBrightness\":" + String(ledBarGetAppliedBrightness());
         json += ",\"autoBrightnessEnabled\":" + String(cfg.autoBrightnessEnabled ? "true" : "false");
         json += ",\"ambientLightDetected\":" + String(ambientInfo.sensorDetected ? "true" : "false");
         json += ",\"ambientLightActive\":" + String(ambientInfo.sensorActive ? "true" : "false");
+        json += ",\"ambientBusInitialized\":" + String(ambientInfo.busInitialized ? "true" : "false");
+        json += ",\"ambientDeviceResponding\":" + String(ambientInfo.deviceResponding ? "true" : "false");
+        json += ",\"ambientUsingSharedBus\":" + String(ambientInfo.usingSharedBus ? "true" : "false");
         json += ",\"ambientLightSdaPin\":" + String(cfg.ambientLightSdaPin);
         json += ",\"ambientLightSclPin\":" + String(cfg.ambientLightSclPin);
         json += ",\"ambientLux\":" + String(ambientInfo.filteredLux, 1);
         json += ",\"ambientRawLux\":" + String(ambientInfo.rawLux, 1);
+        json += ",\"ambientRawAls\":" + String(ambientInfo.rawAls);
+        json += ",\"ambientRawWhite\":" + String(ambientInfo.rawWhite);
+        json += ",\"ambientConfigReg\":" + String(ambientInfo.configReg);
         json += ",\"ambientTargetBrightness\":" + String(ambientInfo.targetBrightness);
         json += ",\"ambientDesiredBrightness\":" + String(ambientInfo.desiredBrightness);
+        json += ",\"ambientInitAttempts\":" + String(ambientInfo.initAttempts);
+        json += ",\"ambientInitSuccess\":" + String(ambientInfo.initSuccessCount);
         json += ",\"ambientReadCount\":" + String(ambientInfo.readCount);
         json += ",\"ambientReadErrors\":" + String(ambientInfo.readErrorCount);
+        json += ",\"ambientLastInitAgeMs\":" + String(ambientInfo.lastInitMs > 0 ? (now - ambientInfo.lastInitMs) : 0);
         json += ",\"ambientLastReadAgeMs\":" + String(ambientInfo.lastReadMs > 0 ? (now - ambientInfo.lastReadMs) : 0);
+        json += ",\"ambientLastApplyAgeMs\":" + String(ambientInfo.lastApplyMs > 0 ? (now - ambientInfo.lastApplyMs) : 0);
         json += ",\"ambientLastError\":\"" + jsonEscape(ambientInfo.lastError) + "\"";
         json += ",\"displayFocus\":" + String(static_cast<int>(cfg.uiDisplayFocus));
         json += ",\"simHubConfigured\":" + String(cfg.simHubHost.length() > 0 ? "true" : "false");
@@ -2823,6 +2894,26 @@ namespace
         server.send(200, "application/json", json);
     }
 
+    void handleDevAmbientProbe()
+    {
+        markHttpActivity("WEB_DEV_AMBIENT_PROBE");
+        if (server.method() != HTTP_POST)
+        {
+            server.send(405, "text/plain", "Method Not Allowed");
+            return;
+        }
+
+        ambientLightForceProbe();
+        const AmbientLightDebugInfo ambientInfo = ambientLightGetDebugInfo();
+
+        String json = "{\"status\":\"ok\"";
+        json += ",\"sensorDetected\":" + String(ambientInfo.sensorDetected ? "true" : "false");
+        json += ",\"deviceResponding\":" + String(ambientInfo.deviceResponding ? "true" : "false");
+        json += ",\"lastError\":\"" + jsonEscape(ambientInfo.lastError) + "\"";
+        json += "}";
+        server.send(200, "application/json", json);
+    }
+
     void handleNotFound()
     {
         markHttpActivity("WEB_NOT_FOUND");
@@ -2836,6 +2927,7 @@ void initWebUi()
     server.on("/brightness", HTTP_GET, handleBrightness);
     server.on("/save", HTTP_POST, handleSave);
     server.on("/test", HTTP_POST, handleTest);
+    server.on("/test-diagnostic", HTTP_POST, handleTestDiagnostic);
     server.on("/connect", HTTP_POST, handleConnect);
     server.on("/disconnect", HTTP_POST, handleDisconnect);
     server.on("/status", HTTP_GET, handleStatus);
@@ -2856,6 +2948,7 @@ void initWebUi()
     server.on("/dev/display-status", HTTP_GET, handleDevDisplayStatus);
     server.on("/dev/display-pattern", HTTP_POST, handleDevDisplayPattern);
     server.on("/dev/led-mode", HTTP_POST, handleDevLedMode);
+    server.on("/dev/ambient-probe", HTTP_POST, handleDevAmbientProbe);
     server.on("/dev/obd-send", HTTP_POST, handleDevObdSend);
     server.onNotFound(handleNotFound);
 

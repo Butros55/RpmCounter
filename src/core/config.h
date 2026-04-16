@@ -10,11 +10,19 @@ constexpr int DEFAULT_BRIGHTNESS = 80;
 constexpr int STATUS_LED_PIN = 2;
 
 #ifndef AMBIENT_LIGHT_DEFAULT_SDA
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#define AMBIENT_LIGHT_DEFAULT_SDA 47
+#else
 #define AMBIENT_LIGHT_DEFAULT_SDA 21
+#endif
 #endif
 
 #ifndef AMBIENT_LIGHT_DEFAULT_SCL
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+#define AMBIENT_LIGHT_DEFAULT_SCL 48
+#else
 #define AMBIENT_LIGHT_DEFAULT_SCL 22
+#endif
 #endif
 
 constexpr unsigned long RPM_INTERVAL_MS = 100;
@@ -66,6 +74,7 @@ struct AppConfig
     int rpmStartRpm;
     int greenEndPct;
     int yellowEndPct;
+    int redEndPct;
     int blinkStartPct;
     int brightness;
     bool autoBrightnessEnabled;

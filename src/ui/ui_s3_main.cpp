@@ -70,6 +70,7 @@ namespace
         lv_obj_t *webHint = nullptr;
         lv_obj_t *logoOverlay = nullptr;
         lv_obj_t *logoLabel = nullptr;
+        lv_obj_t *logoSubtitle = nullptr;
     };
 
     struct UiState
@@ -83,6 +84,9 @@ namespace
         UiScreenId webReturnScreen = UiScreenId::Home;
         uint32_t lastFocusTapMs = 0;
         uint32_t logoUntilMs = 0;
+        std::string overlayTitle = "ShiftLight";
+        std::string overlaySubtitle;
+        uint32_t overlayAccent = 0x4FCBFF;
     };
 
     UiRefs g_ui;
@@ -865,6 +869,21 @@ namespace
         {
             return;
         }
+        set_label_text(g_ui.logoLabel, g_state.overlayTitle);
+        if (g_ui.logoSubtitle)
+        {
+            set_label_text(g_ui.logoSubtitle, g_state.overlaySubtitle);
+            if (g_state.overlaySubtitle.empty())
+            {
+                lv_obj_add_flag(g_ui.logoSubtitle, LV_OBJ_FLAG_HIDDEN);
+            }
+            else
+            {
+                lv_obj_clear_flag(g_ui.logoSubtitle, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+        lv_obj_set_style_border_color(g_ui.logoOverlay, lv_color_hex(g_state.overlayAccent), 0);
+        lv_obj_set_style_shadow_color(g_ui.logoOverlay, lv_color_hex(g_state.overlayAccent), 0);
         if (g_state.logoUntilMs > now_ms())
         {
             lv_obj_clear_flag(g_ui.logoOverlay, LV_OBJ_FLAG_HIDDEN);
@@ -1316,13 +1335,27 @@ namespace
         lv_obj_add_style(g_ui.logoOverlay, &styleLogoOverlay, 0);
         lv_obj_set_size(g_ui.logoOverlay, LV_PCT(100), LV_PCT(100));
         lv_obj_clear_flag(g_ui.logoOverlay, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_style_border_width(g_ui.logoOverlay, 2, 0);
+        lv_obj_set_style_border_opa(g_ui.logoOverlay, LV_OPA_60, 0);
+        lv_obj_set_style_shadow_width(g_ui.logoOverlay, 28, 0);
+        lv_obj_set_style_shadow_opa(g_ui.logoOverlay, LV_OPA_20, 0);
         lv_obj_add_flag(g_ui.logoOverlay, LV_OBJ_FLAG_HIDDEN);
 
         g_ui.logoLabel = lv_label_create(g_ui.logoOverlay);
         lv_label_set_text(g_ui.logoLabel, "ShiftLight");
         lv_obj_set_style_text_font(g_ui.logoLabel, &lv_font_montserrat_48, 0);
         lv_obj_set_style_text_color(g_ui.logoLabel, color_text, 0);
-        lv_obj_center(g_ui.logoLabel);
+        lv_obj_align(g_ui.logoLabel, LV_ALIGN_CENTER, 0, -18);
+
+        g_ui.logoSubtitle = lv_label_create(g_ui.logoOverlay);
+        lv_label_set_text(g_ui.logoSubtitle, "");
+        lv_obj_set_width(g_ui.logoSubtitle, 220);
+        lv_label_set_long_mode(g_ui.logoSubtitle, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_font(g_ui.logoSubtitle, &lv_font_montserrat_16, 0);
+        lv_obj_set_style_text_color(g_ui.logoSubtitle, color_muted, 0);
+        lv_obj_set_style_text_align(g_ui.logoSubtitle, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(g_ui.logoSubtitle, LV_ALIGN_CENTER, 0, 38);
+        lv_obj_add_flag(g_ui.logoSubtitle, LV_OBJ_FLAG_HIDDEN);
     }
 
     void build_ui()
@@ -1376,7 +1409,19 @@ void ui_s3_set_shiftlight(bool active)
 
 void ui_s3_show_logo()
 {
+    g_state.overlayTitle = "ShiftLight";
+    g_state.overlaySubtitle.clear();
+    g_state.overlayAccent = 0x4FCBFF;
     g_state.logoUntilMs = now_ms() + kLogoDurationMs;
+    refresh_view();
+}
+
+void ui_s3_show_transient_message(const char *title, const char *subtitle, uint32_t durationMs, uint32_t accentColorRgb)
+{
+    g_state.overlayTitle = title != nullptr ? title : "";
+    g_state.overlaySubtitle = subtitle != nullptr ? subtitle : "";
+    g_state.overlayAccent = accentColorRgb;
+    g_state.logoUntilMs = now_ms() + std::max<uint32_t>(durationMs, 400U);
     refresh_view();
 }
 

@@ -15,5 +15,6 @@ void ui_s3_loop(const UiRuntimeState &state);
 void ui_s3_set_gear(int gear);
 void ui_s3_set_shiftlight(bool active);
 void ui_s3_show_logo();
+void ui_s3_show_transient_message(const char *title, const char *subtitle, uint32_t durationMs, uint32_t accentColorRgb);
 void ui_s3_debug_dispatch(UiDebugAction action);
 UiDebugSnapshot ui_s3_debug_snapshot();

@@ -3,168 +3,48 @@
 #include <Arduino.h>
 
 #include "core/config.h"
-#include "led_bar.h"
 #include "core/state.h"
+#include "led_bar.h"
 
 namespace
 {
-    const uint8_t lbR = 0, lbG = 120, lbB = 255;
-    const uint8_t dbR = 0, dbG = 0, dbB = 120;
-    const uint8_t rR = 255, rG = 0, rB = 0;
-
-    int segmentLength()
+    void waitForLedEffect(unsigned long timeoutMs)
     {
-        int segLen = NUM_LEDS / 3;
-        return (segLen < 2) ? 2 : segLen;
-    }
-
-    void drawLogoFrame(float intensity)
-    {
-        if (intensity < 0.0f)
-            intensity = 0.0f;
-        if (intensity > 1.0f)
-            intensity = 1.0f;
-
-        int segLen = segmentLength();
-        for (int i = 0; i < NUM_LEDS; i++)
+        const unsigned long startMs = millis();
+        while (ledBarEffectActive() && (millis() - startMs) < timeoutMs)
         {
-            uint8_t br = 0, bg = 0, bb = 0;
-            if (i < segLen)
-            {
-                br = lbR;
-                bg = lbG;
-                bb = lbB;
-            }
-            else if (i < 2 * segLen)
-            {
-                br = dbR;
-                bg = dbG;
-                bb = dbB;
-            }
-            else if (i < 3 * segLen)
-            {
-                br = rR;
-                bg = rG;
-                bb = rB;
-            }
-
-            uint8_t r = (uint8_t)(br * intensity);
-            uint8_t g = (uint8_t)(bg * intensity);
-            uint8_t b = (uint8_t)(bb * intensity);
-            strip.setPixelColor(i, strip.Color(r, g, b));
+            delay(20);
         }
-        strip.show();
-    }
-
-    void fadeCurrentBarToBlack(unsigned long durationMs)
-    {
-        uint32_t snapshot[NUM_LEDS];
-        for (int i = 0; i < NUM_LEDS; i++)
-        {
-            snapshot[i] = strip.getPixelColor(i);
-        }
-
-        const int steps = 24;
-        unsigned long perStep = (durationMs > 0) ? durationMs / steps : 0;
-        for (int s = 0; s <= steps; s++)
-        {
-            float t = (float)s / (float)steps;
-            float scale = 1.0f - t;
-            if (scale < 0.0f)
-                scale = 0.0f;
-
-            for (int i = 0; i < NUM_LEDS; i++)
-            {
-                uint32_t col = snapshot[i];
-                uint8_t gVal = (col >> 16) & 0xFF;
-                uint8_t rVal = (col >> 8) & 0xFF;
-                uint8_t bVal = col & 0xFF;
-                uint8_t r = (uint8_t)(rVal * scale);
-                uint8_t g = (uint8_t)(gVal * scale);
-                uint8_t b = (uint8_t)(bVal * scale);
-                strip.setPixelColor(i, strip.Color(r, g, b));
-            }
-            strip.show();
-            if (perStep > 0)
-            {
-                delay(perStep);
-            }
-        }
-    }
-
-    void playLogoSequence(int steps, int frameDelay, bool fadeOutSlow)
-    {
-        for (int s = 0; s <= steps; s++)
-        {
-            float t = (float)s / (float)steps;
-            float eased = t * t * (3.0f - 2.0f * t);
-            drawLogoFrame(eased);
-            delay(frameDelay);
-        }
-
-        int fadeSteps = fadeOutSlow ? steps : (steps / 2);
-        for (int s = fadeSteps; s >= 0; s--)
-        {
-            float t = (float)s / (float)fadeSteps;
-            float eased = t * t;
-            drawLogoFrame(eased);
-            delay(frameDelay);
-        }
-
-        strip.clear();
-        strip.show();
     }
 }
 
 void showMLogoPreview()
 {
-    float brightnessFactor = ledBarGetAppliedBrightness() / 255.0f;
-    if (brightnessFactor < 0.02f)
-        brightnessFactor = 0.02f;
-
-    ledBarInvalidateFrameCache();
-    drawLogoFrame(brightnessFactor);
-    rememberPreviewPixels();
+    ledBarRequestLogoPreview();
 }
 
 void showMLogoAnimation()
 {
     if (g_animationActive)
         return;
-    g_animationActive = true;
-    ledBarInvalidateFrameCache();
 
     Serial.println("[MLOGO] Starte BMW M Boot-Animation");
-
-    playLogoSequence(60, 15, true);
+    ledBarRequestLogoAnimation();
+    waitForLedEffect(2400);
 
     Serial.println("[MLOGO] Animation fertig");
-
-    g_animationActive = false;
-    ledBarInvalidateFrameCache();
-
-    if (!g_testActive && g_currentRpm > 0)
-    {
-        updateRpmBar(g_currentRpm);
-    }
 }
 
 void showMLogoLeavingAnimation()
 {
     if (g_animationActive)
         return;
-    g_animationActive = true;
-    ledBarInvalidateFrameCache();
 
     Serial.println("[MLOGO] Starte Leaving-Animation");
-
-    fadeCurrentBarToBlack(1200);
-    delay(100);
-    playLogoSequence(50, 20, true);
+    ledBarRequestLeavingAnimation();
+    waitForLedEffect(3200);
 
     Serial.println("[MLOGO] Leaving-Animation fertig");
-    g_animationActive = false;
-    ledBarInvalidateFrameCache();
 }
 
 void logoAnimLoop()

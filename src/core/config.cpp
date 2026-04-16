@@ -5,6 +5,10 @@
 namespace
 {
     constexpr const char *PREF_NAMESPACE = "rpm_cfg";
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+    constexpr int LEGACY_AMBIENT_SDA_PIN = 21;
+    constexpr int LEGACY_AMBIENT_SCL_PIN = 22;
+#endif
 
     WifiMode clampWifiMode(uint32_t raw)
     {
@@ -41,6 +45,17 @@ namespace
         }
         return static_cast<DisplayFocusMetric>(raw);
     }
+
+    bool shouldMigrateLegacyAmbientPins(int sdaPin, int sclPin)
+    {
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+        return sdaPin == LEGACY_AMBIENT_SDA_PIN && sclPin == LEGACY_AMBIENT_SCL_PIN;
+#else
+        (void)sdaPin;
+        (void)sclPin;
+        return false;
+#endif
+    }
 }
 
 AppConfig cfg;
@@ -60,6 +75,7 @@ void initConfig()
     cfg.rpmStartRpm = 1000;
     cfg.greenEndPct = 60;
     cfg.yellowEndPct = 85;
+    cfg.redEndPct = 90;
     cfg.blinkStartPct = 90;
     cfg.brightness = DEFAULT_BRIGHTNESS;
     cfg.autoBrightnessEnabled = false;
@@ -121,15 +137,21 @@ void loadConfig()
     cfg.rpmStartRpm = clampInt(prefs.getInt("rpmStart", cfg.rpmStartRpm), 0, 12000);
     cfg.greenEndPct = clampInt(prefs.getInt("greenEnd", cfg.greenEndPct), 0, 100);
     cfg.yellowEndPct = clampInt(prefs.getInt("yellowEnd", cfg.yellowEndPct), 0, 100);
+    cfg.redEndPct = clampInt(prefs.getInt("redEnd", cfg.blinkStartPct), 0, 100);
     cfg.blinkStartPct = clampInt(prefs.getInt("blinkStart", cfg.blinkStartPct), 0, 100);
     if (cfg.yellowEndPct < cfg.greenEndPct)
         cfg.yellowEndPct = cfg.greenEndPct;
-    if (cfg.blinkStartPct < cfg.yellowEndPct)
-        cfg.blinkStartPct = cfg.yellowEndPct;
+    if (cfg.redEndPct < cfg.yellowEndPct)
+        cfg.redEndPct = cfg.yellowEndPct;
     cfg.brightness = clampInt(prefs.getInt("brightness", cfg.brightness), 0, 255);
     cfg.autoBrightnessEnabled = prefs.getBool("autoBright", cfg.autoBrightnessEnabled);
     cfg.ambientLightSdaPin = clampInt(prefs.getInt("ambSda", cfg.ambientLightSdaPin), 0, 48);
     cfg.ambientLightSclPin = clampInt(prefs.getInt("ambScl", cfg.ambientLightSclPin), 0, 48);
+    if (shouldMigrateLegacyAmbientPins(cfg.ambientLightSdaPin, cfg.ambientLightSclPin))
+    {
+        cfg.ambientLightSdaPin = AMBIENT_LIGHT_DEFAULT_SDA;
+        cfg.ambientLightSclPin = AMBIENT_LIGHT_DEFAULT_SCL;
+    }
     cfg.autoBrightnessStrengthPct = clampInt(prefs.getInt("autoBrPct", cfg.autoBrightnessStrengthPct), 25, 200);
     cfg.autoBrightnessMin = clampInt(prefs.getInt("autoBrMin", cfg.autoBrightnessMin), 0, 255);
     cfg.autoBrightnessResponsePct = clampInt(prefs.getInt("autoResp", cfg.autoBrightnessResponsePct), 1, 100);
@@ -193,6 +215,7 @@ void saveConfig()
     prefs.putInt("rpmStart", cfg.rpmStartRpm);
     prefs.putInt("greenEnd", cfg.greenEndPct);
     prefs.putInt("yellowEnd", cfg.yellowEndPct);
+    prefs.putInt("redEnd", cfg.redEndPct);
     prefs.putInt("blinkStart", cfg.blinkStartPct);
     prefs.putInt("brightness", cfg.brightness);
     prefs.putBool("autoBright", cfg.autoBrightnessEnabled);

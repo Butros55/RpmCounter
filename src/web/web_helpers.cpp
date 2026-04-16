@@ -87,13 +87,14 @@ String safeLabel(const String &value, const String &fallback)
     return trimmed;
 }
 
-void enforceOrder(int &g, int &y, int &b)
+void enforceOrder(int &g, int &y, int &r, int &b)
 {
     g = clampInt(g, 0, 100);
     if (y < g)
         y = g;
     y = clampInt(y, 0, 100);
-    if (b < y)
-        b = y;
+    if (r < y)
+        r = y;
+    r = clampInt(r, 0, 100);
     b = clampInt(b, 0, 100);
 }

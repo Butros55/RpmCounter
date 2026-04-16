@@ -499,15 +499,10 @@ namespace
             return;
         }
 
-        // ageBucket == 2 → definitively stale.
-        if (g_usbTelemetryEverReceived)
-        {
-            setUsbState(UsbBridgeConnectionState::Error, F("Telemetry stale"));
-        }
-        else
-        {
-            setUsbState(UsbBridgeConnectionState::WaitingForData);
-        }
+        // ageBucket == 2 → definitively stale. Treat this as "waiting for
+        // live game data" instead of an error so an idle SimHub session or a
+        // just-closed game does not flash a red transport fault animation.
+        setUsbState(UsbBridgeConnectionState::WaitingForData);
     }
 
     bool usbBridgeRecentlyActive(unsigned long nowMs)
@@ -885,9 +880,9 @@ bool usbSimShouldBlockObd()
 
 bool usbSimShouldSuspendWifi()
 {
-    // Only USB-only may suspend WiFi. Auto must leave the network path ready for fallback.
-    return resolveSimRuntimeTransportMode(cfg.telemetryPreference, cfg.simTransportPreference) ==
-           SimRuntimeTransportMode::UsbOnly;
+    // Keep WiFi available even in USB-only so the local ESP web UI stays
+    // reachable while telemetry itself remains locked to USB.
+    return false;
 }
 
 String usbSimBuildStatusJson()
@@ -895,6 +890,9 @@ String usbSimBuildStatusJson()
     const SimRuntimeTransportMode transportMode =
         resolveSimRuntimeTransportMode(cfg.telemetryPreference, cfg.simTransportPreference);
     const unsigned long nowMs = millis();
+    const TelemetryDebugInfo telemetryInfo = telemetryGetDebugInfo();
+    const LedRenderHistoryInfo ledHistory = ledBarGetRenderHistoryInfo();
+    const TelemetryRenderSnapshot &telemetrySnapshot = telemetryInfo.snapshot;
     const WifiStatus wifiStatus = getWifiStatus();
     String wifiIp = wifiStatus.ip;
     if (wifiIp.isEmpty())
@@ -913,18 +911,27 @@ String usbSimBuildStatusJson()
         (g_simHubDebug.lastErrorMs > 0) ? (nowMs - g_simHubDebug.lastErrorMs) : 0;
     String json = "{";
     json += "\"ok\":true";
-    json += ",\"rpm\":" + String(g_currentRpm);
-    json += ",\"maxRpm\":" + String(g_maxSeenRpm);
-    json += ",\"speed\":" + String(g_vehicleSpeedKmh);
-    json += ",\"gear\":" + String(g_estimatedGear);
+    json += ",\"rpm\":" + String(telemetrySnapshot.rpm);
+    json += ",\"maxRpm\":" + String(telemetrySnapshot.maxSeenRpm);
+    json += ",\"speed\":" + String(telemetrySnapshot.speedKmh);
+    json += ",\"gear\":" + String(telemetrySnapshot.gear);
     json += ",\"gearSource\":\"" + jsonEscape(gearSourceLabel()) + "\"";
-    json += ",\"throttle\":" + String(g_currentThrottle, 3);
-    json += ",\"pitLimiter\":" + String(g_pitLimiterActive ? "true" : "false");
+    json += ",\"throttle\":" + String(telemetrySnapshot.throttle, 3);
+    json += ",\"pitLimiter\":" + String(telemetrySnapshot.pitLimiter ? "true" : "false");
     json += ",\"activeTelemetry\":\"" + activeTelemetryLabel(g_activeTelemetrySource) + "\"";
     json += ",\"telemetryPreference\":\"" + telemetryPreferenceLabel(cfg.telemetryPreference) + "\"";
     json += ",\"simTransport\":\"" + simTransportLabel(cfg.simTransportPreference) + "\"";
     json += ",\"simTransportMode\":\"" + simTransportModeLabel(transportMode) + "\"";
     json += ",\"telemetryFallback\":" + String(telemetrySourceIsFallback(g_activeTelemetrySource, cfg.telemetryPreference, cfg.simTransportPreference) ? "true" : "false");
+    json += ",\"telemetrySnapshotVersion\":" + String(telemetrySnapshot.version);
+    json += ",\"telemetrySnapshotAgeMs\":" + String(telemetrySnapshot.sampleTimestampMs > 0 ? (nowMs - telemetrySnapshot.sampleTimestampMs) : 0);
+    json += ",\"telemetrySnapshotSource\":\"" + jsonEscape(String(telemetrySourceName(telemetrySnapshot.source))) + "\"";
+    json += ",\"telemetrySnapshotFresh\":" + String(telemetrySnapshot.telemetryFresh ? "true" : "false");
+    json += ",\"simSessionState\":\"" + jsonEscape(String(simSessionStateName(telemetrySnapshot.simSessionState))) + "\"";
+    json += ",\"telemetrySourceTransitionCount\":" + String(telemetryInfo.sourceTransitionCount);
+    json += ",\"telemetryLastSourceTransition\":\"" + jsonEscape(String(telemetrySourceName(telemetryInfo.lastSourceTransition.fromSource)) + " -> " + telemetrySourceName(telemetryInfo.lastSourceTransition.toSource)) + "\"";
+    json += ",\"simSessionTransitionCount\":" + String(telemetryInfo.simSessionTransitionCount);
+    json += ",\"simSessionLastTransition\":\"" + jsonEscape(String(simSessionTransitionTypeName(telemetryInfo.lastSimSessionTransition.transition))) + "\"";
     json += ",\"simHubState\":\"" + simHubStateLabel(g_simHubConnectionState) + "\"";
     json += ",\"usbState\":\"" + usbStateLabel(g_usbBridgeConnectionState) + "\"";
     json += ",\"usbConnected\":" + String(g_usbSerialConnected ? "true" : "false");
@@ -976,7 +983,12 @@ String usbSimBuildStatusJson()
     json += ",\"ledPitLimiterOnly\":" + String(g_ledRenderDebug.pitLimiterOnly ? "true" : "false");
     json += ",\"ledDiagnosticMode\":\"" + jsonEscape(String(ledBarGetDiagnosticModeName())) + "\"";
     json += ",\"ledRenderMode\":\"" + jsonEscape(String(ledBarGetLastRenderModeName())) + "\"";
+    json += ",\"ledLastWriter\":\"" + jsonEscape(String(ledBarGetLastWriterName())) + "\"";
     json += ",\"ledLastShowAgeMs\":" + String(g_ledRenderDebug.lastShowMs > 0 ? (nowMs - g_ledRenderDebug.lastShowMs) : 0);
+    json += ",\"ledLastFrameHash\":" + String(ledHistory.lastEvent.frameHash);
+    json += ",\"ledExternalWriteAttempts\":" + String(ledHistory.externalWriteAttempts);
+    json += ",\"ledSnapshotChangedDuringRender\":" + String(ledHistory.snapshotChangedDuringRender);
+    json += ",\"ledDeterministicSweepActive\":" + String(ledHistory.deterministicSweepActive ? "true" : "false");
     json += ",\"rpmStartRpm\":" + String(cfg.rpmStartRpm);
     json += "}";
     return json;

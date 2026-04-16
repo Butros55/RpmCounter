@@ -2,11 +2,14 @@
 
 #include <Arduino.h>
 
+#include "telemetry/telemetry_manager.h"
+
 void displayInit();
 void displayClear();
 void displayShowTestLogo();
 void displaySetGear(int gear);
 void displaySetShiftBlink(bool active);
+void displayShowSimSessionTransition(SimSessionTransitionType transition);
 
 enum class DisplayDebugPattern
 {

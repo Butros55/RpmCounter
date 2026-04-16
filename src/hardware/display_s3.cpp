@@ -63,6 +63,9 @@ namespace
     static int g_cachedGear = 0;
     static bool g_cachedShift = false;
     static bool g_logoRequested = false;
+    static SimSessionTransitionType g_pendingSimOverlay = SimSessionTransitionType::None;
+    static uint32_t g_pendingSimOverlaySerial = 0;
+    static uint32_t g_consumedSimOverlaySerial = 0;
     static uint32_t g_lastLvglRun = 0;
     static Arduino_DataBus *g_bus = nullptr;
     static Arduino_GFX *g_gfx = nullptr;
@@ -92,6 +95,32 @@ namespace
     void setLastError(const char *msg)
     {
         g_lastError = msg;
+    }
+
+    void showPendingSimOverlay()
+    {
+        if (g_pendingSimOverlaySerial == g_consumedSimOverlaySerial || g_pendingSimOverlay == SimSessionTransitionType::None)
+        {
+            return;
+        }
+
+        switch (g_pendingSimOverlay)
+        {
+        case SimSessionTransitionType::BecameLive:
+            ui_s3_show_transient_message("Sim bereit", "Live-Telemetrie aktiv", 1400, 0x67F2A0);
+            break;
+        case SimSessionTransitionType::BecameWaiting:
+            ui_s3_show_transient_message("Warte auf Daten", "Spiel offen, aber noch keine Live-Werte", 1500, 0x4FCBFF);
+            break;
+        case SimSessionTransitionType::BecameError:
+            ui_s3_show_transient_message("Sim Fehler", "Transport oder Session unterbrochen", 1700, 0xFF6B7A);
+            break;
+        case SimSessionTransitionType::None:
+        default:
+            break;
+        }
+
+        g_consumedSimOverlaySerial = g_pendingSimOverlaySerial;
     }
 
     void lv_rounder_cb(lv_disp_drv_t *disp_drv, lv_area_t *area)
@@ -285,6 +314,33 @@ namespace
     // Neuer I2C-Treiber (driver_ng)
     static i2c_master_bus_handle_t g_touchBus = nullptr;
     static i2c_master_dev_handle_t g_touchDev = nullptr;
+    static bool ensureTouchBus()
+    {
+        if (g_touchBus)
+        {
+            return true;
+        }
+
+        i2c_master_bus_config_t bus_cfg = {};
+        bus_cfg.clk_source = I2C_CLK_SRC_DEFAULT;
+        bus_cfg.i2c_port = TOUCH_I2C_PORT;
+        bus_cfg.scl_io_num = PIN_TOUCH_SCL;
+        bus_cfg.sda_io_num = PIN_TOUCH_SDA;
+        bus_cfg.glitch_ignore_cnt = 7;
+        // Use 0 for synchronous blocking I2C (no queue, no overflow)
+        bus_cfg.trans_queue_depth = 0;
+        bus_cfg.flags.enable_internal_pullup = true;
+
+        const esp_err_t err = i2c_new_master_bus(&bus_cfg, &g_touchBus);
+        if (err != ESP_OK)
+        {
+            ESP_LOGE(TAG, "i2c_new_master_bus failed: %s", esp_err_to_name(err));
+            return false;
+        }
+        LOG_INFO("DISPLAY", "TOUCH_BUS_OK", String("sda=") + PIN_TOUCH_SDA + " scl=" + PIN_TOUCH_SCL + " hz=" + TOUCH_I2C_SPEED);
+        return true;
+    }
+
     static void release_touch_dev()
     {
         if (g_touchDev)
@@ -307,25 +363,9 @@ namespace
             return true; // schon fertig
         }
 
-        if (!g_touchBus)
+        if (!ensureTouchBus())
         {
-            i2c_master_bus_config_t bus_cfg = {};
-            bus_cfg.clk_source = I2C_CLK_SRC_DEFAULT;
-            bus_cfg.i2c_port = TOUCH_I2C_PORT;
-            bus_cfg.scl_io_num = PIN_TOUCH_SCL;
-            bus_cfg.sda_io_num = PIN_TOUCH_SDA;
-            bus_cfg.glitch_ignore_cnt = 7;
-            // Use 0 for synchronous blocking I2C (no queue, no overflow)
-            bus_cfg.trans_queue_depth = 0;
-            bus_cfg.flags.enable_internal_pullup = true;
-
-            esp_err_t err = i2c_new_master_bus(&bus_cfg, &g_touchBus);
-            if (err != ESP_OK)
-            {
-                ESP_LOGE(TAG, "i2c_new_master_bus failed: %s", esp_err_to_name(err));
-                return false;
-            }
-            LOG_INFO("DISPLAY", "TOUCH_BUS_OK", String("sda=") + PIN_TOUCH_SDA + " scl=" + PIN_TOUCH_SCL + " hz=" + TOUCH_I2C_SPEED);
+            return false;
         }
 
         i2c_device_config_t dev_cfg = {};
@@ -602,6 +642,47 @@ namespace
     }
 } // namespace
 
+bool display_s3_add_shared_i2c_device(uint8_t address, uint32_t sclSpeedHz, i2c_master_dev_handle_t *outDevice)
+{
+    if (!outDevice)
+    {
+        return false;
+    }
+
+    if (!ensureTouchBus())
+    {
+        return false;
+    }
+
+    i2c_device_config_t dev_cfg = {};
+    dev_cfg.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+    dev_cfg.device_address = address;
+    dev_cfg.scl_speed_hz = sclSpeedHz;
+    dev_cfg.scl_wait_us = 0;
+    dev_cfg.flags.disable_ack_check = false;
+
+    const esp_err_t err = i2c_master_bus_add_device(g_touchBus, &dev_cfg, outDevice);
+    if (err != ESP_OK)
+    {
+        ESP_LOGW(TAG, "shared i2c add device 0x%02X failed: %s", address, esp_err_to_name(err));
+        return false;
+    }
+    return true;
+}
+
+void display_s3_remove_shared_i2c_device(i2c_master_dev_handle_t device)
+{
+    if (device)
+    {
+        i2c_master_bus_rm_device(device);
+    }
+}
+
+bool display_s3_uses_shared_i2c_pins(int sdaPin, int sclPin)
+{
+    return sdaPin == static_cast<int>(PIN_TOUCH_SDA) && sclPin == static_cast<int>(PIN_TOUCH_SCL);
+}
+
 void displayInit()
 {
     display_s3_init();
@@ -622,6 +703,12 @@ void displayShowTestLogo()
         return;
 
     ui_s3_show_logo();
+}
+
+void displayShowSimSessionTransition(SimSessionTransitionType transition)
+{
+    g_pendingSimOverlay = transition;
+    ++g_pendingSimOverlaySerial;
 }
 
 void displaySetGear(int gear)
@@ -730,6 +817,7 @@ void display_s3_loop()
     }
 
     ui_s3_loop(makeEsp32UiState());
+    showPendingSimOverlay();
 }
 
 DisplayDebugInfo displayGetDebugInfo()

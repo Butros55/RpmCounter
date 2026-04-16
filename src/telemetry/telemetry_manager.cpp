@@ -5,6 +5,7 @@
 #include "core/config.h"
 #include "core/logging.h"
 #include "hardware/display.h"
+#include "hardware/led_bar.h"
 #include "telemetry/simhub_client.h"
 #include "telemetry/usb_sim_bridge.h"
 
@@ -22,6 +23,20 @@ namespace
     // straight to black.
     constexpr float RPM_DECAY_PER_MS = 20.0f; // 20000 RPM / 1000 ms → full bar empties in ~1s
     unsigned long g_lastDecayMs = 0;
+    portMUX_TYPE g_telemetrySnapshotMux = portMUX_INITIALIZER_UNLOCKED;
+    TelemetryRenderSnapshot g_renderSnapshot{};
+    TelemetrySourceTransitionEvent g_sourceHistory[TELEMETRY_DEBUG_HISTORY_LEN]{};
+    SimSessionTransitionEvent g_simHistory[TELEMETRY_DEBUG_HISTORY_LEN]{};
+    uint8_t g_sourceHistoryCount = 0;
+    uint8_t g_sourceHistoryHead = 0;
+    uint8_t g_simHistoryCount = 0;
+    uint8_t g_simHistoryHead = 0;
+    uint32_t g_sourceTransitionCount = 0;
+    uint32_t g_simSessionTransitionCount = 0;
+    TelemetrySourceTransitionEvent g_lastSourceTransition{};
+    SimSessionTransitionEvent g_lastSimSessionTransition{};
+    SimSessionState g_lastSimSessionState = SimSessionState::Inactive;
+    ActiveTelemetrySource g_lastSimSessionSource = ActiveTelemetrySource::None;
 
     bool isObdFresh(unsigned long nowMs)
     {
@@ -142,21 +157,265 @@ namespace
         }
     }
 
-    const char *sourceName(ActiveTelemetrySource source)
+    bool sourceFreshForSnapshot(ActiveTelemetrySource source, bool usbFresh, bool simHubFresh, bool obdFresh)
     {
         switch (source)
         {
-        case ActiveTelemetrySource::Obd:
-            return "OBD";
-        case ActiveTelemetrySource::SimHubNetwork:
-            return "SimHubNet";
         case ActiveTelemetrySource::UsbSim:
-            return "UsbSim";
+            return usbFresh;
+        case ActiveTelemetrySource::SimHubNetwork:
+            return simHubFresh;
+        case ActiveTelemetrySource::Obd:
+            return obdFresh;
         case ActiveTelemetrySource::None:
         default:
-            return "None";
+            return false;
         }
     }
+
+    void pushSourceTransition(const TelemetrySourceTransitionEvent &event)
+    {
+        g_lastSourceTransition = event;
+        g_sourceHistory[g_sourceHistoryHead] = event;
+        g_sourceHistoryHead = static_cast<uint8_t>((g_sourceHistoryHead + 1U) % TELEMETRY_DEBUG_HISTORY_LEN);
+        if (g_sourceHistoryCount < TELEMETRY_DEBUG_HISTORY_LEN)
+        {
+            ++g_sourceHistoryCount;
+        }
+        ++g_sourceTransitionCount;
+    }
+
+    void pushSimTransition(const SimSessionTransitionEvent &event)
+    {
+        g_lastSimSessionTransition = event;
+        g_simHistory[g_simHistoryHead] = event;
+        g_simHistoryHead = static_cast<uint8_t>((g_simHistoryHead + 1U) % TELEMETRY_DEBUG_HISTORY_LEN);
+        if (g_simHistoryCount < TELEMETRY_DEBUG_HISTORY_LEN)
+        {
+            ++g_simHistoryCount;
+        }
+        ++g_simSessionTransitionCount;
+    }
+
+    SimSessionState mapUsbSessionState(UsbBridgeConnectionState state)
+    {
+        switch (state)
+        {
+        case UsbBridgeConnectionState::Live:
+            return SimSessionState::Live;
+        case UsbBridgeConnectionState::Error:
+            return SimSessionState::Error;
+        case UsbBridgeConnectionState::Disabled:
+        case UsbBridgeConnectionState::Disconnected:
+            return SimSessionState::Inactive;
+        case UsbBridgeConnectionState::WaitingForBridge:
+        case UsbBridgeConnectionState::WaitingForData:
+        default:
+            return SimSessionState::WaitingForData;
+        }
+    }
+
+    SimSessionState mapSimHubSessionState(SimHubConnectionState state)
+    {
+        switch (state)
+        {
+        case SimHubConnectionState::Live:
+            return SimSessionState::Live;
+        case SimHubConnectionState::Error:
+            return SimSessionState::Error;
+        case SimHubConnectionState::Disabled:
+            return SimSessionState::Inactive;
+        case SimHubConnectionState::WaitingForHost:
+        case SimHubConnectionState::WaitingForNetwork:
+        case SimHubConnectionState::WaitingForData:
+        default:
+            return SimSessionState::WaitingForData;
+        }
+    }
+
+    ActiveTelemetrySource chooseSimSessionSource(ActiveTelemetrySource activeSource, SimRuntimeTransportMode mode)
+    {
+        if (activeSource == ActiveTelemetrySource::UsbSim || activeSource == ActiveTelemetrySource::SimHubNetwork)
+        {
+            return activeSource;
+        }
+
+        if (cfg.telemetryPreference == TelemetryPreference::SimHub)
+        {
+            switch (mode)
+            {
+            case SimRuntimeTransportMode::UsbOnly:
+                return ActiveTelemetrySource::UsbSim;
+            case SimRuntimeTransportMode::NetworkOnly:
+                return ActiveTelemetrySource::SimHubNetwork;
+            case SimRuntimeTransportMode::Auto:
+                if (g_lastSimSessionSource == ActiveTelemetrySource::UsbSim)
+                {
+                    return ActiveTelemetrySource::UsbSim;
+                }
+                return ActiveTelemetrySource::SimHubNetwork;
+            case SimRuntimeTransportMode::Disabled:
+            default:
+                return ActiveTelemetrySource::None;
+            }
+        }
+
+        if (g_lastSimSessionSource == ActiveTelemetrySource::UsbSim || g_lastSimSessionSource == ActiveTelemetrySource::SimHubNetwork)
+        {
+            return g_lastSimSessionSource;
+        }
+
+        return ActiveTelemetrySource::None;
+    }
+
+    SimSessionState deriveSimSessionState(ActiveTelemetrySource sessionSource)
+    {
+        switch (sessionSource)
+        {
+        case ActiveTelemetrySource::UsbSim:
+            return mapUsbSessionState(g_usbBridgeConnectionState);
+        case ActiveTelemetrySource::SimHubNetwork:
+            return mapSimHubSessionState(g_simHubConnectionState);
+        case ActiveTelemetrySource::Obd:
+        case ActiveTelemetrySource::None:
+        default:
+            return SimSessionState::Inactive;
+        }
+    }
+
+    SimSessionTransitionType classifySimTransition(SimSessionState from, SimSessionState to)
+    {
+        if (to == SimSessionState::Live && from != SimSessionState::Live)
+        {
+            return SimSessionTransitionType::BecameLive;
+        }
+        if (to == SimSessionState::Error && from != SimSessionState::Error)
+        {
+            return SimSessionTransitionType::BecameError;
+        }
+        if (to == SimSessionState::WaitingForData && from == SimSessionState::Live)
+        {
+            return SimSessionTransitionType::BecameWaiting;
+        }
+        return SimSessionTransitionType::None;
+    }
+
+    void publishRenderSnapshot(const TelemetryRenderSnapshot &snapshot)
+    {
+        portENTER_CRITICAL(&g_telemetrySnapshotMux);
+        g_renderSnapshot = snapshot;
+        portEXIT_CRITICAL(&g_telemetrySnapshotMux);
+    }
+
+    void recordSourceTransition(unsigned long nowMs,
+                                ActiveTelemetrySource fromSource,
+                                ActiveTelemetrySource toSource,
+                                bool usbFresh,
+                                bool simHubFresh,
+                                bool obdFresh,
+                                bool holdApplied,
+                                bool fallbackActive)
+    {
+        TelemetrySourceTransitionEvent event{};
+        event.timestampMs = nowMs;
+        event.fromSource = fromSource;
+        event.toSource = toSource;
+        event.usbFresh = usbFresh;
+        event.simHubFresh = simHubFresh;
+        event.obdFresh = obdFresh;
+        event.holdApplied = holdApplied;
+        event.fallbackActive = fallbackActive;
+        portENTER_CRITICAL(&g_telemetrySnapshotMux);
+        pushSourceTransition(event);
+        portEXIT_CRITICAL(&g_telemetrySnapshotMux);
+    }
+
+    void trackSimSessionTransition(unsigned long nowMs, ActiveTelemetrySource source, SimSessionState nextState)
+    {
+        if (source == ActiveTelemetrySource::UsbSim || source == ActiveTelemetrySource::SimHubNetwork)
+        {
+            g_lastSimSessionSource = source;
+        }
+        else if (nextState == SimSessionState::Inactive)
+        {
+            g_lastSimSessionSource = ActiveTelemetrySource::None;
+        }
+
+        if (nextState == g_lastSimSessionState)
+        {
+            return;
+        }
+
+        const SimSessionTransitionType transition = classifySimTransition(g_lastSimSessionState, nextState);
+        if (transition != SimSessionTransitionType::None)
+        {
+            SimSessionTransitionEvent event{};
+            event.timestampMs = nowMs;
+            event.fromState = g_lastSimSessionState;
+            event.toState = nextState;
+            event.transition = transition;
+            event.source = source;
+            portENTER_CRITICAL(&g_telemetrySnapshotMux);
+            pushSimTransition(event);
+            portEXIT_CRITICAL(&g_telemetrySnapshotMux);
+            ledBarRequestSimSessionTransition(transition);
+            displayShowSimSessionTransition(transition);
+        }
+
+        g_lastSimSessionState = nextState;
+    }
+}
+
+const char *telemetrySourceName(ActiveTelemetrySource source)
+{
+    switch (source)
+    {
+    case ActiveTelemetrySource::Obd:
+        return "OBD";
+    case ActiveTelemetrySource::SimHubNetwork:
+        return "SimHubNet";
+    case ActiveTelemetrySource::UsbSim:
+        return "UsbSim";
+    case ActiveTelemetrySource::None:
+    default:
+        return "None";
+    }
+}
+
+const char *simSessionStateName(SimSessionState state)
+{
+    switch (state)
+    {
+    case SimSessionState::WaitingForData:
+        return "waiting";
+    case SimSessionState::Live:
+        return "live";
+    case SimSessionState::Error:
+        return "error";
+    case SimSessionState::Inactive:
+    default:
+        return "inactive";
+    }
+}
+
+const char *simSessionTransitionTypeName(SimSessionTransitionType type)
+{
+    switch (type)
+    {
+    case SimSessionTransitionType::BecameLive:
+        return "became-live";
+    case SimSessionTransitionType::BecameWaiting:
+        return "became-waiting";
+    case SimSessionTransitionType::BecameError:
+        return "became-error";
+    case SimSessionTransitionType::None:
+    default:
+        return "none";
+    }
+}
+
+namespace
+{
 }
 
 TelemetryPreference nextTelemetryPreference(TelemetryPreference current)
@@ -281,8 +540,10 @@ void telemetryLoop()
     const bool usbFresh = usbSimTelemetryFresh(nowMs);
     const bool simHubFresh = isSimHubFresh(nowMs);
     const bool obdFresh = isObdFresh(nowMs);
+    const SimRuntimeTransportMode mode = resolveSimRuntimeTransportMode(cfg.telemetryPreference, cfg.simTransportPreference);
     ActiveTelemetrySource nextSource =
         selectTelemetryRuntimeSource(cfg.telemetryPreference, cfg.simTransportPreference, usbFresh, simHubFresh, obdFresh);
+    bool holdApplied = false;
 
     // The hold window is only for Auto transport so short gaps do not flap between USB and network.
     if (telemetrySupportsTransportFallback(cfg.telemetryPreference, cfg.simTransportPreference) &&
@@ -293,23 +554,50 @@ void telemetryLoop()
         if (lastSampleMs > 0 && (nowMs - lastSampleMs) <= TELEMETRY_SOURCE_HOLD_MS)
         {
             nextSource = g_activeTelemetrySource;
+            holdApplied = true;
         }
     }
 
     if (nextSource != g_activeTelemetrySource)
     {
-        const SimRuntimeTransportMode mode = resolveSimRuntimeTransportMode(cfg.telemetryPreference, cfg.simTransportPreference);
         LOG_INFO("TELEMETRY", "SOURCE_SWITCH",
-                 String("from=") + sourceName(g_activeTelemetrySource) +
-                     " to=" + sourceName(nextSource) +
+                 String("from=") + telemetrySourceName(g_activeTelemetrySource) +
+                     " to=" + telemetrySourceName(nextSource) +
                      " mode=" + simRuntimeTransportModeName(mode) +
                      " usbFresh=" + (usbFresh ? "1" : "0") +
                      " netFresh=" + (simHubFresh ? "1" : "0") +
                      " obdFresh=" + (obdFresh ? "1" : "0"));
+        recordSourceTransition(nowMs,
+                               g_activeTelemetrySource,
+                               nextSource,
+                               usbFresh,
+                               simHubFresh,
+                               obdFresh,
+                               holdApplied,
+                               telemetrySourceIsFallback(nextSource, cfg.telemetryPreference, cfg.simTransportPreference));
         g_activeTelemetrySource = nextSource;
     }
 
     applyActiveTelemetry(nextSource, nowMs);
+
+    const ActiveTelemetrySource simSessionSource = chooseSimSessionSource(nextSource, mode);
+    const SimSessionState simSessionState = deriveSimSessionState(simSessionSource);
+    trackSimSessionTransition(nowMs, simSessionSource, simSessionState);
+
+    TelemetryRenderSnapshot snapshot{};
+    snapshot.version = telemetryGetRenderSnapshotVersion() + 1U;
+    snapshot.source = nextSource;
+    snapshot.rpm = g_currentRpm;
+    snapshot.maxSeenRpm = g_maxSeenRpm;
+    snapshot.speedKmh = g_vehicleSpeedKmh;
+    snapshot.gear = g_estimatedGear;
+    snapshot.throttle = g_currentThrottle;
+    snapshot.pitLimiter = g_pitLimiterActive;
+    snapshot.sampleTimestampMs = lastSampleForSource(nextSource);
+    snapshot.telemetryFresh = sourceFreshForSnapshot(nextSource, usbFresh, simHubFresh, obdFresh);
+    snapshot.fallbackActive = telemetrySourceIsFallback(nextSource, cfg.telemetryPreference, cfg.simTransportPreference);
+    snapshot.simSessionState = simSessionState;
+    publishRenderSnapshot(snapshot);
 }
 
 void telemetryOnObdSample(int rpm, int speedKmh, int gear, unsigned long sampleMs)
@@ -331,4 +619,47 @@ void telemetryOnObdDisconnected()
 bool telemetryShouldAllowObd()
 {
     return !usbSimShouldBlockObd();
+}
+
+TelemetryRenderSnapshot telemetryCopyRenderSnapshot()
+{
+    TelemetryRenderSnapshot snapshot{};
+    portENTER_CRITICAL(&g_telemetrySnapshotMux);
+    snapshot = g_renderSnapshot;
+    portEXIT_CRITICAL(&g_telemetrySnapshotMux);
+    return snapshot;
+}
+
+uint32_t telemetryGetRenderSnapshotVersion()
+{
+    uint32_t version = 0;
+    portENTER_CRITICAL(&g_telemetrySnapshotMux);
+    version = g_renderSnapshot.version;
+    portEXIT_CRITICAL(&g_telemetrySnapshotMux);
+    return version;
+}
+
+TelemetryDebugInfo telemetryGetDebugInfo()
+{
+    TelemetryDebugInfo info{};
+    portENTER_CRITICAL(&g_telemetrySnapshotMux);
+    info.snapshot = g_renderSnapshot;
+    info.lastSourceTransition = g_lastSourceTransition;
+    info.lastSimSessionTransition = g_lastSimSessionTransition;
+    info.sourceTransitionCount = g_sourceTransitionCount;
+    info.simSessionTransitionCount = g_simSessionTransitionCount;
+    info.sourceHistoryCount = g_sourceHistoryCount;
+    info.simHistoryCount = g_simHistoryCount;
+    for (uint8_t i = 0; i < g_sourceHistoryCount; ++i)
+    {
+        const uint8_t index = static_cast<uint8_t>((g_sourceHistoryHead + TELEMETRY_DEBUG_HISTORY_LEN - g_sourceHistoryCount + i) % TELEMETRY_DEBUG_HISTORY_LEN);
+        info.sourceHistory[i] = g_sourceHistory[index];
+    }
+    for (uint8_t i = 0; i < g_simHistoryCount; ++i)
+    {
+        const uint8_t index = static_cast<uint8_t>((g_simHistoryHead + TELEMETRY_DEBUG_HISTORY_LEN - g_simHistoryCount + i) % TELEMETRY_DEBUG_HISTORY_LEN);
+        info.simHistory[i] = g_simHistory[index];
+    }
+    portEXIT_CRITICAL(&g_telemetrySnapshotMux);
+    return info;
 }
