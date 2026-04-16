@@ -48,7 +48,7 @@ float ambientApplySmoothing(float current, float target, float alpha)
     return current + ((target - current) * clampedAlpha);
 }
 
-int ambientComputeTargetBrightness(float lux, const AutoBrightnessCurveConfig &config)
+float ambientComputeTargetBrightnessFloat(float lux, const AutoBrightnessCurveConfig &config)
 {
     const int manualMax = clampValue(config.manualMax, 0, 255);
     const int minBrightness = clampValue(config.minBrightness, 0, manualMax);
@@ -58,6 +58,12 @@ int ambientComputeTargetBrightness(float lux, const AutoBrightnessCurveConfig &c
     const float adjustedLux = clampValue(normalizedLux * strength, 0.0f, 1.0f);
     const float target =
         static_cast<float>(minBrightness) + adjustedLux * static_cast<float>(manualMax - minBrightness);
-    const int rounded = static_cast<int>(lroundf(target));
-    return clampValue(rounded, 0, manualMax);
+    return clampValue(target, 0.0f, static_cast<float>(manualMax));
+}
+
+int ambientComputeTargetBrightness(float lux, const AutoBrightnessCurveConfig &config)
+{
+    const float target = ambientComputeTargetBrightnessFloat(lux, config);
+    const int manualMax = clampValue(config.manualMax, 0, 255);
+    return clampValue(static_cast<int>(lroundf(target)), 0, manualMax);
 }

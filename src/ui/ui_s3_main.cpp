@@ -254,7 +254,9 @@ namespace
 
     bool usb_bridge_web_selected()
     {
-        return usb_transport_mode_selected() || g_state.runtime.telemetrySource == UiTelemetrySource::UsbBridge;
+        return (!g_state.runtime.usbHost.empty() && g_state.runtime.usbBridgeConnected) ||
+               usb_transport_mode_selected() ||
+               g_state.runtime.telemetrySource == UiTelemetrySource::UsbBridge;
     }
 
     std::string usb_state_text(bool autoMode)

@@ -6,6 +6,7 @@
 #include "core/logging.h"
 #include "hardware/display.h"
 #include "hardware/led_bar.h"
+#include "signal_utils.h"
 #include "telemetry/simhub_client.h"
 #include "telemetry/usb_sim_bridge.h"
 
@@ -22,6 +23,10 @@ namespace
     // so the LED bar smoothly empties instead of cutting from a stale value
     // straight to black.
     constexpr float RPM_DECAY_PER_MS = 20.0f; // 20000 RPM / 1000 ms → full bar empties in ~1s
+    constexpr unsigned long SIM_SESSION_LIVE_DEBOUNCE_MS = 100;
+    constexpr unsigned long SIM_SESSION_WAITING_DEBOUNCE_MS = 1200;
+    constexpr unsigned long SIM_SESSION_ERROR_DEBOUNCE_MS = 1500;
+    constexpr unsigned long SIM_SESSION_INACTIVE_DEBOUNCE_MS = 1500;
     unsigned long g_lastDecayMs = 0;
     portMUX_TYPE g_telemetrySnapshotMux = portMUX_INITIALIZER_UNLOCKED;
     TelemetryRenderSnapshot g_renderSnapshot{};
@@ -33,10 +38,14 @@ namespace
     uint8_t g_simHistoryHead = 0;
     uint32_t g_sourceTransitionCount = 0;
     uint32_t g_simSessionTransitionCount = 0;
+    uint32_t g_simSessionSuppressedCount = 0;
     TelemetrySourceTransitionEvent g_lastSourceTransition{};
     SimSessionTransitionEvent g_lastSimSessionTransition{};
     SimSessionState g_lastSimSessionState = SimSessionState::Inactive;
     ActiveTelemetrySource g_lastSimSessionSource = ActiveTelemetrySource::None;
+    SimSessionState g_pendingSimSessionState = SimSessionState::Inactive;
+    ActiveTelemetrySource g_pendingSimSessionSource = ActiveTelemetrySource::None;
+    unsigned long g_pendingSimSessionSinceMs = 0;
 
     bool isObdFresh(unsigned long nowMs)
     {
@@ -300,6 +309,65 @@ namespace
         return SimSessionTransitionType::None;
     }
 
+    SimSessionState trackSimSessionTransition(unsigned long nowMs, ActiveTelemetrySource source, SimSessionState candidateState)
+    {
+        if (source == ActiveTelemetrySource::UsbSim || source == ActiveTelemetrySource::SimHubNetwork)
+        {
+            g_lastSimSessionSource = source;
+        }
+        else if (candidateState == SimSessionState::Inactive)
+        {
+            g_lastSimSessionSource = ActiveTelemetrySource::None;
+        }
+
+        if (candidateState == g_lastSimSessionState)
+        {
+            g_pendingSimSessionState = candidateState;
+            g_pendingSimSessionSource = source;
+            g_pendingSimSessionSinceMs = nowMs;
+            return g_lastSimSessionState;
+        }
+
+        if (candidateState != g_pendingSimSessionState || source != g_pendingSimSessionSource)
+        {
+            if (g_pendingSimSessionState != g_lastSimSessionState)
+            {
+                ++g_simSessionSuppressedCount;
+            }
+            g_pendingSimSessionState = candidateState;
+            g_pendingSimSessionSource = source;
+            g_pendingSimSessionSinceMs = nowMs;
+            return g_lastSimSessionState;
+        }
+
+        if (!telemetrySimSessionCandidateReady(candidateState, g_pendingSimSessionSinceMs, nowMs))
+        {
+            return g_lastSimSessionState;
+        }
+
+        const SimSessionTransitionType transition = classifySimTransition(g_lastSimSessionState, candidateState);
+        if (transition != SimSessionTransitionType::None)
+        {
+            SimSessionTransitionEvent event{};
+            event.timestampMs = nowMs;
+            event.fromState = g_lastSimSessionState;
+            event.toState = candidateState;
+            event.transition = transition;
+            event.source = source;
+            portENTER_CRITICAL(&g_telemetrySnapshotMux);
+            pushSimTransition(event);
+            portEXIT_CRITICAL(&g_telemetrySnapshotMux);
+            ledBarRequestSimSessionTransition(transition);
+            displayShowSimSessionTransition(transition);
+        }
+
+        g_lastSimSessionState = candidateState;
+        g_pendingSimSessionState = candidateState;
+        g_pendingSimSessionSource = source;
+        g_pendingSimSessionSinceMs = nowMs;
+        return g_lastSimSessionState;
+    }
+
     void publishRenderSnapshot(const TelemetryRenderSnapshot &snapshot)
     {
         portENTER_CRITICAL(&g_telemetrySnapshotMux);
@@ -330,40 +398,6 @@ namespace
         portEXIT_CRITICAL(&g_telemetrySnapshotMux);
     }
 
-    void trackSimSessionTransition(unsigned long nowMs, ActiveTelemetrySource source, SimSessionState nextState)
-    {
-        if (source == ActiveTelemetrySource::UsbSim || source == ActiveTelemetrySource::SimHubNetwork)
-        {
-            g_lastSimSessionSource = source;
-        }
-        else if (nextState == SimSessionState::Inactive)
-        {
-            g_lastSimSessionSource = ActiveTelemetrySource::None;
-        }
-
-        if (nextState == g_lastSimSessionState)
-        {
-            return;
-        }
-
-        const SimSessionTransitionType transition = classifySimTransition(g_lastSimSessionState, nextState);
-        if (transition != SimSessionTransitionType::None)
-        {
-            SimSessionTransitionEvent event{};
-            event.timestampMs = nowMs;
-            event.fromState = g_lastSimSessionState;
-            event.toState = nextState;
-            event.transition = transition;
-            event.source = source;
-            portENTER_CRITICAL(&g_telemetrySnapshotMux);
-            pushSimTransition(event);
-            portEXIT_CRITICAL(&g_telemetrySnapshotMux);
-            ledBarRequestSimSessionTransition(transition);
-            displayShowSimSessionTransition(transition);
-        }
-
-        g_lastSimSessionState = nextState;
-    }
 }
 
 const char *telemetrySourceName(ActiveTelemetrySource source)
@@ -412,6 +446,28 @@ const char *simSessionTransitionTypeName(SimSessionTransitionType type)
     default:
         return "none";
     }
+}
+
+unsigned long simSessionStateDebounceMs(SimSessionState state)
+{
+    switch (state)
+    {
+    case SimSessionState::Live:
+        return SIM_SESSION_LIVE_DEBOUNCE_MS;
+    case SimSessionState::WaitingForData:
+        return SIM_SESSION_WAITING_DEBOUNCE_MS;
+    case SimSessionState::Error:
+        return SIM_SESSION_ERROR_DEBOUNCE_MS;
+    case SimSessionState::Inactive:
+    default:
+        return SIM_SESSION_INACTIVE_DEBOUNCE_MS;
+    }
+}
+
+bool telemetrySimSessionCandidateReady(SimSessionState candidateState, unsigned long pendingSinceMs, unsigned long nowMs)
+{
+    return pendingSinceMs > 0 && (nowMs >= pendingSinceMs) &&
+           (nowMs - pendingSinceMs) >= simSessionStateDebounceMs(candidateState);
 }
 
 namespace
@@ -581,8 +637,7 @@ void telemetryLoop()
     applyActiveTelemetry(nextSource, nowMs);
 
     const ActiveTelemetrySource simSessionSource = chooseSimSessionSource(nextSource, mode);
-    const SimSessionState simSessionState = deriveSimSessionState(simSessionSource);
-    trackSimSessionTransition(nowMs, simSessionSource, simSessionState);
+    const SimSessionState simSessionState = trackSimSessionTransition(nowMs, simSessionSource, deriveSimSessionState(simSessionSource));
 
     TelemetryRenderSnapshot snapshot{};
     snapshot.version = telemetryGetRenderSnapshotVersion() + 1U;
@@ -648,6 +703,7 @@ TelemetryDebugInfo telemetryGetDebugInfo()
     info.lastSimSessionTransition = g_lastSimSessionTransition;
     info.sourceTransitionCount = g_sourceTransitionCount;
     info.simSessionTransitionCount = g_simSessionTransitionCount;
+    info.simSessionSuppressedCount = g_simSessionSuppressedCount;
     info.sourceHistoryCount = g_sourceHistoryCount;
     info.simHistoryCount = g_simHistoryCount;
     for (uint8_t i = 0; i < g_sourceHistoryCount; ++i)

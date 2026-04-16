@@ -23,6 +23,9 @@ namespace
     constexpr int LED_MODE_GT3 = 3;
     constexpr int GT3_PIT_MARKER_COUNT = 2;
     const RgbColor GT3_PIT_COLOR = {255, 0, 170};
+    constexpr float LED_LEVEL_HYSTERESIS_UP = 0.38f;
+    constexpr float LED_LEVEL_HYSTERESIS_DOWN = 0.18f;
+    constexpr unsigned long SESSION_EFFECT_COOLDOWN_MS = 5000;
     TaskHandle_t g_ledBarTaskHandle = nullptr;
     volatile bool g_ledBarTaskRunning = false;
 
@@ -109,6 +112,17 @@ namespace
     uint32_t g_ledSnapshotChangedDuringRender = 0;
     LedRenderWriter g_lastWriter = LedRenderWriter::None;
     LedTestSweepMode g_testSweepMode = LedTestSweepMode::Expressive;
+    int g_stableDisplayLevel = 0;
+    int g_stableDisplayLevelCount = 0;
+    uint8_t g_stableDisplayMode = 0;
+    float g_stableDisplayRawLevel = 0.0f;
+    LedEffectType g_lastQueuedEffectType = LedEffectType::None;
+    uint32_t g_sessionEffectRequestCount = 0;
+    uint32_t g_sessionEffectSuppressedCount = 0;
+    unsigned long g_lastSessionEffectMs = 0;
+
+    constexpr uint8_t DISPLAY_MODE_LINEAR = 1;
+    constexpr uint8_t DISPLAY_MODE_GT3 = 2;
 
     void invalidateLedFrameCacheInternal()
     {
@@ -119,6 +133,17 @@ namespace
             displaySetShiftBlink(false);
             g_lastDisplayBlinkState = false;
         }
+    }
+
+    void resetDisplayLevelState()
+    {
+        g_stableDisplayLevel = 0;
+        g_stableDisplayLevelCount = 0;
+        g_stableDisplayMode = 0;
+        g_stableDisplayRawLevel = 0.0f;
+        g_ledRenderDebug.lastDesiredLevel = 0;
+        g_ledRenderDebug.lastDisplayedLevel = 0;
+        g_ledRenderDebug.lastLevelCount = 0;
     }
 
     void setLastRenderMode(LedFrameMode mode)
@@ -159,6 +184,33 @@ namespace
         default:
             return "none";
         }
+    }
+
+    const char *effectName(LedEffectType effect)
+    {
+        switch (effect)
+        {
+        case LedEffectType::BrightnessPreview:
+            return "brightness-preview";
+        case LedEffectType::Logo:
+            return "logo";
+        case LedEffectType::LogoLeaving:
+            return "logo-leaving";
+        case LedEffectType::SimReady:
+            return "sim-ready";
+        case LedEffectType::SimStandby:
+            return "sim-standby";
+        case LedEffectType::SimError:
+            return "sim-error";
+        case LedEffectType::None:
+        default:
+            return "none";
+        }
+    }
+
+    int activeLedCount()
+    {
+        return clampInt(cfg.activeLedCount, 1, NUM_LEDS);
     }
 
     void pushRenderHistory(const LedRenderEvent &event)
@@ -217,10 +269,37 @@ namespace
         portENTER_CRITICAL(&g_ledEffectMux);
         g_pendingEffectType = type;
         ++g_pendingEffectSerial;
+        g_lastQueuedEffectType = type;
         portEXIT_CRITICAL(&g_ledEffectMux);
         g_animationActive = animationActive;
         g_brightnessPreviewActive = brightnessPreview;
         invalidateLedFrameCacheInternal();
+    }
+
+    bool isSimSessionEffect(LedEffectType type)
+    {
+        return type == LedEffectType::SimReady || type == LedEffectType::SimStandby || type == LedEffectType::SimError;
+    }
+
+    void cancelSimSessionEffects()
+    {
+        bool changed = false;
+        portENTER_CRITICAL(&g_ledEffectMux);
+        if (isSimSessionEffect(g_pendingEffectType))
+        {
+            g_pendingEffectType = LedEffectType::None;
+            changed = true;
+        }
+        if (isSimSessionEffect(g_effectState.type))
+        {
+            g_effectState = LedEffectState{};
+            changed = true;
+        }
+        portEXIT_CRITICAL(&g_ledEffectMux);
+        if (changed)
+        {
+            g_forceNextStripShow = true;
+        }
     }
 
     bool startPendingEffectIfAny(unsigned long nowMs)
@@ -325,6 +404,17 @@ namespace
         return strip.Color(c.r, c.g, c.b);
     }
 
+    uint32_t scalePackedColor(uint32_t color, float scale)
+    {
+        scale = constrain(scale, 0.0f, 1.0f);
+        const uint8_t gVal = (color >> 16) & 0xFF;
+        const uint8_t rVal = (color >> 8) & 0xFF;
+        const uint8_t bVal = color & 0xFF;
+        return strip.Color(static_cast<uint8_t>(rVal * scale),
+                           static_cast<uint8_t>(gVal * scale),
+                           static_cast<uint8_t>(bVal * scale));
+    }
+
     void clearFrame(uint32_t *frame)
     {
         for (int i = 0; i < NUM_LEDS; ++i)
@@ -382,6 +472,73 @@ namespace
         return toStripColor(cfg.redColor);
     }
 
+    struct LedZoneProfile
+    {
+        float greenEnd = 0.0f;
+        float yellowEnd = 0.0f;
+        float redFillEnd = 1.0f;
+        float blinkStart = 1.0f;
+    };
+
+    LedZoneProfile buildLedZoneProfile()
+    {
+        const float greenPct = constrain(cfg.greenEndPct / 100.0f, 0.0f, 1.0f);
+        const float yellowPct = constrain(cfg.yellowEndPct / 100.0f, greenPct, 1.0f);
+        const float redPct = constrain(cfg.redEndPct / 100.0f, yellowPct, 1.0f);
+        const float blinkPct = constrain(cfg.blinkStartPct / 100.0f, 0.0f, 1.0f);
+        const float safeRedPct = redPct > 0.01f ? redPct : 0.01f;
+
+        LedZoneProfile profile;
+        profile.greenEnd = constrain(greenPct / safeRedPct, 0.0f, 1.0f);
+        profile.yellowEnd = constrain(yellowPct / safeRedPct, profile.greenEnd, 1.0f);
+        profile.redFillEnd = constrain(blinkPct * safeRedPct, 0.0f, 1.0f);
+        profile.blinkStart = blinkPct;
+        return profile;
+    }
+
+    float computeLedDisplayFraction(float actualFraction, const LedZoneProfile &profile)
+    {
+        if (actualFraction <= 0.0f)
+        {
+            return 0.0f;
+        }
+        if (profile.redFillEnd <= 0.001f)
+        {
+            return 1.0f;
+        }
+        return constrain(actualFraction / profile.redFillEnd, 0.0f, 1.0f);
+    }
+
+    int computeStableDisplayedLevel(float displayFraction, int levelCount, uint8_t displayMode, bool bypass)
+    {
+        if (levelCount <= 0)
+        {
+            resetDisplayLevelState();
+            return 0;
+        }
+
+        const float rawLevel = constrain(displayFraction, 0.0f, 1.0f) * static_cast<float>(levelCount);
+        const int desiredLevel = clampInt(static_cast<int>(lroundf(rawLevel)), 0, levelCount);
+        g_stableDisplayRawLevel = rawLevel;
+
+        if (bypass || g_stableDisplayMode != displayMode || g_stableDisplayLevelCount != levelCount)
+        {
+            g_stableDisplayLevel = desiredLevel;
+            g_stableDisplayLevelCount = levelCount;
+            g_stableDisplayMode = displayMode;
+        }
+        else
+        {
+            g_stableDisplayLevel =
+                applyDisplayLevelHysteresis(g_stableDisplayLevel, rawLevel, levelCount, LED_LEVEL_HYSTERESIS_UP, LED_LEVEL_HYSTERESIS_DOWN);
+        }
+
+        g_ledRenderDebug.lastDesiredLevel = desiredLevel;
+        g_ledRenderDebug.lastDisplayedLevel = g_stableDisplayLevel;
+        g_ledRenderDebug.lastLevelCount = levelCount;
+        return g_stableDisplayLevel;
+    }
+
     void overlayPitLimiterMarkers(uint32_t *frame, bool enabled)
     {
         if (!enabled)
@@ -389,16 +546,18 @@ namespace
             return;
         }
 
+        const int ledCount = activeLedCount();
         const uint32_t pitColor = toStripColor(GT3_PIT_COLOR);
-        for (int offset = 0; offset < GT3_PIT_MARKER_COUNT && offset < NUM_LEDS; ++offset)
+        for (int offset = 0; offset < GT3_PIT_MARKER_COUNT && offset < ledCount; ++offset)
         {
             frame[offset] = pitColor;
-            frame[NUM_LEDS - 1 - offset] = pitColor;
+            frame[ledCount - 1 - offset] = pitColor;
         }
     }
 
     void renderLinearPattern(uint32_t *frame,
-                             int ledsOn,
+                             int stableLevel,
+                             float rawLevel,
                              bool aggressiveFullBlink,
                              bool shiftBlink,
                              bool blinkState,
@@ -408,34 +567,47 @@ namespace
     {
         g_ledRenderDebug.pitLimiterOnly = false;
         setLastRenderMode(LedFrameMode::Linear);
-        for (int i = 0; i < NUM_LEDS; i++)
+        const int ledCount = activeLedCount();
+        const int tailIndex = (aggressiveFullBlink || shiftBlink) ? -1 : displayLevelTailIndex(stableLevel, rawLevel, ledCount);
+        const float tailIntensity = (tailIndex >= 0) ? displayLevelTailIntensity(stableLevel, rawLevel, ledCount) : 0.0f;
+        for (int i = 0; i < ledCount; i++)
         {
             uint32_t color = 0;
+            const bool fullyLit = i < stableLevel;
+            const bool partiallyLit = !fullyLit && i == tailIndex && tailIntensity > 0.02f;
 
-            if (i < ledsOn)
+            if (fullyLit || partiallyLit)
             {
-                const float pos = (NUM_LEDS > 1) ? (float)i / (float)(NUM_LEDS - 1) : 0.0f;
+                const float pos = (ledCount > 1) ? (float)i / (float)(ledCount - 1) : 0.0f;
 
                 if (aggressiveFullBlink)
                 {
                     color = blinkState ? strip.Color(255, 0, 0) : 0;
                 }
-                else if (pos < greenEnd)
-                {
-                    color = toStripColor(cfg.greenColor);
-                }
-                else if (pos < yellowEnd)
-                {
-                    color = toStripColor(cfg.yellowColor);
-                }
-                else if (cfg.mode == LED_MODE_F1 && shiftBlink)
-                {
-                    color = blinkState ? toStripColor(cfg.redColor) : 0;
-                    displayBlink = blinkState;
-                }
                 else
                 {
-                    color = toStripColor(cfg.redColor);
+                    if (pos < greenEnd)
+                    {
+                        color = toStripColor(cfg.greenColor);
+                    }
+                    else if (pos < yellowEnd)
+                    {
+                        color = toStripColor(cfg.yellowColor);
+                    }
+                    else if (cfg.mode == LED_MODE_F1 && shiftBlink)
+                    {
+                        color = blinkState ? toStripColor(cfg.redColor) : 0;
+                        displayBlink = blinkState;
+                    }
+                    else
+                    {
+                        color = toStripColor(cfg.redColor);
+                    }
+
+                    if (partiallyLit)
+                    {
+                        color = scalePackedColor(color, tailIntensity);
+                    }
                 }
             }
 
@@ -444,10 +616,11 @@ namespace
     }
 
     void renderGt3Pattern(uint32_t *frame,
-                          float fraction,
+                          int stableLevel,
+                          float rawLevel,
+                          bool finalBlink,
                           float greenEnd,
                           float yellowEnd,
-                          float blinkStart,
                           bool blinkState,
                           bool pitLimiterActive,
                           bool &displayBlink)
@@ -460,18 +633,14 @@ namespace
             return;
         }
 
-        const int pairCount = (NUM_LEDS + 1) / 2;
-        int pairsOn = (int)round(fraction * pairCount);
-        if (pairsOn < 0)
-            pairsOn = 0;
-        if (pairsOn > pairCount)
-            pairsOn = pairCount;
+        const int ledCount = activeLedCount();
+        const int pairCount = (ledCount + 1) / 2;
+        stableLevel = clampInt(stableLevel, 0, pairCount);
 
-        const bool finalBlink = fraction >= blinkStart;
         if (finalBlink)
         {
             const uint32_t blinkColor = blinkState ? toStripColor(cfg.redColor) : 0;
-            for (int i = 0; i < NUM_LEDS; ++i)
+            for (int i = 0; i < ledCount; ++i)
             {
                 frame[i] = blinkColor;
             }
@@ -481,13 +650,20 @@ namespace
             return;
         }
 
+        const int tailIndex = displayLevelTailIndex(stableLevel, rawLevel, pairCount);
+        const float tailIntensity = displayLevelTailIntensity(stableLevel, rawLevel, pairCount);
         for (int rank = 0; rank < pairCount; ++rank)
         {
-            const bool on = rank < pairsOn;
+            const bool on = rank < stableLevel;
+            const bool partial = !on && rank == tailIndex && tailIntensity > 0.02f;
             const float pos = (pairCount > 1) ? (float)rank / (float)(pairCount - 1) : 1.0f;
-            const uint32_t color = on ? zoneColor(pos, greenEnd, yellowEnd) : 0;
+            uint32_t color = on ? zoneColor(pos, greenEnd, yellowEnd) : 0;
+            if (partial)
+            {
+                color = scalePackedColor(zoneColor(pos, greenEnd, yellowEnd), tailIntensity);
+            }
             const int left = rank;
-            const int right = NUM_LEDS - 1 - rank;
+            const int right = ledCount - 1 - rank;
             frame[left] = color;
             if (right != left)
             {
@@ -512,7 +688,8 @@ namespace
         case LedDiagnosticMode::StaticGreen:
         {
             const uint32_t color = toStripColor(cfg.greenColor);
-            for (int i = 0; i < NUM_LEDS; ++i)
+            const int ledCount = activeLedCount();
+            for (int i = 0; i < ledCount; ++i)
             {
                 frame[i] = color;
             }
@@ -522,7 +699,8 @@ namespace
         case LedDiagnosticMode::StaticWhite:
         {
             const uint32_t color = strip.Color(255, 255, 255);
-            for (int i = 0; i < NUM_LEDS; ++i)
+            const int ledCount = activeLedCount();
+            for (int i = 0; i < ledCount; ++i)
             {
                 frame[i] = color;
             }
@@ -631,8 +809,9 @@ namespace
         intensity = constrain(intensity, 0.0f, 1.0f);
         clearFrame(frame);
 
-        const int segLen = max(2, NUM_LEDS / 3);
-        for (int i = 0; i < NUM_LEDS; ++i)
+        const int ledCount = activeLedCount();
+        const int segLen = max(2, ledCount / 3);
+        for (int i = 0; i < ledCount; ++i)
         {
             uint8_t br = 0;
             uint8_t bg = 0;
@@ -664,7 +843,8 @@ namespace
     void scaleFrame(uint32_t *frame, const uint32_t *source, float scale)
     {
         scale = constrain(scale, 0.0f, 1.0f);
-        for (int i = 0; i < NUM_LEDS; ++i)
+        const int ledCount = activeLedCount();
+        for (int i = 0; i < ledCount; ++i)
         {
             const uint32_t col = source[i];
             const uint8_t gVal = (col >> 16) & 0xFF;
@@ -753,10 +933,11 @@ namespace
         case LedEffectType::SimReady:
         {
             const float t = min(1.0f, elapsed / static_cast<float>(SIM_READY_EFFECT_MS));
-            const int ledsOn = static_cast<int>(round(smoothStep(min(1.0f, t / 0.55f)) * NUM_LEDS));
+            const int ledCount = activeLedCount();
+            const int ledsOn = static_cast<int>(round(smoothStep(min(1.0f, t / 0.55f)) * ledCount));
             const float fade = (t < 0.55f) ? 1.0f : (1.0f - smoothStep((t - 0.55f) / 0.45f));
             const uint32_t color = strip.Color(0, static_cast<uint8_t>(180 * fade), static_cast<uint8_t>(255 * fade));
-            for (int i = 0; i < ledsOn && i < NUM_LEDS; ++i)
+            for (int i = 0; i < ledsOn && i < ledCount; ++i)
             {
                 frame[i] = color;
             }
@@ -773,11 +954,12 @@ namespace
             const float t = min(1.0f, elapsed / static_cast<float>(SIM_STANDBY_EFFECT_MS));
             if (g_effectState.baseFrameValid)
             {
+                const int ledCount = activeLedCount();
                 scaleFrame(frame, g_effectState.baseFrame, 1.0f - smoothStep(t));
-                const int keep = static_cast<int>(round((1.0f - t) * NUM_LEDS));
-                const int left = max(0, (NUM_LEDS - keep) / 2);
-                const int right = min(NUM_LEDS, left + keep);
-                for (int i = 0; i < NUM_LEDS; ++i)
+                const int keep = static_cast<int>(round((1.0f - t) * ledCount));
+                const int left = max(0, (ledCount - keep) / 2);
+                const int right = min(ledCount, left + keep);
+                for (int i = 0; i < ledCount; ++i)
                 {
                     if (i < left || i >= right)
                     {
@@ -795,9 +977,10 @@ namespace
         }
         case LedEffectType::SimError:
         {
+            const int ledCount = activeLedCount();
             const bool on = ((elapsed / 120UL) % 2UL) == 0UL;
             const uint32_t color = on ? strip.Color(255, 0, 0) : strip.Color(30, 0, 0);
-            for (int i = 0; i < NUM_LEDS; ++i)
+            for (int i = 0; i < ledCount; ++i)
             {
                 frame[i] = color;
             }
@@ -851,11 +1034,16 @@ void initLeds()
     g_effectState = LedEffectState{};
     g_pendingEffectType = LedEffectType::None;
     g_pendingEffectSerial = 0;
+    g_lastQueuedEffectType = LedEffectType::None;
+    g_sessionEffectRequestCount = 0;
+    g_sessionEffectSuppressedCount = 0;
+    g_lastSessionEffectMs = 0;
     g_renderHistoryCount = 0;
     g_renderHistoryHead = 0;
     g_lastRenderEvent = LedRenderEvent{};
     g_ledExternalWriteAttempts = 0;
     g_ledSnapshotChangedDuringRender = 0;
+    resetDisplayLevelState();
 }
 
 void ledBarRefreshBrightness()
@@ -883,6 +1071,7 @@ void ledBarSetDiagnosticMode(LedDiagnosticMode mode)
     g_pendingEffectType = LedEffectType::None;
     g_effectState = LedEffectState{};
     portEXIT_CRITICAL(&g_ledEffectMux);
+    resetDisplayLevelState();
     invalidateLedFrameCacheInternal();
 }
 
@@ -952,9 +1141,19 @@ uint8_t ledBarGetAppliedBrightness()
     return g_appliedStripBrightness;
 }
 
+int ledBarGetConfiguredLedCount()
+{
+    return activeLedCount();
+}
+
 const char *ledBarGetLastWriterName()
 {
     return writerName(g_lastWriter);
+}
+
+const char *ledBarEffectNameById(uint8_t effectId)
+{
+    return effectName(static_cast<LedEffectType>(effectId));
 }
 
 void ledBarStartTestSweep(LedTestSweepMode mode, int maxRpm)
@@ -969,6 +1168,7 @@ void ledBarStartTestSweep(LedTestSweepMode mode, int maxRpm)
     g_pendingEffectType = LedEffectType::None;
     g_effectState = LedEffectState{};
     portEXIT_CRITICAL(&g_ledEffectMux);
+    resetDisplayLevelState();
     invalidateLedFrameCacheInternal();
 }
 
@@ -1004,19 +1204,38 @@ void ledBarRequestLeavingAnimation()
 
 void ledBarRequestSimSessionTransition(SimSessionTransitionType transition)
 {
+    ++g_sessionEffectRequestCount;
+    cancelSimSessionEffects();
+    if (!cfg.simSessionLedEffectsEnabled)
+    {
+        ++g_sessionEffectSuppressedCount;
+        return;
+    }
+
+    const unsigned long nowMs = millis();
+    if (!cooldownElapsed(nowMs, g_lastSessionEffectMs, SESSION_EFFECT_COOLDOWN_MS))
+    {
+        ++g_sessionEffectSuppressedCount;
+        return;
+    }
+
     switch (transition)
     {
     case SimSessionTransitionType::BecameLive:
         queueEffect(LedEffectType::SimReady, false, false);
+        g_lastSessionEffectMs = nowMs;
         return;
     case SimSessionTransitionType::BecameWaiting:
         queueEffect(LedEffectType::SimStandby, false, false);
+        g_lastSessionEffectMs = nowMs;
         return;
     case SimSessionTransitionType::BecameError:
         queueEffect(LedEffectType::SimError, false, false);
+        g_lastSessionEffectMs = nowMs;
         return;
     case SimSessionTransitionType::None:
     default:
+        ++g_sessionEffectSuppressedCount;
         return;
     }
 }
@@ -1043,6 +1262,11 @@ LedRenderHistoryInfo ledBarGetRenderHistoryInfo()
     info.snapshotChangedDuringRender = g_ledSnapshotChangedDuringRender;
     info.deterministicSweepActive = ledBarDeterministicSweepActive();
     info.lastWriter = static_cast<uint8_t>(g_lastWriter);
+    info.activeEffect = static_cast<uint8_t>(g_effectState.type);
+    info.queuedEffect = static_cast<uint8_t>(g_pendingEffectType);
+    info.lastQueuedEffect = static_cast<uint8_t>(g_lastQueuedEffectType);
+    info.sessionEffectRequests = g_sessionEffectRequestCount;
+    info.sessionEffectSuppressions = g_sessionEffectSuppressedCount;
     for (uint8_t i = 0; i < g_renderHistoryCount; ++i)
     {
         const uint8_t index = static_cast<uint8_t>((g_renderHistoryHead + LED_RENDER_HISTORY_LEN - g_renderHistoryCount + i) % LED_RENDER_HISTORY_LEN);
@@ -1054,7 +1278,7 @@ LedRenderHistoryInfo ledBarGetRenderHistoryInfo()
 
 namespace
 {
-    constexpr uint32_t LED_TASK_TICK_MS = 10;
+    constexpr uint32_t LED_TASK_TICK_MS = 5;
 
     void finalizeFrame(const uint32_t *frame,
                        LedRenderWriter writer,
@@ -1125,19 +1349,15 @@ namespace
             fraction = constrain(fraction, 0.0f, 1.0f);
         }
 
-        float greenEnd = constrain(cfg.greenEndPct / 100.0f, 0.0f, 1.0f);
-        float yellowEnd = constrain(cfg.yellowEndPct / 100.0f, greenEnd, 1.0f);
-        float redEnd = constrain(cfg.redEndPct / 100.0f, yellowEnd, 1.0f);
-        float blinkStart = constrain(cfg.blinkStartPct / 100.0f, 0.0f, 1.0f);
-        const float blinkTrigger = max(redEnd, blinkStart);
-
-        int ledsOn = static_cast<int>(round(fraction * NUM_LEDS));
-        g_ledRenderDebug.lastDisplayedLeds = ledsOn;
+        const LedZoneProfile zoneProfile = buildLedZoneProfile();
+        const float displayFraction = computeLedDisplayFraction(fraction, zoneProfile);
 
         static unsigned long lastBlink = 0;
         static bool blinkState = false;
         const unsigned long now = millis();
-        const bool shiftBlink = ((cfg.mode == LED_MODE_F1 || cfg.mode == LED_MODE_AGGRESSIVE || cfg.mode == LED_MODE_GT3) && fraction >= blinkTrigger);
+        const bool shiftBlink =
+            ((cfg.mode == LED_MODE_F1 || cfg.mode == LED_MODE_AGGRESSIVE || cfg.mode == LED_MODE_GT3) &&
+             fraction >= zoneProfile.blinkStart);
         g_ledRenderDebug.lastShiftBlink = shiftBlink;
         if (shiftBlink && now - lastBlink > 100)
         {
@@ -1150,27 +1370,51 @@ namespace
         }
 
         bool displayBlink = false;
-        if (cfg.mode == LED_MODE_AGGRESSIVE && fraction >= blinkTrigger)
+        if (cfg.mode == LED_MODE_AGGRESSIVE && shiftBlink)
         {
-            ledsOn = NUM_LEDS;
             displayBlink = blinkState;
         }
 
         uint32_t frame[NUM_LEDS];
         clearFrame(frame);
+        const int ledCount = activeLedCount();
         if (cfg.mode == LED_MODE_GT3)
         {
-            renderGt3Pattern(frame, fraction, greenEnd, yellowEnd, blinkTrigger, blinkState, snapshot.pitLimiter, displayBlink);
+            const int pairCount = (ledCount + 1) / 2;
+            const int pairsOn = computeStableDisplayedLevel(displayFraction, pairCount, DISPLAY_MODE_GT3, bypassFilter);
+            g_ledRenderDebug.lastDisplayedLeds = min(ledCount, pairsOn * 2);
+            renderGt3Pattern(frame,
+                             pairsOn,
+                             g_stableDisplayRawLevel,
+                             shiftBlink,
+                             zoneProfile.greenEnd,
+                             zoneProfile.yellowEnd,
+                             blinkState,
+                             snapshot.pitLimiter,
+                             displayBlink);
         }
         else
         {
+            int ledsOn = computeStableDisplayedLevel(displayFraction,
+                                                     ledCount,
+                                                     DISPLAY_MODE_LINEAR,
+                                                     bypassFilter);
+            if (cfg.mode == LED_MODE_AGGRESSIVE && shiftBlink)
+            {
+                ledsOn = ledCount;
+                g_ledRenderDebug.lastDisplayedLevel = ledCount;
+                g_ledRenderDebug.lastDesiredLevel = ledCount;
+                g_ledRenderDebug.lastLevelCount = ledCount;
+            }
+            g_ledRenderDebug.lastDisplayedLeds = ledsOn;
             renderLinearPattern(frame,
                                 ledsOn,
-                                cfg.mode == LED_MODE_AGGRESSIVE && fraction >= blinkTrigger,
+                                g_stableDisplayRawLevel,
+                                cfg.mode == LED_MODE_AGGRESSIVE && shiftBlink,
                                 shiftBlink,
                                 blinkState,
-                                greenEnd,
-                                yellowEnd,
+                                zoneProfile.greenEnd,
+                                zoneProfile.yellowEnd,
                                 displayBlink);
         }
 
@@ -1273,15 +1517,14 @@ void startLedBarTask()
 
     // Pinned to Core 1 so it shares a cache with the Arduino loop (config
     // reads etc.) but runs as its own task with a higher priority than
-    // loop() (which is priority 1). Priority 2 is high enough that render
-    // jitter stays under a frame time, low enough that WiFi + BLE are not
-    // starved.
+    // loop() (which is priority 1). Priority 3 keeps render jitter low
+    // while still leaving room for the USB reader and WiFi tasks.
     xTaskCreatePinnedToCore(
         ledBarTaskBody,
         "ledBar",
         4096,
         nullptr,
-        2,
+        3,
         &g_ledBarTaskHandle,
         1);
 }

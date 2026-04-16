@@ -12,4 +12,5 @@ struct AutoBrightnessCurveConfig
 float ambientNormalizeLux(float lux, float luxMin, float luxMax);
 float ambientComputeResponseAlpha(int responsePct);
 float ambientApplySmoothing(float current, float target, float alpha);
+float ambientComputeTargetBrightnessFloat(float lux, const AutoBrightnessCurveConfig &config);
 int ambientComputeTargetBrightness(float lux, const AutoBrightnessCurveConfig &config);

@@ -5,6 +5,7 @@
 
 void run_core_tests();
 void register_ambient_light_algo_tests();
+void register_gesture_sensor_tests();
 void register_signal_utils_tests();
 void register_telemetry_manager_tests();
 // später:
@@ -13,6 +14,7 @@ void register_telemetry_manager_tests();
 // Force-include the actual test implementations so PlatformIO links them in one runner.
 #include "unit_core/test_clamp_int.cpp"
 #include "unit_core/test_ambient_light_algo.cpp"
+#include "unit_core/test_gesture_sensor.cpp"
 #include "unit_core/test_signal_utils.cpp"
 #include "unit_core/test_state_retry.cpp"
 #include "unit_core/test_telemetry_manager.cpp"
@@ -23,6 +25,7 @@ void setup()
 
     run_core_tests();
     register_ambient_light_algo_tests();
+    register_gesture_sensor_tests();
     register_signal_utils_tests();
     register_telemetry_manager_tests();
     // RUN_TEST-Gruppen hier ergänzen:

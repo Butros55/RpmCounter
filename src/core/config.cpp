@@ -73,6 +73,7 @@ void initConfig()
     cfg.autoScaleMaxRpm = true;
     cfg.fixedMaxRpm = 5000;
     cfg.rpmStartRpm = 1000;
+    cfg.activeLedCount = NUM_LEDS;
     cfg.greenEndPct = 60;
     cfg.yellowEndPct = 85;
     cfg.redEndPct = 90;
@@ -90,6 +91,8 @@ void initConfig()
     cfg.logoOnIgnitionOn = true;
     cfg.logoOnEngineStart = true;
     cfg.logoOnIgnitionOff = true;
+    cfg.simSessionLedEffectsEnabled = false;
+    cfg.gestureControlEnabled = true;
     cfg.displayBrightness = 220;
     cfg.uiTutorialSeen = false;
     cfg.uiLastMenuIndex = 0;
@@ -135,6 +138,7 @@ void loadConfig()
     cfg.autoScaleMaxRpm = prefs.getBool("autoscale", cfg.autoScaleMaxRpm);
     cfg.fixedMaxRpm = clampInt(prefs.getInt("fixedMax", cfg.fixedMaxRpm), 1000, 8000);
     cfg.rpmStartRpm = clampInt(prefs.getInt("rpmStart", cfg.rpmStartRpm), 0, 12000);
+    cfg.activeLedCount = clampInt(prefs.getInt("ledCount", cfg.activeLedCount), 1, NUM_LEDS);
     cfg.greenEndPct = clampInt(prefs.getInt("greenEnd", cfg.greenEndPct), 0, 100);
     cfg.yellowEndPct = clampInt(prefs.getInt("yellowEnd", cfg.yellowEndPct), 0, 100);
     cfg.redEndPct = clampInt(prefs.getInt("redEnd", cfg.blinkStartPct), 0, 100);
@@ -176,6 +180,8 @@ void loadConfig()
     cfg.logoOnIgnitionOn = prefs.getBool("logoIgnOn", cfg.logoOnIgnitionOn);
     cfg.logoOnEngineStart = prefs.getBool("logoEngStart", cfg.logoOnEngineStart);
     cfg.logoOnIgnitionOff = prefs.getBool("logoIgnOff", cfg.logoOnIgnitionOff);
+    cfg.simSessionLedEffectsEnabled = prefs.getBool("simFxLed", cfg.simSessionLedEffectsEnabled);
+    cfg.gestureControlEnabled = prefs.getBool("gestureCtl", cfg.gestureControlEnabled);
 
     cfg.greenColor.r = prefs.getUChar("gR", cfg.greenColor.r);
     cfg.greenColor.g = prefs.getUChar("gG", cfg.greenColor.g);
@@ -213,6 +219,7 @@ void saveConfig()
     prefs.putBool("autoscale", cfg.autoScaleMaxRpm);
     prefs.putInt("fixedMax", cfg.fixedMaxRpm);
     prefs.putInt("rpmStart", cfg.rpmStartRpm);
+    prefs.putInt("ledCount", cfg.activeLedCount);
     prefs.putInt("greenEnd", cfg.greenEndPct);
     prefs.putInt("yellowEnd", cfg.yellowEndPct);
     prefs.putInt("redEnd", cfg.redEndPct);
@@ -242,6 +249,8 @@ void saveConfig()
     prefs.putBool("logoIgnOn", cfg.logoOnIgnitionOn);
     prefs.putBool("logoEngStart", cfg.logoOnEngineStart);
     prefs.putBool("logoIgnOff", cfg.logoOnIgnitionOff);
+    prefs.putBool("simFxLed", cfg.simSessionLedEffectsEnabled);
+    prefs.putBool("gestureCtl", cfg.gestureControlEnabled);
 
     prefs.putUChar("gR", cfg.greenColor.r);
     prefs.putUChar("gG", cfg.greenColor.g);

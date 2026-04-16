@@ -9,6 +9,7 @@
 #include "core/wifi.h"
 #include "hardware/ambient_light.h"
 #include "hardware/led_bar.h"
+#include "hardware/gesture_sensor.h"
 #include "hardware/logo_anim.h"
 #include "core/vehicle_info.h"
 #include "core/state.h"
@@ -40,6 +41,56 @@ namespace
     {
         g_lastHttpMs = millis();
         LOG_DEBUG("WEB", code, String("method=") + httpMethodName() + " uri=" + server.uri());
+    }
+
+    String currentWebBaseUrl()
+    {
+        WifiStatus status = getWifiStatus();
+        if (status.ip.length() > 0)
+            return String(F("http://")) + status.ip;
+        if (status.staIp.length() > 0)
+            return String(F("http://")) + status.staIp;
+        if (status.apIp.length() > 0)
+            return String(F("http://")) + status.apIp;
+        return String(F("http://192.168.4.1"));
+    }
+
+    String currentBridgeBaseUrl()
+    {
+        String host = g_usbBridgeHost;
+        host.trim();
+        if (host.isEmpty() || host == F("USB Bridge"))
+            return "";
+        return String(F("http://")) + host + F(":8765");
+    }
+
+    bool requestCameViaBridgeProxy()
+    {
+        return server.hasHeader("X-ShiftLight-Bridge-Proxy");
+    }
+
+    bool shouldRedirectToBridgeUi()
+    {
+        if (!usbSimBridgeOnline())
+            return false;
+        if (requestCameViaBridgeProxy())
+            return false;
+        if (server.hasArg("direct"))
+            return false;
+        return currentBridgeBaseUrl().length() > 0;
+    }
+
+    bool maybeRedirectToBridgeUi()
+    {
+        if (!shouldRedirectToBridgeUi())
+            return false;
+
+        const String target = currentBridgeBaseUrl() + server.uri();
+        LOG_INFO("WEB", "WEB_REDIRECT_BRIDGE", String("target=") + target);
+        server.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate", true);
+        server.sendHeader("Location", target, true);
+        server.send(303, "text/plain", "Redirecting to USB bridge web UI");
+        return true;
     }
 
     String currentIpString()
@@ -2195,6 +2246,10 @@ namespace
     void handleRoot()
     {
         markHttpActivity("WEB_ROOT");
+        if (maybeRedirectToBridgeUi())
+        {
+            return;
+        }
         server.send(200, "text/html", buildDashboardPage());
     }
 
@@ -2278,6 +2333,8 @@ namespace
             cfg.fixedMaxRpm = clampInt(server.arg("fixedMaxRpm").toInt(), 1000, 8000);
         if (server.hasArg("rpmStartRpm"))
             cfg.rpmStartRpm = clampInt(server.arg("rpmStartRpm").toInt(), 0, 12000);
+        if (server.hasArg("activeLedCount"))
+            cfg.activeLedCount = clampInt(server.arg("activeLedCount").toInt(), 1, NUM_LEDS);
 
         int gPct = cfg.greenEndPct;
         int yPct = cfg.yellowEndPct;
@@ -2311,7 +2368,10 @@ namespace
         cfg.logoOnIgnitionOn = server.hasArg("logoIgnOn");
         cfg.logoOnEngineStart = server.hasArg("logoEngStart");
         cfg.logoOnIgnitionOff = server.hasArg("logoIgnOff");
+        cfg.simSessionLedEffectsEnabled = server.hasArg("simFxLed");
+        cfg.gestureControlEnabled = server.hasArg("gestureControlEnabled");
         ambientLightOnConfigChanged();
+        gestureSensorOnConfigChanged();
         ledBarRefreshBrightness();
 
         if (allowAutoReconnect)
@@ -2470,6 +2530,7 @@ namespace
         int vehicleAge = 0;
         bool ready = g_vehicleInfoAvailable;
         const AmbientLightDebugInfo ambientInfo = ambientLightGetDebugInfo();
+        const GestureSensorDebugInfo gestureInfo = gestureSensorGetDebugInfo();
         const TelemetryDebugInfo telemetryInfo = telemetryGetDebugInfo();
         const LedRenderHistoryInfo ledHistory = ledBarGetRenderHistoryInfo();
         const TelemetryRenderSnapshot &telemetrySnapshot = telemetryInfo.snapshot;
@@ -2512,6 +2573,7 @@ namespace
         json += ",\"telemetryLastSourceTransitionHold\":" + String(telemetryInfo.lastSourceTransition.holdApplied ? "true" : "false");
         json += ",\"telemetryLastSourceTransitionFallback\":" + String(telemetryInfo.lastSourceTransition.fallbackActive ? "true" : "false");
         json += ",\"simSessionTransitionCount\":" + String(telemetryInfo.simSessionTransitionCount);
+        json += ",\"simSessionSuppressedCount\":" + String(telemetryInfo.simSessionSuppressedCount);
         json += ",\"simSessionLastTransition\":\"" + jsonEscape(String(simSessionTransitionTypeName(telemetryInfo.lastSimSessionTransition.transition))) + "\"";
         json += ",\"simHubState\":\"" + jsonEscape(simHubConnectionStateLabel(g_simHubConnectionState)) + "\"";
         json += ",\"usbState\":\"" + jsonEscape(usbBridgeStateLabel(g_usbBridgeConnectionState)) + "\"";
@@ -2519,6 +2581,9 @@ namespace
         json += ",\"usbBridgeConnected\":" + String(g_usbBridgeConnected ? "true" : "false");
         json += ",\"usbBridgeWebActive\":" + String(g_usbBridgeWebActive ? "true" : "false");
         json += ",\"usbHost\":\"" + jsonEscape(g_usbBridgeHost) + "\"";
+        json += ",\"bridgeWebUrl\":\"" + jsonEscape(currentBridgeBaseUrl()) + "\"";
+        json += ",\"localWebUrl\":\"" + jsonEscape(currentWebBaseUrl()) + "\"";
+        json += ",\"preferredWebUrl\":\"" + jsonEscape(shouldRedirectToBridgeUi() ? currentBridgeBaseUrl() : currentWebBaseUrl()) + "\"";
         json += ",\"usbError\":\"" + jsonEscape(g_usbBridgeLastError) + "\"";
         json += ",\"wifiSuspended\":" + String(isWifiSuspendedForUsb() ? "true" : "false");
         json += ",\"obdAllowed\":" + String(telemetryShouldAllowObd() ? "true" : "false");
@@ -2526,6 +2591,8 @@ namespace
         json += ",\"usbTelemetryFrames\":" + String(g_usbTelemetryDebug.framesReceived);
         json += ",\"usbTelemetryParseErrors\":" + String(g_usbTelemetryDebug.parseErrors);
         json += ",\"usbTelemetryGlitchRejects\":" + String(g_usbTelemetryDebug.glitchRejects);
+        json += ",\"usbTelemetryGlitchRejectUps\":" + String(g_usbTelemetryDebug.glitchRejectUpCount);
+        json += ",\"usbTelemetryGlitchRejectDowns\":" + String(g_usbTelemetryDebug.glitchRejectDownCount);
         json += ",\"usbTelemetryGapEvents\":" + String(g_usbTelemetryDebug.gapEvents);
         json += ",\"usbTelemetryLastGapMs\":" + String(g_usbTelemetryDebug.lastGapMs);
         json += ",\"usbTelemetryMaxGapMs\":" + String(g_usbTelemetryDebug.maxGapMs);
@@ -2536,6 +2603,7 @@ namespace
         json += ",\"usbTelemetryLineOverflows\":" + String(g_usbTelemetryDebug.lineOverflows);
         json += ",\"usbTelemetryLastRawRpm\":" + String(g_usbTelemetryDebug.lastRawRpm);
         json += ",\"usbTelemetryLastAcceptedRpm\":" + String(g_usbTelemetryDebug.lastAcceptedRpm);
+        json += ",\"usbTelemetryLastRejectedRpm\":" + String(g_usbTelemetryDebug.lastRejectedRpm);
         json += ",\"simHubPollOk\":" + String(g_simHubDebug.pollSuccessCount);
         json += ",\"simHubPollErr\":" + String(g_simHubDebug.pollErrorCount);
         json += ",\"simHubSuppressedWhileUsb\":" + String(g_simHubDebug.suppressedWhileUsbCount);
@@ -2546,6 +2614,9 @@ namespace
         json += ",\"ledFilteredRpm\":" + String(g_ledRenderDebug.lastFilteredRpm);
         json += ",\"ledStartRpm\":" + String(g_ledRenderDebug.lastStartRpm);
         json += ",\"ledDisplayedLeds\":" + String(g_ledRenderDebug.lastDisplayedLeds);
+        json += ",\"ledDesiredLevel\":" + String(g_ledRenderDebug.lastDesiredLevel);
+        json += ",\"ledDisplayedLevel\":" + String(g_ledRenderDebug.lastDisplayedLevel);
+        json += ",\"ledLevelCount\":" + String(g_ledRenderDebug.lastLevelCount);
         json += ",\"ledFilterAdjusts\":" + String(g_ledRenderDebug.filterAdjustCount);
         json += ",\"ledRenderCalls\":" + String(g_ledRenderDebug.renderCalls);
         json += ",\"ledFrameShows\":" + String(g_ledRenderDebug.frameShowCount);
@@ -2561,8 +2632,15 @@ namespace
         json += ",\"ledExternalWriteAttempts\":" + String(ledHistory.externalWriteAttempts);
         json += ",\"ledSnapshotChangedDuringRender\":" + String(ledHistory.snapshotChangedDuringRender);
         json += ",\"ledDeterministicSweepActive\":" + String(ledHistory.deterministicSweepActive ? "true" : "false");
+        json += ",\"ledSessionEffectsEnabled\":" + String(cfg.simSessionLedEffectsEnabled ? "true" : "false");
+        json += ",\"ledActiveEffect\":\"" + jsonEscape(String(ledBarEffectNameById(ledHistory.activeEffect))) + "\"";
+        json += ",\"ledQueuedEffect\":\"" + jsonEscape(String(ledBarEffectNameById(ledHistory.queuedEffect))) + "\"";
+        json += ",\"ledLastQueuedEffect\":\"" + jsonEscape(String(ledBarEffectNameById(ledHistory.lastQueuedEffect))) + "\"";
+        json += ",\"ledSessionEffectRequests\":" + String(ledHistory.sessionEffectRequests);
+        json += ",\"ledSessionEffectSuppressions\":" + String(ledHistory.sessionEffectSuppressions);
         json += ",\"rpmStartRpm\":" + String(cfg.rpmStartRpm);
         json += ",\"ledManualBrightness\":" + String(cfg.brightness);
+        json += ",\"ledConfiguredCount\":" + String(cfg.activeLedCount);
         json += ",\"ledAppliedBrightness\":" + String(ledBarGetAppliedBrightness());
         json += ",\"autoBrightnessEnabled\":" + String(cfg.autoBrightnessEnabled ? "true" : "false");
         json += ",\"ambientLightDetected\":" + String(ambientInfo.sensorDetected ? "true" : "false");
@@ -2587,6 +2665,39 @@ namespace
         json += ",\"ambientLastReadAgeMs\":" + String(ambientInfo.lastReadMs > 0 ? (now - ambientInfo.lastReadMs) : 0);
         json += ",\"ambientLastApplyAgeMs\":" + String(ambientInfo.lastApplyMs > 0 ? (now - ambientInfo.lastApplyMs) : 0);
         json += ",\"ambientLastError\":\"" + jsonEscape(ambientInfo.lastError) + "\"";
+        json += ",\"gestureControlEnabled\":" + String(cfg.gestureControlEnabled ? "true" : "false");
+        json += ",\"gestureSensorDetected\":" + String(gestureInfo.sensorDetected ? "true" : "false");
+        json += ",\"gestureSensorActive\":" + String(gestureInfo.sensorActive ? "true" : "false");
+        json += ",\"gestureBusInitialized\":" + String(gestureInfo.busInitialized ? "true" : "false");
+        json += ",\"gestureDeviceResponding\":" + String(gestureInfo.deviceResponding ? "true" : "false");
+        json += ",\"gestureAckResponding\":" + String(gestureInfo.ackResponding ? "true" : "false");
+        json += ",\"gestureIdReadOk\":" + String(gestureInfo.idReadOk ? "true" : "false");
+        json += ",\"gestureConfigApplied\":" + String(gestureInfo.configApplied ? "true" : "false");
+        json += ",\"gestureUsingSharedBus\":" + String(gestureInfo.usingSharedBus ? "true" : "false");
+        json += ",\"gestureSdaPin\":" + String(gestureInfo.sdaPin);
+        json += ",\"gestureSclPin\":" + String(gestureInfo.sclPin);
+        json += ",\"gestureIntPin\":" + String(gestureInfo.intPin);
+        json += ",\"gestureIntConfigured\":" + String(gestureInfo.intConfigured ? "true" : "false");
+        json += ",\"gestureIntEnabled\":" + String(gestureInfo.intEnabled ? "true" : "false");
+        json += ",\"gestureIntPending\":" + String(gestureInfo.intPending ? "true" : "false");
+        json += ",\"gestureIntLineLow\":" + String(gestureInfo.intLineLow ? "true" : "false");
+        json += ",\"gestureIntTriggerCount\":" + String(gestureInfo.intTriggerCount);
+        json += ",\"gestureDeviceId\":" + String(gestureInfo.deviceId);
+        json += ",\"gestureLastStatusReg\":" + String(gestureInfo.lastStatusReg);
+        json += ",\"gestureLastFifoLevel\":" + String(gestureInfo.lastFifoLevel);
+        json += ",\"gestureInitAttempts\":" + String(gestureInfo.initAttempts);
+        json += ",\"gestureInitSuccess\":" + String(gestureInfo.initSuccessCount);
+        json += ",\"gestureProbeCount\":" + String(gestureInfo.probeCount);
+        json += ",\"gesturePollCount\":" + String(gestureInfo.pollCount);
+        json += ",\"gestureReadErrors\":" + String(gestureInfo.readErrorCount);
+        json += ",\"gestureLastIntAgeMs\":" + String(gestureInfo.lastIntMs > 0 ? (now - gestureInfo.lastIntMs) : 0);
+        json += ",\"gestureLastProbeAgeMs\":" + String(gestureInfo.lastProbeMs > 0 ? (now - gestureInfo.lastProbeMs) : 0);
+        json += ",\"gestureLastReadAgeMs\":" + String(gestureInfo.lastReadMs > 0 ? (now - gestureInfo.lastReadMs) : 0);
+        json += ",\"gestureLastError\":\"" + jsonEscape(gestureInfo.lastError) + "\"";
+        json += ",\"gestureLastDirection\":\"" + jsonEscape(String(gestureSensorDirectionName(gestureInfo.lastGesture))) + "\"";
+        json += ",\"gestureLastGestureAgeMs\":" + String(gestureInfo.lastGestureMs > 0 ? (now - gestureInfo.lastGestureMs) : 0);
+        json += ",\"gestureCount\":" + String(gestureInfo.gestureCount);
+        json += ",\"gestureModeSwitchCount\":" + String(gestureInfo.modeSwitchCount);
         json += ",\"displayFocus\":" + String(static_cast<int>(cfg.uiDisplayFocus));
         json += ",\"simHubConfigured\":" + String(cfg.simHubHost.length() > 0 ? "true" : "false");
         json += ",\"bleConnectInProgress\":" + String(g_bleConnectInProgress ? "true" : "false");
@@ -2764,6 +2875,10 @@ namespace
     void handleSettingsGet()
     {
         markHttpActivity("WEB_SETTINGS_GET");
+        if (maybeRedirectToBridgeUi())
+        {
+            return;
+        }
         bool saved = server.hasArg("saved");
         server.send(200, "text/html", buildSettingsPage(saved));
     }
@@ -2914,6 +3029,31 @@ namespace
         server.send(200, "application/json", json);
     }
 
+    void handleDevGestureProbe()
+    {
+        markHttpActivity("WEB_DEV_GESTURE_PROBE");
+        if (server.method() != HTTP_POST)
+        {
+            server.send(405, "text/plain", "Method Not Allowed");
+            return;
+        }
+
+        gestureSensorForceProbe();
+        const GestureSensorDebugInfo gestureInfo = gestureSensorGetDebugInfo();
+
+        String json = "{\"status\":\"ok\"";
+        json += ",\"sensorDetected\":" + String(gestureInfo.sensorDetected ? "true" : "false");
+        json += ",\"busInitialized\":" + String(gestureInfo.busInitialized ? "true" : "false");
+        json += ",\"ackResponding\":" + String(gestureInfo.ackResponding ? "true" : "false");
+        json += ",\"idReadOk\":" + String(gestureInfo.idReadOk ? "true" : "false");
+        json += ",\"configApplied\":" + String(gestureInfo.configApplied ? "true" : "false");
+        json += ",\"deviceResponding\":" + String(gestureInfo.deviceResponding ? "true" : "false");
+        json += ",\"deviceId\":" + String(gestureInfo.deviceId);
+        json += ",\"lastError\":\"" + jsonEscape(gestureInfo.lastError) + "\"";
+        json += "}";
+        server.send(200, "application/json", json);
+    }
+
     void handleNotFound()
     {
         markHttpActivity("WEB_NOT_FOUND");
@@ -2923,6 +3063,8 @@ namespace
 
 void initWebUi()
 {
+    static const char *kCollectedHeaders[] = {"X-ShiftLight-Bridge-Proxy"};
+    server.collectHeaders(kCollectedHeaders, 1);
     server.on("/", HTTP_GET, handleRoot);
     server.on("/brightness", HTTP_GET, handleBrightness);
     server.on("/save", HTTP_POST, handleSave);
@@ -2949,6 +3091,7 @@ void initWebUi()
     server.on("/dev/display-pattern", HTTP_POST, handleDevDisplayPattern);
     server.on("/dev/led-mode", HTTP_POST, handleDevLedMode);
     server.on("/dev/ambient-probe", HTTP_POST, handleDevAmbientProbe);
+    server.on("/dev/gesture-probe", HTTP_POST, handleDevGestureProbe);
     server.on("/dev/obd-send", HTTP_POST, handleDevObdSend);
     server.onNotFound(handleNotFound);
 

@@ -272,12 +272,12 @@
       setText('diagEspAge', String(data.espUsbTelemetryAgeMs ?? 0) + ' ms');
       setText('diagUsbGap', `${data.espUsbTelemetryLastGapMs ?? 0} / ${data.espUsbTelemetryMaxGapMs ?? 0} ms (${data.espUsbTelemetryGapEvents ?? 0})`);
       setText('diagUsbSeq', `seq ${data.espUsbTelemetrySeq ?? 0} | gap ${data.espUsbTelemetrySeqGapEvents ?? 0}/${data.espUsbTelemetrySeqGapFrames ?? 0} | dup ${data.espUsbTelemetrySeqDuplicates ?? 0}`);
-      setText('diagLedFilter', `${data.espLedRawRpm ?? 0} -> ${data.espLedFilteredRpm ?? 0} rpm | adj ${data.espLedFilterAdjusts ?? 0}`);
-      setText('diagLedRender', `show ${data.espLedFrameShows ?? 0} | skip ${data.espLedFrameSkips ?? 0} | mode ${data.espLedRenderMode || '-'} | writer ${data.espLedLastWriter || '-'} | race ${data.espLedSnapshotChangedDuringRender ?? 0} | ext ${data.espLedExternalWriteAttempts ?? 0}`);
+      setText('diagLedFilter', `${data.espLedRawRpm ?? 0} -> ${data.espLedFilteredRpm ?? 0} rpm | lvl ${data.espLedDisplayedLevel ?? 0}/${data.espLedDesiredLevel ?? 0} of ${data.espLedLevelCount ?? 0} | adj ${data.espLedFilterAdjusts ?? 0}`);
+      setText('diagLedRender', `show ${data.espLedFrameShows ?? 0} | skip ${data.espLedFrameSkips ?? 0} | fx ${data.espLedActiveEffect || '-'} / ${data.espLedQueuedEffect || '-'} | writer ${data.espLedLastWriter || '-'} | race ${data.espLedSnapshotChangedDuringRender ?? 0} | ext ${data.espLedExternalWriteAttempts ?? 0}`);
       setText('diagSnapshot', `v${data.espTelemetrySnapshotVersion ?? 0} | ${data.espTelemetrySnapshotSource || '-'} | age ${data.espTelemetrySnapshotAgeMs ?? 0} ms | ${data.espTelemetrySnapshotFresh ? 'fresh' : 'stale'}`);
-      setText('diagSimSession', `${data.espSimSessionState || '-'} | ${data.espSimSessionLastTransition || '-'} | src ${data.espTelemetryLastSourceTransition || '-'}`);
+      setText('diagSimSession', `${data.espSimSessionState || '-'} | ${data.espSimSessionLastTransition || '-'} | suppr ${data.espSimSessionSuppressedCount ?? 0} | src ${data.espTelemetryLastSourceTransition || '-'}`);
       setText('diagBridgeGap', `${data.bridgeLastTelemetryGapMs ?? 0} / ${data.bridgeMaxTelemetryGapMs ?? 0} ms | tx ${data.bridgeTelemetryTxCount ?? 0} | rpc ${data.bridgeStatusRpcErrors ?? 0}`);
-      setText('diagNetErr', `ok ${data.espSimHubPollOk ?? 0} err ${data.espSimHubPollErr ?? 0} suppr ${data.espSimHubSuppressedWhileUsb ?? 0} ${data.espSimHubLastError ? '| ' + data.espSimHubLastError : ''}`);
+      setText('diagNetErr', `ok ${data.espSimHubPollOk ?? 0} err ${data.espSimHubPollErr ?? 0} usb-suppr ${data.espSimHubSuppressedWhileUsb ?? 0} glitch u/d ${data.espUsbTelemetryGlitchRejectUps ?? 0}/${data.espUsbTelemetryGlitchRejectDowns ?? 0} ${data.espSimHubLastError ? '| ' + data.espSimHubLastError : ''}`);
       syncDirty();
     }
     async function loadStatus(){ const res = await fetch('/api/status', { cache:'no-store' }); applyStatus(await res.json()); }

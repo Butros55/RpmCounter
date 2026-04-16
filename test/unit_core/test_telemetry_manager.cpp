@@ -63,6 +63,21 @@ static void test_telemetry_transport_helpers_follow_mode_rules()
     TEST_ASSERT_FALSE(telemetrySupportsTransportFallback(TelemetryPreference::SimHub, SimTransportPreference::UsbSerial));
 }
 
+static void test_simSessionStateDebounceMs_waiting_is_slower_than_live()
+{
+    TEST_ASSERT_EQUAL_UINT32(100, simSessionStateDebounceMs(SimSessionState::Live));
+    TEST_ASSERT_EQUAL_UINT32(1200, simSessionStateDebounceMs(SimSessionState::WaitingForData));
+    TEST_ASSERT_EQUAL_UINT32(1500, simSessionStateDebounceMs(SimSessionState::Error));
+}
+
+static void test_telemetrySimSessionCandidateReady_requires_full_debounce_window()
+{
+    TEST_ASSERT_FALSE(telemetrySimSessionCandidateReady(SimSessionState::WaitingForData, 1000, 1500));
+    TEST_ASSERT_TRUE(telemetrySimSessionCandidateReady(SimSessionState::WaitingForData, 1000, 2200));
+    TEST_ASSERT_FALSE(telemetrySimSessionCandidateReady(SimSessionState::Live, 500, 550));
+    TEST_ASSERT_TRUE(telemetrySimSessionCandidateReady(SimSessionState::Live, 500, 600));
+}
+
 void register_telemetry_manager_tests()
 {
     RUN_TEST(test_selectTelemetryRuntimeSource_auto_prefers_usb);
@@ -73,4 +88,6 @@ void register_telemetry_manager_tests()
     RUN_TEST(test_selectTelemetryRuntimeSource_fixed_modes_use_only_their_transport);
     RUN_TEST(test_telemetrySourceIsFallback_marks_network_and_obd_only_in_auto);
     RUN_TEST(test_telemetry_transport_helpers_follow_mode_rules);
+    RUN_TEST(test_simSessionStateDebounceMs_waiting_is_slower_than_live);
+    RUN_TEST(test_telemetrySimSessionCandidateReady_requires_full_debounce_window);
 }

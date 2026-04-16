@@ -73,6 +73,7 @@ struct TelemetryDebugInfo
     SimSessionTransitionEvent lastSimSessionTransition{};
     uint32_t sourceTransitionCount = 0;
     uint32_t simSessionTransitionCount = 0;
+    uint32_t simSessionSuppressedCount = 0;
     uint8_t sourceHistoryCount = 0;
     uint8_t simHistoryCount = 0;
     TelemetrySourceTransitionEvent sourceHistory[TELEMETRY_DEBUG_HISTORY_LEN]{};
@@ -91,6 +92,8 @@ bool telemetryAllowsNetworkSim(TelemetryPreference preference, SimTransportPrefe
 bool telemetrySupportsTransportFallback(TelemetryPreference preference, SimTransportPreference transportPreference);
 bool telemetrySourceIsFallback(ActiveTelemetrySource source, TelemetryPreference preference, SimTransportPreference transportPreference);
 ActiveTelemetrySource selectTelemetryRuntimeSource(TelemetryPreference preference, SimTransportPreference transportPreference, bool usbFresh, bool simHubFresh, bool obdFresh);
+unsigned long simSessionStateDebounceMs(SimSessionState state);
+bool telemetrySimSessionCandidateReady(SimSessionState candidateState, unsigned long pendingSinceMs, unsigned long nowMs);
 bool telemetryShouldAllowObd();
 TelemetryRenderSnapshot telemetryCopyRenderSnapshot();
 uint32_t telemetryGetRenderSnapshotVersion();

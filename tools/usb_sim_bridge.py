@@ -355,8 +355,8 @@ class UsbSimBridge:
                         self._send_line(f"USBSIM TELEMETRY {payload}")
                         self.telemetry_tx_count += 1
                         self.log(f"tx TELEMETRY payload={payload}")
-                    next_tx = now + 0.016
-                time.sleep(0.01)
+                    next_tx = now + 0.012
+                time.sleep(0.005)
             except (SerialException, OSError) as exc:
                 self.telemetry_tx_error_count += 1
                 self.log(f"serial error: {exc}")
@@ -424,7 +424,7 @@ class UsbSimBridge:
                     next_state.last_packet_ts = self.simhub.last_packet_ts
                 self.simhub = next_state
             self._log_simhub_state_change(previous, next_state)
-            time.sleep(0.025)
+            time.sleep(0.012)
 
     def _status_loop(self) -> None:
         next_config = 0.0
@@ -673,6 +673,8 @@ class UsbSimBridge:
             "espUsbTelemetryFrames": int(esp.raw.get("usbTelemetryFrames", 0) or 0),
             "espUsbTelemetryParseErrors": int(esp.raw.get("usbTelemetryParseErrors", 0) or 0),
             "espUsbTelemetryGlitchRejects": int(esp.raw.get("usbTelemetryGlitchRejects", 0) or 0),
+            "espUsbTelemetryGlitchRejectUps": int(esp.raw.get("usbTelemetryGlitchRejectUps", 0) or 0),
+            "espUsbTelemetryGlitchRejectDowns": int(esp.raw.get("usbTelemetryGlitchRejectDowns", 0) or 0),
             "espUsbTelemetryGapEvents": int(esp.raw.get("usbTelemetryGapEvents", 0) or 0),
             "espUsbTelemetryLastGapMs": int(esp.raw.get("usbTelemetryLastGapMs", 0) or 0),
             "espUsbTelemetryMaxGapMs": int(esp.raw.get("usbTelemetryMaxGapMs", 0) or 0),
@@ -681,10 +683,14 @@ class UsbSimBridge:
             "espUsbTelemetrySeqGapFrames": int(esp.raw.get("usbTelemetrySeqGapFrames", 0) or 0),
             "espUsbTelemetrySeqDuplicates": int(esp.raw.get("usbTelemetrySeqDuplicates", 0) or 0),
             "espUsbTelemetryLineOverflows": int(esp.raw.get("usbTelemetryLineOverflows", 0) or 0),
+            "espUsbTelemetryLastRejectedRpm": int(esp.raw.get("usbTelemetryLastRejectedRpm", 0) or 0),
             "espLedRawRpm": int(esp.raw.get("ledRawRpm", 0) or 0),
             "espLedFilteredRpm": int(esp.raw.get("ledFilteredRpm", 0) or 0),
             "espLedStartRpm": int(esp.raw.get("ledStartRpm", 0) or 0),
             "espLedDisplayedLeds": int(esp.raw.get("ledDisplayedLeds", 0) or 0),
+            "espLedDesiredLevel": int(esp.raw.get("ledDesiredLevel", 0) or 0),
+            "espLedDisplayedLevel": int(esp.raw.get("ledDisplayedLevel", 0) or 0),
+            "espLedLevelCount": int(esp.raw.get("ledLevelCount", 0) or 0),
             "espLedFilterAdjusts": int(esp.raw.get("ledFilterAdjusts", 0) or 0),
             "espLedRenderCalls": int(esp.raw.get("ledRenderCalls", 0) or 0),
             "espLedFrameShows": int(esp.raw.get("ledFrameShows", 0) or 0),
@@ -700,6 +706,12 @@ class UsbSimBridge:
             "espLedExternalWriteAttempts": int(esp.raw.get("ledExternalWriteAttempts", 0) or 0),
             "espLedSnapshotChangedDuringRender": int(esp.raw.get("ledSnapshotChangedDuringRender", 0) or 0),
             "espLedDeterministicSweepActive": bool(esp.raw.get("ledDeterministicSweepActive", False)),
+            "espLedSessionEffectsEnabled": bool(esp.raw.get("ledSessionEffectsEnabled", False)),
+            "espLedActiveEffect": str(esp.raw.get("ledActiveEffect", "") or ""),
+            "espLedQueuedEffect": str(esp.raw.get("ledQueuedEffect", "") or ""),
+            "espLedLastQueuedEffect": str(esp.raw.get("ledLastQueuedEffect", "") or ""),
+            "espLedSessionEffectRequests": int(esp.raw.get("ledSessionEffectRequests", 0) or 0),
+            "espLedSessionEffectSuppressions": int(esp.raw.get("ledSessionEffectSuppressions", 0) or 0),
             "espTelemetrySnapshotVersion": int(esp.raw.get("telemetrySnapshotVersion", 0) or 0),
             "espTelemetrySnapshotAgeMs": int(esp.raw.get("telemetrySnapshotAgeMs", 0) or 0),
             "espTelemetrySnapshotSource": str(esp.raw.get("telemetrySnapshotSource", "") or ""),
@@ -708,6 +720,7 @@ class UsbSimBridge:
             "espTelemetrySourceTransitionCount": int(esp.raw.get("telemetrySourceTransitionCount", 0) or 0),
             "espTelemetryLastSourceTransition": str(esp.raw.get("telemetryLastSourceTransition", "") or ""),
             "espSimSessionTransitionCount": int(esp.raw.get("simSessionTransitionCount", 0) or 0),
+            "espSimSessionSuppressedCount": int(esp.raw.get("simSessionSuppressedCount", 0) or 0),
             "espSimSessionLastTransition": str(esp.raw.get("simSessionLastTransition", "") or ""),
             "gearSource": str(esp.raw.get("gearSource", "") or ""),
             "espWifiIp": str(esp.raw.get("wifiIp", "") or ""),
@@ -857,6 +870,7 @@ def create_app(bridge: UsbSimBridge) -> Flask:
             value = request.headers.get(name)
             if value:
                 headers[name] = value
+        headers["X-ShiftLight-Bridge-Proxy"] = "1"
 
         data = request.get_data() if request.method in {"POST", "PUT", "PATCH"} else None
         query = request.query_string.decode("utf-8", errors="ignore")

@@ -44,6 +44,11 @@ struct LedRenderHistoryInfo
     uint32_t snapshotChangedDuringRender = 0;
     bool deterministicSweepActive = false;
     uint8_t lastWriter = 0;
+    uint8_t activeEffect = 0;
+    uint8_t queuedEffect = 0;
+    uint8_t lastQueuedEffect = 0;
+    uint32_t sessionEffectRequests = 0;
+    uint32_t sessionEffectSuppressions = 0;
 };
 
 void initLeds();
@@ -58,7 +63,9 @@ LedDiagnosticMode ledBarGetDiagnosticMode();
 const char *ledBarGetDiagnosticModeName();
 const char *ledBarGetLastRenderModeName();
 const char *ledBarGetLastWriterName();
+const char *ledBarEffectNameById(uint8_t effectId);
 uint8_t ledBarGetAppliedBrightness();
+int ledBarGetConfiguredLedCount();
 void ledBarStartTestSweep(LedTestSweepMode mode, int maxRpm);
 bool ledBarTestSweepActive();
 bool ledBarDeterministicSweepActive();

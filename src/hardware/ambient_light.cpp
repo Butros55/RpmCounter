@@ -18,9 +18,13 @@
 
 namespace
 {
-    constexpr uint32_t AMBIENT_POLL_INTERVAL_MS = 180;
-    constexpr uint32_t AMBIENT_MIN_READ_GAP_MS = 100;
+    constexpr uint32_t AMBIENT_POLL_INTERVAL_MS = 12;
+    constexpr uint32_t AMBIENT_MIN_READ_GAP_MS = 6;
     constexpr uint32_t AMBIENT_RETRY_INTERVAL_MS = 3000;
+    constexpr uint32_t AMBIENT_SAMPLE_SETTLE_MARGIN_MS = 4;
+    constexpr float AMBIENT_BRIGHTNESS_SLEW_MIN_PER_16MS = 1.4f;
+    constexpr float AMBIENT_BRIGHTNESS_SLEW_MAX_PER_16MS = 10.8f;
+    constexpr float AMBIENT_BRIGHTNESS_DOWN_MULTIPLIER = 3.2f;
 
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
     constexpr int S3_LCD_RESET_PIN = 21;
@@ -65,6 +69,9 @@ namespace
     int g_runtimeSclPin = -1;
     unsigned long g_lastPollMs = 0;
     unsigned long g_lastInitAttemptMs = 0;
+    float g_liveBrightness = DEFAULT_BRIGHTNESS;
+    float g_desiredBrightness = DEFAULT_BRIGHTNESS;
+    unsigned long g_lastBrightnessStepMs = 0;
 
     AutoBrightnessCurveConfig curveConfig()
     {
@@ -93,6 +100,9 @@ namespace
         g_debug.configReg = 0;
         g_debug.targetBrightness = clampInt(cfg.brightness, 0, 255);
         g_debug.desiredBrightness = clampInt(cfg.brightness, 0, 255);
+        g_desiredBrightness = static_cast<float>(g_debug.desiredBrightness);
+        g_liveBrightness = static_cast<float>(g_debug.desiredBrightness);
+        g_lastBrightnessStepMs = 0;
     }
 
     bool validLux(float lux)
@@ -104,30 +114,20 @@ namespace
     {
         const AutoBrightnessCurveConfig config = curveConfig();
         const int manualBrightness = config.manualMax;
+        (void)smoothOutput;
 
         if (!cfg.autoBrightnessEnabled || !g_sensorReady || !g_filterPrimed)
         {
             g_debug.targetBrightness = manualBrightness;
             g_debug.desiredBrightness = manualBrightness;
+            g_desiredBrightness = static_cast<float>(manualBrightness);
             return;
         }
 
-        const int target = ambientComputeTargetBrightness(g_debug.filteredLux, config);
-        g_debug.targetBrightness = target;
-
-        if (!smoothOutput)
-        {
-            g_debug.desiredBrightness = target;
-            return;
-        }
-
-        const float responseAlpha = ambientComputeResponseAlpha(cfg.autoBrightnessResponsePct);
-        const float brightnessAlpha = responseAlpha < 0.08f ? 0.08f : (responseAlpha * 1.2f);
-        const float smoothed = ambientApplySmoothing(
-            static_cast<float>(g_debug.desiredBrightness),
-            static_cast<float>(target),
-            brightnessAlpha > 0.45f ? 0.45f : brightnessAlpha);
-        g_debug.desiredBrightness = clampInt(static_cast<int>(lroundf(smoothed)), 0, manualBrightness);
+        const float target = ambientComputeTargetBrightnessFloat(g_debug.filteredLux, config);
+        g_desiredBrightness = target;
+        g_debug.targetBrightness = clampInt(static_cast<int>(lroundf(target)), 0, manualBrightness);
+        g_debug.desiredBrightness = g_debug.targetBrightness;
     }
 
     bool validateBoardPinSelection()
@@ -329,51 +329,8 @@ namespace
         return true;
     }
 
-    void waitForMeasurement()
+    bool readAlsRaw(uint16_t &value)
     {
-        const unsigned long requiredMs = static_cast<unsigned long>(integrationTimeMs(g_vemlIntegration) * 2);
-        const unsigned long elapsedMs = (g_lastSensorIoMs > 0) ? (millis() - g_lastSensorIoMs) : requiredMs;
-        if (elapsedMs < requiredMs)
-        {
-            delay(requiredMs - elapsedMs);
-        }
-    }
-
-    bool setGain(uint8_t gain)
-    {
-        g_vemlGain = gain;
-        if (!writeRegister16(VEML7700_REG_ALS_CONFIG, buildAlsConfigRegister(true)))
-        {
-            return false;
-        }
-        g_lastSensorIoMs = millis();
-        refreshConfigRegister();
-        return true;
-    }
-
-    bool setIntegrationTime(uint8_t integration, bool waitOldCycle = true)
-    {
-        const int flushDelay = waitOldCycle ? integrationTimeMs(g_vemlIntegration) : 0;
-        g_vemlIntegration = integration;
-        if (!writeRegister16(VEML7700_REG_ALS_CONFIG, buildAlsConfigRegister(true)))
-        {
-            return false;
-        }
-        if (flushDelay > 0)
-        {
-            delay(flushDelay);
-        }
-        g_lastSensorIoMs = millis();
-        refreshConfigRegister();
-        return true;
-    }
-
-    bool readAlsRaw(bool waitForSample, uint16_t &value)
-    {
-        if (waitForSample)
-        {
-            waitForMeasurement();
-        }
         const bool ok = readRegister16(VEML7700_REG_ALS_DATA, value);
         if (ok)
         {
@@ -382,12 +339,8 @@ namespace
         return ok;
     }
 
-    bool readWhiteRaw(bool waitForSample, uint16_t &value)
+    bool readWhiteRaw(uint16_t &value)
     {
-        if (waitForSample)
-        {
-            waitForMeasurement();
-        }
         const bool ok = readRegister16(VEML7700_REG_WHITE_DATA, value);
         if (ok)
         {
@@ -406,72 +359,31 @@ namespace
         return lux;
     }
 
-    bool readAutoLux(float &luxOut, uint16_t &alsOut, uint16_t &whiteOut)
+    bool measurementReadyForRead(unsigned long nowMs)
     {
-        const uint8_t gains[] = {VEML7700_GAIN_1_8, VEML7700_GAIN_1_4, VEML7700_GAIN_1, VEML7700_GAIN_2};
-        const uint8_t integrationTimes[] = {VEML7700_IT_25MS, VEML7700_IT_50MS, VEML7700_IT_100MS,
-                                            VEML7700_IT_200MS, VEML7700_IT_400MS, VEML7700_IT_800MS};
+        if (g_lastSensorIoMs == 0)
+        {
+            return true;
+        }
 
-        uint8_t gainIndex = 0;
-        uint8_t integrationIndex = 2;
-        bool useCorrection = false;
+        const unsigned long requiredMs =
+            static_cast<unsigned long>(integrationTimeMs(g_vemlIntegration)) + AMBIENT_SAMPLE_SETTLE_MARGIN_MS;
+        return (nowMs - g_lastSensorIoMs) >= requiredMs;
+    }
 
-        if (!setGain(gains[gainIndex]) || !setIntegrationTime(integrationTimes[integrationIndex]))
+    bool readLiveLux(float &luxOut, uint16_t &alsOut, uint16_t &whiteOut)
+    {
+        if (!readAlsRaw(alsOut))
         {
             return false;
         }
 
-        if (!readAlsRaw(true, alsOut))
-        {
-            return false;
-        }
-
-        if (alsOut <= 100)
-        {
-            while (alsOut <= 100 && !((gainIndex == 3) && (integrationIndex == 5)))
-            {
-                if (gainIndex < 3)
-                {
-                    if (!setGain(gains[++gainIndex]))
-                    {
-                        return false;
-                    }
-                }
-                else if (integrationIndex < 5)
-                {
-                    if (!setIntegrationTime(integrationTimes[++integrationIndex]))
-                    {
-                        return false;
-                    }
-                }
-
-                if (!readAlsRaw(true, alsOut))
-                {
-                    return false;
-                }
-            }
-        }
-        else
-        {
-            useCorrection = true;
-            while (alsOut > 10000 && integrationIndex > 0)
-            {
-                if (!setIntegrationTime(integrationTimes[--integrationIndex]))
-                {
-                    return false;
-                }
-                if (!readAlsRaw(true, alsOut))
-                {
-                    return false;
-                }
-            }
-        }
-
-        luxOut = computeLuxFromAls(alsOut, useCorrection);
-        if (!readWhiteRaw(false, whiteOut))
+        if (!readWhiteRaw(whiteOut))
         {
             whiteOut = 0;
         }
+
+        luxOut = computeLuxFromAls(alsOut, alsOut > 10000U);
         refreshConfigRegister();
         return true;
     }
@@ -479,7 +391,7 @@ namespace
     bool configureVemlDefaults()
     {
         g_vemlGain = VEML7700_GAIN_1_8;
-        g_vemlIntegration = VEML7700_IT_100MS;
+        g_vemlIntegration = VEML7700_IT_25MS;
         if (!writeRegister16(VEML7700_REG_ALS_CONFIG, buildAlsConfigRegister(false)))
         {
             return false;
@@ -622,7 +534,17 @@ namespace
         uint16_t rawWhite = 0;
 
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
-        if (!readAutoLux(lux, rawAls, rawWhite))
+        const unsigned long now = millis();
+        if (!measurementReadyForRead(now))
+        {
+            if (seedOnly)
+            {
+                updateDesiredBrightnessFromLux(false);
+            }
+            return;
+        }
+
+        if (!readLiveLux(lux, rawAls, rawWhite))
         {
             handleReadFailure(F("lux-read-failed"));
             return;
@@ -672,6 +594,7 @@ void initAmbientLight()
     g_debug.targetBrightness = clampInt(cfg.brightness, 0, 255);
     g_debug.desiredBrightness = clampInt(cfg.brightness, 0, 255);
     g_debug.appliedBrightness = clampInt(cfg.brightness, 0, 255);
+    g_desiredBrightness = static_cast<float>(g_debug.desiredBrightness);
     g_lastPollMs = 0;
     g_lastInitAttemptMs = 0;
     configureSensor();
@@ -725,6 +648,7 @@ void ambientLightLoop()
     {
         g_debug.desiredBrightness = clampInt(cfg.brightness, 0, 255);
         g_debug.targetBrightness = g_debug.desiredBrightness;
+        g_desiredBrightness = static_cast<float>(g_debug.desiredBrightness);
 
         if (g_lastInitAttemptMs == 0 || (now - g_lastInitAttemptMs) >= AMBIENT_RETRY_INTERVAL_MS)
         {
@@ -754,17 +678,69 @@ void ambientLightLoop()
 uint8_t ambientLightGetLedBrightness()
 {
     const int manualBrightness = clampInt(cfg.brightness, 0, 255);
+    const unsigned long now = millis();
     if (!cfg.autoBrightnessEnabled || !g_sensorReady || !g_filterPrimed)
     {
         g_debug.sensorActive = false;
         g_debug.targetBrightness = manualBrightness;
         g_debug.desiredBrightness = manualBrightness;
+        g_desiredBrightness = static_cast<float>(manualBrightness);
+        g_liveBrightness = static_cast<float>(manualBrightness);
+        g_lastBrightnessStepMs = now;
         return static_cast<uint8_t>(manualBrightness);
     }
 
     g_debug.sensorActive = true;
-    g_debug.desiredBrightness = clampInt(g_debug.desiredBrightness, 0, manualBrightness);
-    return static_cast<uint8_t>(g_debug.desiredBrightness);
+    g_desiredBrightness = constrain(g_desiredBrightness, 0.0f, static_cast<float>(manualBrightness));
+    g_debug.desiredBrightness = clampInt(static_cast<int>(lroundf(g_desiredBrightness)), 0, manualBrightness);
+    if (g_lastBrightnessStepMs == 0)
+    {
+        g_liveBrightness = static_cast<float>(g_debug.appliedBrightness > 0 ? g_debug.appliedBrightness
+                                                                            : g_debug.desiredBrightness);
+        g_lastBrightnessStepMs = now;
+    }
+
+    const float desiredBrightness = g_desiredBrightness;
+    const float deltaMs = constrain(static_cast<float>(now - g_lastBrightnessStepMs), 1.0f, 80.0f);
+    g_lastBrightnessStepMs = now;
+
+    const float responseNormalized =
+        constrain(static_cast<float>(cfg.autoBrightnessResponsePct), 1.0f, 100.0f) / 100.0f;
+    float stepPer16Ms = AMBIENT_BRIGHTNESS_SLEW_MIN_PER_16MS +
+                        (AMBIENT_BRIGHTNESS_SLEW_MAX_PER_16MS - AMBIENT_BRIGHTNESS_SLEW_MIN_PER_16MS) *
+                            responseNormalized;
+    if (stepPer16Ms < AMBIENT_BRIGHTNESS_SLEW_MIN_PER_16MS)
+    {
+        stepPer16Ms = AMBIENT_BRIGHTNESS_SLEW_MIN_PER_16MS;
+    }
+    if (stepPer16Ms > AMBIENT_BRIGHTNESS_SLEW_MAX_PER_16MS)
+    {
+        stepPer16Ms = AMBIENT_BRIGHTNESS_SLEW_MAX_PER_16MS;
+    }
+
+    float maxStep = stepPer16Ms * (deltaMs / 16.0f);
+    const float delta = desiredBrightness - g_liveBrightness;
+    if (delta < 0.0f)
+    {
+        maxStep *= AMBIENT_BRIGHTNESS_DOWN_MULTIPLIER;
+    }
+    if (fabsf(delta) <= maxStep)
+    {
+        g_liveBrightness = desiredBrightness;
+    }
+    else
+    {
+        g_liveBrightness += (delta > 0.0f ? maxStep : -maxStep);
+    }
+
+    int outputBrightness = clampInt(static_cast<int>(lroundf(g_liveBrightness)), 0, manualBrightness);
+    if (fabsf(desiredBrightness - static_cast<float>(outputBrightness)) <= 0.35f)
+    {
+        outputBrightness = clampInt(static_cast<int>(lroundf(desiredBrightness)), 0, manualBrightness);
+        g_liveBrightness = static_cast<float>(outputBrightness);
+    }
+
+    return static_cast<uint8_t>(outputBrightness);
 }
 
 void ambientLightNoteAppliedBrightness(uint8_t brightness)

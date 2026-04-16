@@ -5,6 +5,7 @@
 #include "bluetooth/ble_obd.h"
 #include "web/web_ui.h"
 #include "hardware/ambient_light.h"
+#include "hardware/gesture_sensor.h"
 #include "hardware/led_bar.h"
 #include "hardware/logo_anim.h"
 #include "telemetry/telemetry_manager.h"
@@ -67,6 +68,9 @@ void setup()
     displayInit();
 #endif
 
+    Serial.println("[BOOT] Initializing gesture sensor...");
+    initGestureSensor();
+
     // --- Spawn dedicated worker tasks --------------------------------------
     // The USB serial bridge runs on Core 0 at priority 3 so incoming sim data
     // is drained every ~2 ms regardless of what the main loop is doing. The
@@ -99,6 +103,7 @@ void loop()
     telemetryLoop();
     bleObdLoop();
     ambientLightLoop();
+    gestureSensorLoop();
     // ledBarLoop() is likewise owned by the dedicated LED task — the call
     // here is a no-op while the task is running.
     ledBarLoop();

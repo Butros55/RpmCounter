@@ -21,5 +21,6 @@ void displayShowSimSessionTransition(SimSessionTransitionType transition);
 bool display_s3_add_shared_i2c_device(uint8_t address, uint32_t sclSpeedHz, i2c_master_dev_handle_t *outDevice);
 void display_s3_remove_shared_i2c_device(i2c_master_dev_handle_t device);
 bool display_s3_uses_shared_i2c_pins(int sdaPin, int sclPin);
+bool display_s3_probe_shared_i2c_address(uint8_t address, uint32_t timeoutMs = 50);
 
 #endif // CONFIG_IDF_TARGET_ESP32S3

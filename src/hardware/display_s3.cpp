@@ -683,6 +683,22 @@ bool display_s3_uses_shared_i2c_pins(int sdaPin, int sclPin)
     return sdaPin == static_cast<int>(PIN_TOUCH_SDA) && sclPin == static_cast<int>(PIN_TOUCH_SCL);
 }
 
+bool display_s3_probe_shared_i2c_address(uint8_t address, uint32_t timeoutMs)
+{
+    if (!ensureTouchBus())
+    {
+        return false;
+    }
+
+    const esp_err_t err = i2c_master_probe(g_touchBus, address, static_cast<int>(timeoutMs));
+    if (err != ESP_OK)
+    {
+        ESP_LOGW(TAG, "shared i2c probe 0x%02X failed: %s", address, esp_err_to_name(err));
+        return false;
+    }
+    return true;
+}
+
 void displayInit()
 {
     display_s3_init();

@@ -30,6 +30,8 @@ struct UsbTelemetryDebugStats
     uint32_t framesReceived = 0;
     uint32_t parseErrors = 0;
     uint32_t glitchRejects = 0;
+    uint32_t glitchRejectUpCount = 0;
+    uint32_t glitchRejectDownCount = 0;
     uint32_t gapEvents = 0;
     uint32_t seqGapEvents = 0;
     uint32_t seqGapFrames = 0;
@@ -41,6 +43,7 @@ struct UsbTelemetryDebugStats
     uint32_t lastSeq = 0;
     int lastRawRpm = 0;
     int lastAcceptedRpm = 0;
+    int lastRejectedRpm = 0;
 };
 
 struct SimHubDebugStats
@@ -63,6 +66,9 @@ struct LedRenderDebugStats
     int lastFilteredRpm = 0;
     int lastStartRpm = 0;
     int lastDisplayedLeds = 0;
+    int lastDesiredLevel = 0;
+    int lastDisplayedLevel = 0;
+    int lastLevelCount = 0;
     uint8_t lastAppliedBrightness = 0;
     bool lastShiftBlink = false;
     bool pitLimiterOnly = false;

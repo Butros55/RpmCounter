@@ -72,6 +72,7 @@ struct AppConfig
     bool autoScaleMaxRpm;
     int fixedMaxRpm;
     int rpmStartRpm;
+    int activeLedCount;
     int greenEndPct;
     int yellowEndPct;
     int redEndPct;
@@ -89,6 +90,8 @@ struct AppConfig
     bool logoOnIgnitionOn;
     bool logoOnEngineStart;
     bool logoOnIgnitionOff;
+    bool simSessionLedEffectsEnabled;
+    bool gestureControlEnabled;
     int displayBrightness;
     bool uiTutorialSeen;
     int uiLastMenuIndex;

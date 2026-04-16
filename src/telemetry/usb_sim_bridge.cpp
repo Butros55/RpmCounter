@@ -41,8 +41,8 @@ namespace
 
     // Dedicated task cadence — reads serial every 2 ms and refreshes state every
     // 20 ms regardless of whether data arrived.
-    constexpr uint32_t USB_TASK_POLL_INTERVAL_MS = 2;
-    constexpr uint32_t USB_STATE_REFRESH_INTERVAL_MS = 20;
+    constexpr uint32_t USB_TASK_POLL_INTERVAL_MS = 1;
+    constexpr uint32_t USB_STATE_REFRESH_INTERVAL_MS = 10;
     constexpr unsigned long USB_TELEMETRY_DIAG_GAP_MS = 60;
     constexpr unsigned long USB_TELEMETRY_GLITCH_SHORT_GAP_MS = 40;
     constexpr int USB_TELEMETRY_GLITCH_RPM_DELTA = 1200;
@@ -570,18 +570,35 @@ namespace
 
         const bool contiguousSeq =
             !frame.hasSeq || previousSeq == 0 || frame.seq == (previousSeq + 1U);
-        if (previousFrameMs > 0 &&
-            contiguousSeq &&
-            frame.rpm > previousAcceptedRpm &&
-            isShortGapSpike(previousAcceptedRpm,
-                            frame.rpm,
-                            nowMs - previousFrameMs,
-                            USB_TELEMETRY_GLITCH_RPM_DELTA,
-                            USB_TELEMETRY_GLITCH_SHORT_GAP_MS))
+        if (previousFrameMs > 0 && contiguousSeq)
         {
-            ++g_usbTelemetryDebug.glitchRejects;
-            g_usbTelemetryDebug.lastRawRpm = frame.rpm;
-            return;
+            const unsigned long frameGapMs = nowMs - previousFrameMs;
+            if (frame.rpm > previousAcceptedRpm &&
+                isShortGapSpike(previousAcceptedRpm,
+                                frame.rpm,
+                                frameGapMs,
+                                USB_TELEMETRY_GLITCH_RPM_DELTA,
+                                USB_TELEMETRY_GLITCH_SHORT_GAP_MS))
+            {
+                ++g_usbTelemetryDebug.glitchRejects;
+                ++g_usbTelemetryDebug.glitchRejectUpCount;
+                g_usbTelemetryDebug.lastRawRpm = frame.rpm;
+                g_usbTelemetryDebug.lastRejectedRpm = frame.rpm;
+                return;
+            }
+
+            if (isShortGapDip(previousAcceptedRpm,
+                              frame.rpm,
+                              frameGapMs,
+                              USB_TELEMETRY_GLITCH_RPM_DELTA,
+                              USB_TELEMETRY_GLITCH_SHORT_GAP_MS))
+            {
+                ++g_usbTelemetryDebug.glitchRejects;
+                ++g_usbTelemetryDebug.glitchRejectDownCount;
+                g_usbTelemetryDebug.lastRawRpm = frame.rpm;
+                g_usbTelemetryDebug.lastRejectedRpm = frame.rpm;
+                return;
+            }
         }
 
         // USB and network keep separate sample buffers so Auto can switch sources without
@@ -598,6 +615,7 @@ namespace
         g_usbTelemetryDebug.lastFrameMs = nowMs;
         g_usbTelemetryDebug.lastRawRpm = frame.rpm;
         g_usbTelemetryDebug.lastAcceptedRpm = frame.rpm;
+        g_usbTelemetryDebug.lastRejectedRpm = 0;
         if (frame.hasSeq)
         {
             g_usbTelemetryDebug.lastSeq = frame.seq;
@@ -931,6 +949,7 @@ String usbSimBuildStatusJson()
     json += ",\"telemetrySourceTransitionCount\":" + String(telemetryInfo.sourceTransitionCount);
     json += ",\"telemetryLastSourceTransition\":\"" + jsonEscape(String(telemetrySourceName(telemetryInfo.lastSourceTransition.fromSource)) + " -> " + telemetrySourceName(telemetryInfo.lastSourceTransition.toSource)) + "\"";
     json += ",\"simSessionTransitionCount\":" + String(telemetryInfo.simSessionTransitionCount);
+    json += ",\"simSessionSuppressedCount\":" + String(telemetryInfo.simSessionSuppressedCount);
     json += ",\"simSessionLastTransition\":\"" + jsonEscape(String(simSessionTransitionTypeName(telemetryInfo.lastSimSessionTransition.transition))) + "\"";
     json += ",\"simHubState\":\"" + simHubStateLabel(g_simHubConnectionState) + "\"";
     json += ",\"usbState\":\"" + usbStateLabel(g_usbBridgeConnectionState) + "\"";
@@ -954,6 +973,8 @@ String usbSimBuildStatusJson()
     json += ",\"usbTelemetryFrames\":" + String(g_usbTelemetryDebug.framesReceived);
     json += ",\"usbTelemetryParseErrors\":" + String(g_usbTelemetryDebug.parseErrors);
     json += ",\"usbTelemetryGlitchRejects\":" + String(g_usbTelemetryDebug.glitchRejects);
+    json += ",\"usbTelemetryGlitchRejectUps\":" + String(g_usbTelemetryDebug.glitchRejectUpCount);
+    json += ",\"usbTelemetryGlitchRejectDowns\":" + String(g_usbTelemetryDebug.glitchRejectDownCount);
     json += ",\"usbTelemetryGapEvents\":" + String(g_usbTelemetryDebug.gapEvents);
     json += ",\"usbTelemetryLastGapMs\":" + String(g_usbTelemetryDebug.lastGapMs);
     json += ",\"usbTelemetryMaxGapMs\":" + String(g_usbTelemetryDebug.maxGapMs);
@@ -964,6 +985,7 @@ String usbSimBuildStatusJson()
     json += ",\"usbTelemetryLineOverflows\":" + String(g_usbTelemetryDebug.lineOverflows);
     json += ",\"usbTelemetryLastRawRpm\":" + String(g_usbTelemetryDebug.lastRawRpm);
     json += ",\"usbTelemetryLastAcceptedRpm\":" + String(g_usbTelemetryDebug.lastAcceptedRpm);
+    json += ",\"usbTelemetryLastRejectedRpm\":" + String(g_usbTelemetryDebug.lastRejectedRpm);
     json += ",\"simHubPollOk\":" + String(g_simHubDebug.pollSuccessCount);
     json += ",\"simHubPollErr\":" + String(g_simHubDebug.pollErrorCount);
     json += ",\"simHubSuppressedWhileUsb\":" + String(g_simHubDebug.suppressedWhileUsbCount);
@@ -974,6 +996,9 @@ String usbSimBuildStatusJson()
     json += ",\"ledFilteredRpm\":" + String(g_ledRenderDebug.lastFilteredRpm);
     json += ",\"ledStartRpm\":" + String(g_ledRenderDebug.lastStartRpm);
     json += ",\"ledDisplayedLeds\":" + String(g_ledRenderDebug.lastDisplayedLeds);
+    json += ",\"ledDesiredLevel\":" + String(g_ledRenderDebug.lastDesiredLevel);
+    json += ",\"ledDisplayedLevel\":" + String(g_ledRenderDebug.lastDisplayedLevel);
+    json += ",\"ledLevelCount\":" + String(g_ledRenderDebug.lastLevelCount);
     json += ",\"ledFilterAdjusts\":" + String(g_ledRenderDebug.filterAdjustCount);
     json += ",\"ledRenderCalls\":" + String(g_ledRenderDebug.renderCalls);
     json += ",\"ledFrameShows\":" + String(g_ledRenderDebug.frameShowCount);
@@ -989,6 +1014,12 @@ String usbSimBuildStatusJson()
     json += ",\"ledExternalWriteAttempts\":" + String(ledHistory.externalWriteAttempts);
     json += ",\"ledSnapshotChangedDuringRender\":" + String(ledHistory.snapshotChangedDuringRender);
     json += ",\"ledDeterministicSweepActive\":" + String(ledHistory.deterministicSweepActive ? "true" : "false");
+    json += ",\"ledSessionEffectsEnabled\":" + String(cfg.simSessionLedEffectsEnabled ? "true" : "false");
+    json += ",\"ledActiveEffect\":\"" + jsonEscape(String(ledBarEffectNameById(ledHistory.activeEffect))) + "\"";
+    json += ",\"ledQueuedEffect\":\"" + jsonEscape(String(ledBarEffectNameById(ledHistory.queuedEffect))) + "\"";
+    json += ",\"ledLastQueuedEffect\":\"" + jsonEscape(String(ledBarEffectNameById(ledHistory.lastQueuedEffect))) + "\"";
+    json += ",\"ledSessionEffectRequests\":" + String(ledHistory.sessionEffectRequests);
+    json += ",\"ledSessionEffectSuppressions\":" + String(ledHistory.sessionEffectSuppressions);
     json += ",\"rpmStartRpm\":" + String(cfg.rpmStartRpm);
     json += "}";
     return json;
