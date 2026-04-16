@@ -1,23 +1,79 @@
 #include "usb_sim_bridge.h"
 
 #include <Arduino.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/semphr.h>
 
 #include "core/config.h"
 #include "core/logging.h"
 #include "core/state.h"
 #include "core/utils.h"
 #include "core/wifi.h"
+#include "hardware/led_bar.h"
+#include "telemetry/telemetry_manager.h"
 #include "web/web_helpers.h"
+#include "signal_utils.h"
 
 namespace
 {
-    constexpr unsigned long USB_BRIDGE_HEARTBEAT_TIMEOUT_MS = 3200;
-    constexpr unsigned long USB_TELEMETRY_FRESH_TIMEOUT_MS = 3500;
-    constexpr unsigned long USB_BRIDGE_STICKY_TIMEOUT_MS = 12000;
+    // Heartbeat/sticky thresholds — relaxed so short lulls don't drop the bridge.
+    constexpr unsigned long USB_BRIDGE_HEARTBEAT_TIMEOUT_MS = 5000;
+    constexpr unsigned long USB_BRIDGE_STICKY_TIMEOUT_MS = 20000;
+
+    // Hysteresis: two separate thresholds so the state does NOT flap between
+    // Live and stale while the bridge keeps the heartbeat alive.
+    //
+    //   - below LIVE_THRESHOLD   -> Live
+    //   - above STALE_THRESHOLD  -> downgrade (Error / WaitingForData)
+    //   - in between             -> keep current state (dead zone)
+    constexpr unsigned long USB_TELEMETRY_LIVE_THRESHOLD_MS  = 500;
+    constexpr unsigned long USB_TELEMETRY_STALE_THRESHOLD_MS = 2000;
+    // Public "fresh" check used by the source selector — generous so Auto does
+    // not rip USB away during a brief lull while SimHub restarts a session.
+    constexpr unsigned long USB_TELEMETRY_FRESH_TIMEOUT_MS = 2500;
+
+    // Minimum time a candidate state must be pending before it actually commits
+    // to the global state. Prevents single-iteration flips.
+    constexpr unsigned long STATE_COMMIT_DEBOUNCE_MS = 200;
+
     constexpr size_t USB_LINE_BUFFER_LIMIT = 384;
+
+    // Dedicated task cadence — reads serial every 2 ms and refreshes state every
+    // 20 ms regardless of whether data arrived.
+    constexpr uint32_t USB_TASK_POLL_INTERVAL_MS = 2;
+    constexpr uint32_t USB_STATE_REFRESH_INTERVAL_MS = 20;
+    constexpr unsigned long USB_TELEMETRY_DIAG_GAP_MS = 60;
+    constexpr unsigned long USB_TELEMETRY_GLITCH_SHORT_GAP_MS = 40;
+    constexpr int USB_TELEMETRY_GLITCH_RPM_DELTA = 1200;
 
     String g_usbRxLine;
     unsigned long g_lastHelloTxMs = 0;
+
+    // State machine bookkeeping for the debouncer.
+    UsbBridgeConnectionState g_pendingUsbState = UsbBridgeConnectionState::Disabled;
+    String g_pendingUsbError;
+    unsigned long g_pendingUsbStateSinceMs = 0;
+
+    // Serialise writes to Serial so the reader task and any other emitters
+    // cannot interleave bytes.
+    SemaphoreHandle_t g_usbWriteMutex = nullptr;
+
+    TaskHandle_t g_usbBridgeTaskHandle = nullptr;
+    volatile bool g_usbBridgeTaskRunning = false;
+
+    struct UsbTelemetryFrame
+    {
+        bool idle = false;
+        bool hasSeq = false;
+        uint32_t seq = 0;
+        int rpm = 0;
+        int speed = 0;
+        int gear = 0;
+        float throttle = 0.0f;
+        bool pitLimiterActive = false;
+        int reportedMaxRpm = 0;
+    };
 
     Stream &usbStream()
     {
@@ -71,6 +127,21 @@ namespace
         }
     }
 
+    String gearSourceLabel()
+    {
+        switch (g_activeTelemetrySource)
+        {
+        case ActiveTelemetrySource::UsbSim:
+        case ActiveTelemetrySource::SimHubNetwork:
+            return F("SimHub direkt");
+        case ActiveTelemetrySource::Obd:
+            return F("OBD berechnet");
+        case ActiveTelemetrySource::None:
+        default:
+            return F("Keine Quelle");
+        }
+    }
+
     String activeTelemetryLabel(ActiveTelemetrySource source)
     {
         switch (source)
@@ -84,6 +155,42 @@ namespace
         case ActiveTelemetrySource::None:
         default:
             return F("NONE");
+        }
+    }
+
+    String simHubStateLabel(SimHubConnectionState state)
+    {
+        switch (state)
+        {
+        case SimHubConnectionState::WaitingForHost:
+            return F("WAITING_HOST");
+        case SimHubConnectionState::WaitingForNetwork:
+            return F("WAITING_NETWORK");
+        case SimHubConnectionState::WaitingForData:
+            return F("WAITING_DATA");
+        case SimHubConnectionState::Live:
+            return F("LIVE");
+        case SimHubConnectionState::Error:
+            return F("ERROR");
+        case SimHubConnectionState::Disabled:
+        default:
+            return F("DISABLED");
+        }
+    }
+
+    String simTransportModeLabel(SimRuntimeTransportMode mode)
+    {
+        switch (mode)
+        {
+        case SimRuntimeTransportMode::UsbOnly:
+            return F("USB_ONLY");
+        case SimRuntimeTransportMode::NetworkOnly:
+            return F("NETWORK_ONLY");
+        case SimRuntimeTransportMode::Auto:
+            return F("AUTO");
+        case SimRuntimeTransportMode::Disabled:
+        default:
+            return F("DISABLED");
         }
     }
 
@@ -178,15 +285,109 @@ namespace
         return value.toFloat();
     }
 
+    bool parseTelemetryFrame(const String &payload, UsbTelemetryFrame &frame)
+    {
+        frame.idle = queryBool(payload, "idle", false);
+        if (frame.idle)
+        {
+            const String seqValue = queryValue(payload, "seq");
+            if (!seqValue.isEmpty())
+            {
+                frame.hasSeq = true;
+                frame.seq = static_cast<uint32_t>(strtoul(seqValue.c_str(), nullptr, 10));
+            }
+            return true;
+        }
+
+        const String rpmValue = queryValue(payload, "rpm");
+        const String speedValue = queryValue(payload, "speed");
+        const String gearValue = queryValue(payload, "gear");
+        if (rpmValue.isEmpty() || speedValue.isEmpty() || gearValue.isEmpty())
+        {
+            return false;
+        }
+
+        frame.rpm = clampInt(rpmValue.toInt(), 0, 20000);
+        frame.speed = clampInt(speedValue.toInt(), 0, 600);
+        frame.gear = clampInt(gearValue.toInt(), 0, 20);
+        frame.throttle = constrain(kvFloat(payload, "throttle", 0.0f), 0.0f, 1.0f);
+        frame.pitLimiterActive = queryBool(payload, "pit", false);
+        frame.reportedMaxRpm = clampInt(queryInt(payload, "maxrpm", frame.rpm, 0, 25000), 0, 25000);
+
+        const String seqValue = queryValue(payload, "seq");
+        if (!seqValue.isEmpty())
+        {
+            frame.hasSeq = true;
+            frame.seq = static_cast<uint32_t>(strtoul(seqValue.c_str(), nullptr, 10));
+        }
+
+        return true;
+    }
+
+    // Debounced state transition: candidate states must hold for at least
+    // STATE_COMMIT_DEBOUNCE_MS before they overwrite the exposed global state.
+    // This is the core fix for the "Verbindung wechselt ständig"-flicker.
     void setUsbState(UsbBridgeConnectionState state, const String &error = String())
     {
-        g_usbBridgeConnectionState = state;
-        g_usbBridgeLastError = error;
+        const unsigned long nowMs = millis();
+
+        // "Live" is trusted immediately — we never want to delay showing data.
+        if (state == UsbBridgeConnectionState::Live)
+        {
+            g_pendingUsbState = state;
+            g_pendingUsbError = error;
+            g_pendingUsbStateSinceMs = nowMs;
+            g_usbBridgeConnectionState = state;
+            g_usbBridgeLastError = error;
+            return;
+        }
+
+        // Same as current → nothing to do.
+        if (state == g_usbBridgeConnectionState && error == g_usbBridgeLastError)
+        {
+            g_pendingUsbState = state;
+            g_pendingUsbError = error;
+            g_pendingUsbStateSinceMs = nowMs;
+            return;
+        }
+
+        // New candidate — start its debounce timer.
+        if (state != g_pendingUsbState || error != g_pendingUsbError)
+        {
+            g_pendingUsbState = state;
+            g_pendingUsbError = error;
+            g_pendingUsbStateSinceMs = nowMs;
+            return;
+        }
+
+        // Candidate held long enough → commit.
+        if ((nowMs - g_pendingUsbStateSinceMs) >= STATE_COMMIT_DEBOUNCE_MS)
+        {
+            g_usbBridgeConnectionState = state;
+            g_usbBridgeLastError = error;
+        }
+    }
+
+    unsigned long lastUsbBridgeActivityMs()
+    {
+        unsigned long latest = g_lastUsbBridgeHeartbeatMs;
+        latest = max(latest, g_lastUsbRpcMs);
+        latest = max(latest, g_lastUsbTelemetryMs);
+        return latest;
     }
 
     void sendProtocolLine(const String &line)
     {
-        usbStream().println(line);
+        // Serialise writes: reader task + loop() context may both want to emit.
+        if (g_usbWriteMutex != nullptr && xSemaphoreTake(g_usbWriteMutex, pdMS_TO_TICKS(50)) == pdTRUE)
+        {
+            usbStream().println(line);
+            xSemaphoreGive(g_usbWriteMutex);
+        }
+        else
+        {
+            usbStream().println(line);
+        }
     }
 
     void sendRpcResponse(int requestId, const String &json)
@@ -228,11 +429,36 @@ namespace
         saveConfig();
     }
 
+    // Returns the "data age" bucket using hysteresis so small jitter around the
+    // boundary does not cause the exposed state to oscillate.
+    //
+    //   0 = fresh (Live zone)
+    //   1 = dead zone (keep current state)
+    //   2 = stale (downgrade zone)
+    int telemetryAgeBucket(unsigned long nowMs)
+    {
+        if (g_lastUsbTelemetryMs == 0)
+        {
+            return 2;
+        }
+        const unsigned long age = nowMs - g_lastUsbTelemetryMs;
+        if (age <= USB_TELEMETRY_LIVE_THRESHOLD_MS)
+        {
+            return 0;
+        }
+        if (age >= USB_TELEMETRY_STALE_THRESHOLD_MS)
+        {
+            return 2;
+        }
+        return 1;
+    }
+
     void refreshUsbFlags(unsigned long nowMs)
     {
         g_usbSerialConnected = usbSerialConnected();
 
-        if ((nowMs - g_lastUsbBridgeHeartbeatMs) > USB_BRIDGE_HEARTBEAT_TIMEOUT_MS)
+        const unsigned long lastActivityMs = lastUsbBridgeActivityMs();
+        if (lastActivityMs == 0 || (nowMs - lastActivityMs) > USB_BRIDGE_HEARTBEAT_TIMEOUT_MS)
         {
             g_usbBridgeConnected = false;
             g_usbBridgeWebActive = false;
@@ -256,12 +482,24 @@ namespace
             return;
         }
 
-        if (usbSimTelemetryFresh(nowMs))
+        const int ageBucket = telemetryAgeBucket(nowMs);
+        if (ageBucket == 0)
         {
             setUsbState(UsbBridgeConnectionState::Live);
             return;
         }
 
+        if (ageBucket == 1)
+        {
+            // Dead zone — keep whatever the committed state is. The debouncer in
+            // setUsbState already refuses to commit changes that arrive faster
+            // than STATE_COMMIT_DEBOUNCE_MS, so simply not proposing a new
+            // state here is enough to keep things stable.
+            setUsbState(g_usbBridgeConnectionState, g_usbBridgeLastError);
+            return;
+        }
+
+        // ageBucket == 2 → definitively stale.
         if (g_usbTelemetryEverReceived)
         {
             setUsbState(UsbBridgeConnectionState::Error, F("Telemetry stale"));
@@ -278,31 +516,97 @@ namespace
         {
             return true;
         }
-        if (g_lastUsbBridgeHeartbeatMs > 0 && (nowMs - g_lastUsbBridgeHeartbeatMs) <= USB_BRIDGE_STICKY_TIMEOUT_MS)
-        {
-            return true;
-        }
-        if (g_lastUsbTelemetryMs > 0 && (nowMs - g_lastUsbTelemetryMs) <= USB_BRIDGE_STICKY_TIMEOUT_MS)
-        {
-            return true;
-        }
-        return false;
+        const unsigned long lastActivityMs = lastUsbBridgeActivityMs();
+        return lastActivityMs > 0 && (nowMs - lastActivityMs) <= USB_BRIDGE_STICKY_TIMEOUT_MS;
     }
 
     void handleTelemetryMessage(const String &payload)
     {
-        g_simHubCurrentRpm = max(0, queryInt(payload, "rpm", g_simHubCurrentRpm, 0, 20000));
-        g_simHubVehicleSpeedKmh = max(0, queryInt(payload, "speed", g_simHubVehicleSpeedKmh, 0, 600));
-        g_simHubGear = max(0, queryInt(payload, "gear", g_simHubGear, 0, 20));
-        g_simHubThrottle = constrain(kvFloat(payload, "throttle", g_simHubThrottle), 0.0f, 1.0f);
-        g_simHubPitLimiterActive = queryBool(payload, "pit", g_simHubPitLimiterActive);
-        const int reportedMaxRpm = queryInt(payload, "maxrpm", g_simHubMaxSeenRpm, 0, 25000);
-        g_simHubMaxSeenRpm = max(reportedMaxRpm, max(g_simHubMaxSeenRpm, g_simHubCurrentRpm));
-        g_lastSimHubTelemetryMs = millis();
-        g_lastUsbTelemetryMs = g_lastSimHubTelemetryMs;
-        g_simHubEverReceived = true;
-        g_usbTelemetryEverReceived = true;
+        const unsigned long nowMs = millis();
+        g_lastUsbBridgeHeartbeatMs = nowMs;
         g_usbBridgeConnected = true;
+
+        UsbTelemetryFrame frame{};
+        if (!parseTelemetryFrame(payload, frame))
+        {
+            ++g_usbTelemetryDebug.parseErrors;
+            return;
+        }
+
+        // A Python-side "idle" marker tells us the bridge is alive but no real
+        // game data is flowing. We count that as a heartbeat, NOT as telemetry,
+        // so Auto-mode is free to fall back to OBD.
+        if (frame.idle)
+        {
+            return;
+        }
+
+        const unsigned long previousFrameMs = g_usbTelemetryDebug.lastFrameMs;
+        const int previousAcceptedRpm = g_usbTelemetryDebug.lastAcceptedRpm;
+        const uint32_t previousSeq = g_usbTelemetryDebug.lastSeq;
+
+        if (frame.hasSeq && previousSeq > 0)
+        {
+            if (frame.seq == previousSeq)
+            {
+                ++g_usbTelemetryDebug.seqDuplicates;
+                return;
+            }
+            if (frame.seq > previousSeq + 1)
+            {
+                ++g_usbTelemetryDebug.seqGapEvents;
+                g_usbTelemetryDebug.seqGapFrames += (frame.seq - previousSeq - 1U);
+            }
+        }
+
+        if (previousFrameMs > 0)
+        {
+            const unsigned long gapMs = nowMs - previousFrameMs;
+            g_usbTelemetryDebug.lastGapMs = gapMs;
+            if (gapMs > g_usbTelemetryDebug.maxGapMs)
+            {
+                g_usbTelemetryDebug.maxGapMs = gapMs;
+            }
+            if (gapMs >= USB_TELEMETRY_DIAG_GAP_MS)
+            {
+                ++g_usbTelemetryDebug.gapEvents;
+            }
+        }
+
+        const bool contiguousSeq =
+            !frame.hasSeq || previousSeq == 0 || frame.seq == (previousSeq + 1U);
+        if (previousFrameMs > 0 &&
+            contiguousSeq &&
+            frame.rpm > previousAcceptedRpm &&
+            isShortGapSpike(previousAcceptedRpm,
+                            frame.rpm,
+                            nowMs - previousFrameMs,
+                            USB_TELEMETRY_GLITCH_RPM_DELTA,
+                            USB_TELEMETRY_GLITCH_SHORT_GAP_MS))
+        {
+            ++g_usbTelemetryDebug.glitchRejects;
+            g_usbTelemetryDebug.lastRawRpm = frame.rpm;
+            return;
+        }
+
+        // USB and network keep separate sample buffers so Auto can switch sources without
+        // accidentally reusing the other transport's last values.
+        g_usbSimCurrentRpm = frame.rpm;
+        g_usbSimVehicleSpeedKmh = frame.speed;
+        g_usbSimGear = frame.gear;
+        g_usbSimThrottle = frame.throttle;
+        g_usbSimPitLimiterActive = frame.pitLimiterActive;
+        g_usbSimMaxSeenRpm = max(frame.reportedMaxRpm, max(g_usbSimMaxSeenRpm, g_usbSimCurrentRpm));
+        g_lastUsbTelemetryMs = nowMs;
+        g_usbTelemetryEverReceived = true;
+        ++g_usbTelemetryDebug.framesReceived;
+        g_usbTelemetryDebug.lastFrameMs = nowMs;
+        g_usbTelemetryDebug.lastRawRpm = frame.rpm;
+        g_usbTelemetryDebug.lastAcceptedRpm = frame.rpm;
+        if (frame.hasSeq)
+        {
+            g_usbTelemetryDebug.lastSeq = frame.seq;
+        }
         setUsbState(UsbBridgeConnectionState::Live);
     }
 
@@ -360,12 +664,22 @@ namespace
         sendRpcResponse(requestId, String(F("{\"ok\":false,\"error\":\"unknown-command\"}")));
     }
 
-    void handleProtocolLine(const String &line)
+    void handleProtocolLine(const String &rawLine)
     {
-        if (!line.startsWith("USBSIM "))
+        // Resync: if garbage from a previous partial frame got concatenated in
+        // front of a new frame (e.g. reconnect / briefly dropped bytes), the
+        // valid "USBSIM " marker may sit somewhere in the middle of the line.
+        // Search for the LAST occurrence so we always parse the freshest
+        // message and drop whatever preceded it.
+        int markerPos = rawLine.lastIndexOf("USBSIM ");
+        if (markerPos < 0)
         {
             return;
         }
+
+        // Anything before the marker is discarded silently. (Logging noise for
+        // every malformed line would spam the serial console during reboots.)
+        const String line = rawLine.substring(markerPos);
 
         String rest = line.substring(7);
         rest.trim();
@@ -392,10 +706,95 @@ namespace
     }
 }
 
+namespace
+{
+    // Body of the dedicated reader task: drains the CDC RX buffer every few
+    // milliseconds, parses complete lines, and advances the state machine.
+    // Running this outside of loop() means serial data is serviced even if
+    // another module (HTTP, BLE, LED render) takes a long time.
+    void usbSimBridgeTaskBody(void *)
+    {
+        TickType_t lastWake = xTaskGetTickCount();
+        uint32_t stateRefreshAccum = 0;
+
+        for (;;)
+        {
+            Stream &stream = usbStream();
+            while (stream.available() > 0)
+            {
+                const char ch = static_cast<char>(stream.read());
+                if (ch == '\r')
+                {
+                    continue;
+                }
+                if (ch == '\n')
+                {
+                    if (!g_usbRxLine.isEmpty())
+                    {
+                        handleProtocolLine(g_usbRxLine);
+                        g_usbRxLine = "";
+                    }
+                    continue;
+                }
+
+                if (g_usbRxLine.length() < USB_LINE_BUFFER_LIMIT)
+                {
+                    g_usbRxLine += ch;
+                }
+                else
+                {
+                    g_usbRxLine = "";
+                    ++g_usbTelemetryDebug.lineOverflows;
+                    setUsbState(UsbBridgeConnectionState::Error, F("Line overflow"));
+                }
+            }
+
+            const unsigned long nowMs = millis();
+            stateRefreshAccum += USB_TASK_POLL_INTERVAL_MS;
+            if (stateRefreshAccum >= USB_STATE_REFRESH_INTERVAL_MS)
+            {
+                refreshUsbFlags(nowMs);
+                stateRefreshAccum = 0;
+                if (g_usbBridgeConnected && nowMs - g_lastHelloTxMs > 900)
+                {
+                    sendHelloFrame();
+                }
+            }
+
+            vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(USB_TASK_POLL_INTERVAL_MS));
+        }
+    }
+}
+
 void initUsbSimBridge()
 {
     g_usbRxLine.reserve(USB_LINE_BUFFER_LIMIT);
+    if (g_usbWriteMutex == nullptr)
+    {
+        g_usbWriteMutex = xSemaphoreCreateMutex();
+    }
     refreshUsbFlags(millis());
+}
+
+void startUsbSimBridgeTask()
+{
+    if (g_usbBridgeTaskRunning)
+    {
+        return;
+    }
+    g_usbBridgeTaskRunning = true;
+
+    // Core 0 keeps the reader independent from the Arduino loop (Core 1) and
+    // the LED renderer. Priority 3 is above the loop task so CDC drain never
+    // starves even when the rest of the system is busy.
+    xTaskCreatePinnedToCore(
+        usbSimBridgeTaskBody,
+        "usbSimBridge",
+        4096,
+        nullptr,
+        3,
+        &g_usbBridgeTaskHandle,
+        0);
 }
 
 void usbSimBridgeUpdateConfig()
@@ -406,6 +805,15 @@ void usbSimBridgeUpdateConfig()
 
 void usbSimBridgeLoop()
 {
+    // Legacy entry point kept for backwards compatibility with any callers
+    // that still pump the bridge from the main loop. When the dedicated task
+    // is running this is a no-op; otherwise it serves as a fallback so the
+    // bridge still works if someone skips startUsbSimBridgeTask().
+    if (g_usbBridgeTaskRunning)
+    {
+        return;
+    }
+
     Stream &stream = usbStream();
     while (stream.available() > 0)
     {
@@ -431,6 +839,7 @@ void usbSimBridgeLoop()
         else
         {
             g_usbRxLine = "";
+            ++g_usbTelemetryDebug.lineOverflows;
             setUsbState(UsbBridgeConnectionState::Error, F("Line overflow"));
         }
     }
@@ -444,8 +853,7 @@ void usbSimBridgeLoop()
 
 bool usbSimTransportEnabled()
 {
-    return cfg.telemetryPreference != TelemetryPreference::Obd &&
-           cfg.simTransportPreference != SimTransportPreference::Network;
+    return telemetryAllowsUsbSim(cfg.telemetryPreference, cfg.simTransportPreference);
 }
 
 bool usbSimBridgeOnline()
@@ -462,25 +870,14 @@ bool usbSimTelemetryFresh(unsigned long nowMs)
 
 bool usbSimShouldBlockObd()
 {
-    const unsigned long nowMs = millis();
-    const bool usbStickyActive = usbBridgeRecentlyActive(nowMs);
-    const bool explicitUsbSimMode =
-        cfg.telemetryPreference == TelemetryPreference::SimHub &&
-        cfg.simTransportPreference == SimTransportPreference::UsbSerial;
-
-    if (explicitUsbSimMode)
+    if (cfg.telemetryPreference == TelemetryPreference::SimHub)
     {
         return true;
     }
 
-    if (cfg.telemetryPreference == TelemetryPreference::SimHub)
-    {
-        return cfg.simTransportPreference != SimTransportPreference::Network && usbStickyActive;
-    }
-
     if (cfg.telemetryPreference == TelemetryPreference::Auto)
     {
-        return cfg.simTransportPreference != SimTransportPreference::Network && usbStickyActive;
+        return g_activeTelemetrySource == ActiveTelemetrySource::UsbSim;
     }
 
     return false;
@@ -488,48 +885,47 @@ bool usbSimShouldBlockObd()
 
 bool usbSimShouldSuspendWifi()
 {
-    const unsigned long nowMs = millis();
-    const bool usbStickyActive = usbBridgeRecentlyActive(nowMs);
-    const bool explicitUsbSimMode =
-        cfg.telemetryPreference == TelemetryPreference::SimHub &&
-        cfg.simTransportPreference == SimTransportPreference::UsbSerial;
-
-    if (cfg.simTransportPreference == SimTransportPreference::Network)
-    {
-        return false;
-    }
-
-    if (explicitUsbSimMode)
-    {
-        return true;
-    }
-
-    if (cfg.telemetryPreference == TelemetryPreference::SimHub)
-    {
-        return usbStickyActive;
-    }
-
-    if (cfg.telemetryPreference == TelemetryPreference::Auto)
-    {
-        return usbStickyActive;
-    }
-
-    return false;
+    // Only USB-only may suspend WiFi. Auto must leave the network path ready for fallback.
+    return resolveSimRuntimeTransportMode(cfg.telemetryPreference, cfg.simTransportPreference) ==
+           SimRuntimeTransportMode::UsbOnly;
 }
 
 String usbSimBuildStatusJson()
 {
+    const SimRuntimeTransportMode transportMode =
+        resolveSimRuntimeTransportMode(cfg.telemetryPreference, cfg.simTransportPreference);
+    const unsigned long nowMs = millis();
+    const WifiStatus wifiStatus = getWifiStatus();
+    String wifiIp = wifiStatus.ip;
+    if (wifiIp.isEmpty())
+    {
+        wifiIp = wifiStatus.staIp;
+    }
+    if (wifiIp.isEmpty())
+    {
+        wifiIp = wifiStatus.apIp;
+    }
+    const unsigned long usbTelemetryAgeMs =
+        (g_usbTelemetryDebug.lastFrameMs > 0) ? (nowMs - g_usbTelemetryDebug.lastFrameMs) : 0;
+    const unsigned long simHubLastOkAgeMs =
+        (g_simHubDebug.lastSuccessMs > 0) ? (nowMs - g_simHubDebug.lastSuccessMs) : 0;
+    const unsigned long simHubLastErrAgeMs =
+        (g_simHubDebug.lastErrorMs > 0) ? (nowMs - g_simHubDebug.lastErrorMs) : 0;
     String json = "{";
     json += "\"ok\":true";
     json += ",\"rpm\":" + String(g_currentRpm);
     json += ",\"maxRpm\":" + String(g_maxSeenRpm);
     json += ",\"speed\":" + String(g_vehicleSpeedKmh);
     json += ",\"gear\":" + String(g_estimatedGear);
+    json += ",\"gearSource\":\"" + jsonEscape(gearSourceLabel()) + "\"";
     json += ",\"throttle\":" + String(g_currentThrottle, 3);
     json += ",\"pitLimiter\":" + String(g_pitLimiterActive ? "true" : "false");
     json += ",\"activeTelemetry\":\"" + activeTelemetryLabel(g_activeTelemetrySource) + "\"";
     json += ",\"telemetryPreference\":\"" + telemetryPreferenceLabel(cfg.telemetryPreference) + "\"";
     json += ",\"simTransport\":\"" + simTransportLabel(cfg.simTransportPreference) + "\"";
+    json += ",\"simTransportMode\":\"" + simTransportModeLabel(transportMode) + "\"";
+    json += ",\"telemetryFallback\":" + String(telemetrySourceIsFallback(g_activeTelemetrySource, cfg.telemetryPreference, cfg.simTransportPreference) ? "true" : "false");
+    json += ",\"simHubState\":\"" + simHubStateLabel(g_simHubConnectionState) + "\"";
     json += ",\"usbState\":\"" + usbStateLabel(g_usbBridgeConnectionState) + "\"";
     json += ",\"usbConnected\":" + String(g_usbSerialConnected ? "true" : "false");
     json += ",\"usbBridgeConnected\":" + String(g_usbBridgeConnected ? "true" : "false");
@@ -540,10 +936,48 @@ String usbSimBuildStatusJson()
     json += ",\"displayBrightness\":" + String(cfg.displayBrightness);
     json += ",\"nightMode\":" + String(cfg.uiNightMode ? "true" : "false");
     json += ",\"useMph\":" + String(cfg.useMph ? "true" : "false");
+    json += ",\"wifiIp\":\"" + jsonEscape(wifiIp) + "\"";
+    json += ",\"wifiStaConnected\":" + String(wifiStatus.staConnected ? "true" : "false");
+    json += ",\"wifiApActive\":" + String(wifiStatus.apActive ? "true" : "false");
     json += ",\"wifiSuspended\":" + String(isWifiSuspendedForUsb() ? "true" : "false");
     json += ",\"bleConnected\":" + String(g_connected ? "true" : "false");
     json += ",\"bleBlocked\":" + String(usbSimShouldBlockObd() ? "true" : "false");
     json += ",\"obdAllowed\":" + String(usbSimShouldBlockObd() ? "false" : "true");
+    json += ",\"usbTelemetryAgeMs\":" + String(usbTelemetryAgeMs);
+    json += ",\"usbTelemetryFrames\":" + String(g_usbTelemetryDebug.framesReceived);
+    json += ",\"usbTelemetryParseErrors\":" + String(g_usbTelemetryDebug.parseErrors);
+    json += ",\"usbTelemetryGlitchRejects\":" + String(g_usbTelemetryDebug.glitchRejects);
+    json += ",\"usbTelemetryGapEvents\":" + String(g_usbTelemetryDebug.gapEvents);
+    json += ",\"usbTelemetryLastGapMs\":" + String(g_usbTelemetryDebug.lastGapMs);
+    json += ",\"usbTelemetryMaxGapMs\":" + String(g_usbTelemetryDebug.maxGapMs);
+    json += ",\"usbTelemetrySeq\":" + String(g_usbTelemetryDebug.lastSeq);
+    json += ",\"usbTelemetrySeqGapEvents\":" + String(g_usbTelemetryDebug.seqGapEvents);
+    json += ",\"usbTelemetrySeqGapFrames\":" + String(g_usbTelemetryDebug.seqGapFrames);
+    json += ",\"usbTelemetrySeqDuplicates\":" + String(g_usbTelemetryDebug.seqDuplicates);
+    json += ",\"usbTelemetryLineOverflows\":" + String(g_usbTelemetryDebug.lineOverflows);
+    json += ",\"usbTelemetryLastRawRpm\":" + String(g_usbTelemetryDebug.lastRawRpm);
+    json += ",\"usbTelemetryLastAcceptedRpm\":" + String(g_usbTelemetryDebug.lastAcceptedRpm);
+    json += ",\"simHubPollOk\":" + String(g_simHubDebug.pollSuccessCount);
+    json += ",\"simHubPollErr\":" + String(g_simHubDebug.pollErrorCount);
+    json += ",\"simHubSuppressedWhileUsb\":" + String(g_simHubDebug.suppressedWhileUsbCount);
+    json += ",\"simHubLastOkAgeMs\":" + String(simHubLastOkAgeMs);
+    json += ",\"simHubLastErrAgeMs\":" + String(simHubLastErrAgeMs);
+    json += ",\"simHubLastError\":\"" + jsonEscape(g_simHubDebug.lastError) + "\"";
+    json += ",\"ledRawRpm\":" + String(g_ledRenderDebug.lastRawRpm);
+    json += ",\"ledFilteredRpm\":" + String(g_ledRenderDebug.lastFilteredRpm);
+    json += ",\"ledStartRpm\":" + String(g_ledRenderDebug.lastStartRpm);
+    json += ",\"ledDisplayedLeds\":" + String(g_ledRenderDebug.lastDisplayedLeds);
+    json += ",\"ledFilterAdjusts\":" + String(g_ledRenderDebug.filterAdjustCount);
+    json += ",\"ledRenderCalls\":" + String(g_ledRenderDebug.renderCalls);
+    json += ",\"ledFrameShows\":" + String(g_ledRenderDebug.frameShowCount);
+    json += ",\"ledFrameSkips\":" + String(g_ledRenderDebug.frameSkipCount);
+    json += ",\"ledBrightnessUpdates\":" + String(g_ledRenderDebug.brightnessUpdateCount);
+    json += ",\"ledShiftBlink\":" + String(g_ledRenderDebug.lastShiftBlink ? "true" : "false");
+    json += ",\"ledPitLimiterOnly\":" + String(g_ledRenderDebug.pitLimiterOnly ? "true" : "false");
+    json += ",\"ledDiagnosticMode\":\"" + jsonEscape(String(ledBarGetDiagnosticModeName())) + "\"";
+    json += ",\"ledRenderMode\":\"" + jsonEscape(String(ledBarGetLastRenderModeName())) + "\"";
+    json += ",\"ledLastShowAgeMs\":" + String(g_ledRenderDebug.lastShowMs > 0 ? (nowMs - g_ledRenderDebug.lastShowMs) : 0);
+    json += ",\"rpmStartRpm\":" + String(cfg.rpmStartRpm);
     json += "}";
     return json;
 }

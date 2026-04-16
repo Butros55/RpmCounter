@@ -118,10 +118,11 @@ namespace
 
 void showMLogoPreview()
 {
-    float brightnessFactor = cfg.brightness / 255.0f;
+    float brightnessFactor = ledBarGetAppliedBrightness() / 255.0f;
     if (brightnessFactor < 0.02f)
         brightnessFactor = 0.02f;
 
+    ledBarInvalidateFrameCache();
     drawLogoFrame(brightnessFactor);
     rememberPreviewPixels();
 }
@@ -131,6 +132,7 @@ void showMLogoAnimation()
     if (g_animationActive)
         return;
     g_animationActive = true;
+    ledBarInvalidateFrameCache();
 
     Serial.println("[MLOGO] Starte BMW M Boot-Animation");
 
@@ -139,6 +141,7 @@ void showMLogoAnimation()
     Serial.println("[MLOGO] Animation fertig");
 
     g_animationActive = false;
+    ledBarInvalidateFrameCache();
 
     if (!g_testActive && g_currentRpm > 0)
     {
@@ -151,6 +154,7 @@ void showMLogoLeavingAnimation()
     if (g_animationActive)
         return;
     g_animationActive = true;
+    ledBarInvalidateFrameCache();
 
     Serial.println("[MLOGO] Starte Leaving-Animation");
 
@@ -160,6 +164,7 @@ void showMLogoLeavingAnimation()
 
     Serial.println("[MLOGO] Leaving-Animation fertig");
     g_animationActive = false;
+    ledBarInvalidateFrameCache();
 }
 
 void logoAnimLoop()

@@ -9,6 +9,14 @@ constexpr int NUM_LEDS = 30;
 constexpr int DEFAULT_BRIGHTNESS = 80;
 constexpr int STATUS_LED_PIN = 2;
 
+#ifndef AMBIENT_LIGHT_DEFAULT_SDA
+#define AMBIENT_LIGHT_DEFAULT_SDA 21
+#endif
+
+#ifndef AMBIENT_LIGHT_DEFAULT_SCL
+#define AMBIENT_LIGHT_DEFAULT_SCL 22
+#endif
+
 constexpr unsigned long RPM_INTERVAL_MS = 100;
 constexpr unsigned long TEST_SWEEP_DURATION = 5000;
 constexpr unsigned long IGNITION_TIMEOUT_MS = 8000;
@@ -55,10 +63,19 @@ struct AppConfig
 {
     bool autoScaleMaxRpm;
     int fixedMaxRpm;
+    int rpmStartRpm;
     int greenEndPct;
     int yellowEndPct;
     int blinkStartPct;
     int brightness;
+    bool autoBrightnessEnabled;
+    int ambientLightSdaPin;
+    int ambientLightSclPin;
+    int autoBrightnessStrengthPct;
+    int autoBrightnessMin;
+    int autoBrightnessResponsePct;
+    int autoBrightnessLuxMin;
+    int autoBrightnessLuxMax;
     int mode;
     bool logoOnIgnitionOn;
     bool logoOnEngineStart;

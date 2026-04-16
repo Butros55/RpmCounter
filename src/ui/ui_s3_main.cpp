@@ -214,19 +214,88 @@ namespace
         case UiTelemetryPreference::Obd:
             return "Nur BLE / OBD aktiv";
         case UiTelemetryPreference::SimHub:
-            return "USB oder Netzwerk-SimHub";
+            return "Nur SimHub: Auto, USB only oder Network only";
         case UiTelemetryPreference::Auto:
         default:
-            return "Sim bevorzugt, OBD als Fallback";
+            return "USB, Netzwerk und OBD werden automatisch sortiert";
         }
     }
 
-    bool usb_mode_active()
+    bool usb_transport_mode_selected()
     {
-        return g_state.runtime.telemetrySource == UiTelemetrySource::UsbBridge ||
-               g_state.runtime.usbBridgeConnected ||
-               g_state.runtime.wifiSuppressed ||
-               g_state.runtime.bleSuppressed;
+        return g_state.runtime.simTransportMode == UiSimTransportMode::UsbOnly;
+    }
+
+    bool network_transport_mode_selected()
+    {
+        return g_state.runtime.simTransportMode == UiSimTransportMode::NetworkOnly;
+    }
+
+    bool auto_transport_mode_selected()
+    {
+        return g_state.runtime.simTransportMode == UiSimTransportMode::Auto;
+    }
+
+    bool usb_transport_active()
+    {
+        return usb_transport_mode_selected() ||
+               (auto_transport_mode_selected() && g_state.runtime.telemetrySource == UiTelemetrySource::UsbBridge);
+    }
+
+    bool network_transport_active()
+    {
+        return network_transport_mode_selected() ||
+               (auto_transport_mode_selected() && g_state.runtime.telemetrySource == UiTelemetrySource::SimHubNetwork);
+    }
+
+    bool usb_bridge_web_selected()
+    {
+        return usb_transport_mode_selected() || g_state.runtime.telemetrySource == UiTelemetrySource::UsbBridge;
+    }
+
+    std::string usb_state_text(bool autoMode)
+    {
+        const char *prefix = autoMode ? "Auto: " : "";
+        switch (g_state.runtime.usbState)
+        {
+        case UiUsbState::Live:
+            return std::string(prefix) + "USB live";
+        case UiUsbState::WaitingForBridge:
+            return std::string(prefix) + "USB wartet auf Bridge";
+        case UiUsbState::WaitingForData:
+            return std::string(prefix) + "USB wartet auf Daten";
+        case UiUsbState::Error:
+            return std::string(prefix) + "USB Fehler";
+        case UiUsbState::Disconnected:
+            return std::string(prefix) + "USB getrennt";
+        case UiUsbState::Disabled:
+        default:
+            return std::string(prefix) + "USB aus";
+        }
+    }
+
+    std::string simhub_state_text(bool autoMode)
+    {
+        switch (g_state.runtime.simHubState)
+        {
+        case UiSimHubState::Live:
+            if (autoMode && g_state.runtime.telemetryUsingFallback)
+            {
+                return "Auto: Netzwerk Fallback";
+            }
+            return autoMode ? "Auto: Netzwerk live" : "Netzwerk live";
+        case UiSimHubState::WaitingForHost:
+            return autoMode ? "Auto: Host fehlt" : "Host fehlt";
+        case UiSimHubState::WaitingForNetwork:
+            return autoMode ? "Auto: WLAN fehlt" : "WLAN fehlt";
+        case UiSimHubState::WaitingForData:
+            return autoMode ? "Auto: Netzwerk wartet" : "Netzwerk wartet";
+        case UiSimHubState::Error:
+            return autoMode ? "Auto: Netzwerk Fehler" : "Netzwerk Fehler";
+        case UiSimHubState::Disabled:
+        default:
+            return autoMode ? "Auto: SimHub aus" : "Netzwerk aus";
+        }
     }
 
     void set_label_text(lv_obj_t *label, const std::string &text)
@@ -239,32 +308,35 @@ namespace
 
     std::string status_chip_text()
     {
-        if (usb_mode_active())
+        if (usb_transport_mode_selected())
         {
-            switch (g_state.runtime.usbState)
-            {
-            case UiUsbState::Live:
-                return "USB Sim live";
-            case UiUsbState::WaitingForBridge:
-                return "USB wartet auf Bridge";
-            case UiUsbState::WaitingForData:
-                return "USB wartet auf Daten";
-            case UiUsbState::Error:
-                return "USB Fehler";
-            case UiUsbState::Disconnected:
-                return "USB getrennt";
-            case UiUsbState::Disabled:
-            default:
-                return "USB aus";
-            }
+            return usb_state_text(false);
+        }
+
+        if (network_transport_mode_selected())
+        {
+            return simhub_state_text(false);
+        }
+
+        if (g_state.runtime.telemetrySource == UiTelemetrySource::UsbBridge ||
+            g_state.runtime.usbConnected ||
+            g_state.runtime.usbBridgeConnected)
+        {
+            return usb_state_text(true);
+        }
+
+        if (g_state.runtime.telemetrySource == UiTelemetrySource::SimHubNetwork || g_state.runtime.simHubConfigured)
+        {
+            return simhub_state_text(true);
         }
 
         switch (g_state.runtime.telemetrySource)
         {
-        case UiTelemetrySource::SimHubNetwork:
-            return g_state.runtime.telemetryStale ? "SimHub wartet" : "SimHub live";
         case UiTelemetrySource::Esp32Obd:
-            return g_state.runtime.bleConnected ? "OBD live" : (g_state.runtime.bleConnecting ? "OBD verbindet" : "OBD bereit");
+            return g_state.runtime.telemetryUsingFallback ? "Auto: OBD Fallback"
+                                                          : (g_state.runtime.bleConnected ? "OBD live" : (g_state.runtime.bleConnecting ? "OBD verbindet" : "OBD bereit"));
+        case UiTelemetrySource::SimHubNetwork:
+            return simhub_state_text(true);
         case UiTelemetrySource::Simulator:
             return "Simulator";
         case UiTelemetrySource::UsbBridge:
@@ -278,9 +350,36 @@ namespace
         std::string meta = "Quelle: ";
         meta += telemetry_preference_text(g_state.runtime.settings.telemetryPreference);
         meta += "  |  ";
-        if (usb_mode_active())
+        if (usb_transport_mode_selected())
         {
-            meta += g_state.runtime.usbBridgeConnected ? "PC verbunden" : "PC gesucht";
+            meta += "USB only";
+        }
+        else if (network_transport_mode_selected())
+        {
+            meta += "Network only";
+        }
+        else if (g_state.runtime.telemetryUsingFallback)
+        {
+            if (g_state.runtime.telemetrySource == UiTelemetrySource::SimHubNetwork)
+            {
+                meta += "Netzwerk-Fallback";
+            }
+            else if (g_state.runtime.telemetrySource == UiTelemetrySource::Esp32Obd)
+            {
+                meta += "OBD-Fallback";
+            }
+            else
+            {
+                meta += "USB aktiv";
+            }
+        }
+        else if (g_state.runtime.telemetrySource == UiTelemetrySource::UsbBridge)
+        {
+            meta += "USB aktiv";
+        }
+        else if (g_state.runtime.telemetrySource == UiTelemetrySource::SimHubNetwork)
+        {
+            meta += "Netzwerk aktiv";
         }
         else if (g_state.runtime.staConnected)
         {
@@ -299,7 +398,7 @@ namespace
 
     std::string secondary_status_text()
     {
-        if (usb_mode_active())
+        if (usb_transport_active())
         {
             if (!g_state.runtime.usbError.empty())
             {
@@ -310,6 +409,27 @@ namespace
                 return g_state.runtime.usbHost.empty() ? "USB Bridge verbunden" : ("PC: " + g_state.runtime.usbHost);
             }
             return "USB Bridge starten, dann kommt SimHub direkt vom PC.";
+        }
+
+        if (network_transport_active() || (auto_transport_mode_selected() && g_state.runtime.simHubConfigured))
+        {
+            switch (g_state.runtime.simHubState)
+            {
+            case UiSimHubState::Live:
+                return g_state.runtime.simHubEndpoint.empty() ? "SimHub direkt ueber Netzwerk aktiv"
+                                                              : ("SimHub: " + g_state.runtime.simHubEndpoint);
+            case UiSimHubState::WaitingForHost:
+                return "SimHub Host im Web setzen.";
+            case UiSimHubState::WaitingForNetwork:
+                return "WLAN verbinden oder AP pruefen.";
+            case UiSimHubState::WaitingForData:
+                return "SimHub erreichbar, warte auf laufende Session.";
+            case UiSimHubState::Error:
+                return "Netzwerkpfad fehlgeschlagen, SimHub nicht erreichbar.";
+            case UiSimHubState::Disabled:
+            default:
+                break;
+            }
         }
 
         if (!g_state.runtime.ip.empty())
@@ -368,7 +488,7 @@ namespace
     std::string build_web_url(WebTarget target)
     {
         std::string base;
-        if (usb_mode_active())
+        if (usb_bridge_web_selected())
         {
             if (!g_state.runtime.usbHost.empty())
             {
@@ -608,12 +728,23 @@ namespace
 
     void update_status_icons()
     {
-        if (usb_mode_active())
+        if (usb_transport_active())
         {
             lv_label_set_text(g_ui.iconPrimary, "USB");
             lv_obj_set_style_text_color(g_ui.iconPrimary,
                                         g_state.runtime.usbState == UiUsbState::Live ? color_lime :
                                         (g_state.runtime.usbState == UiUsbState::Error ? color_error : color_warn),
+                                        0);
+            lv_obj_add_flag(g_ui.iconSecondary, LV_OBJ_FLAG_HIDDEN);
+            return;
+        }
+
+        if (network_transport_active())
+        {
+            lv_label_set_text(g_ui.iconPrimary, LV_SYMBOL_WIFI);
+            lv_obj_set_style_text_color(g_ui.iconPrimary,
+                                        g_state.runtime.simHubState == UiSimHubState::Live ? color_lime :
+                                        (g_state.runtime.simHubState == UiSimHubState::Error ? color_error : color_warn),
                                         0);
             lv_obj_add_flag(g_ui.iconSecondary, LV_OBJ_FLAG_HIDDEN);
             return;
@@ -725,7 +856,7 @@ namespace
             lv_qrcode_update(g_ui.webQr, url.c_str(), static_cast<uint32_t>(url.size()));
         }
 #endif
-        set_label_text(g_ui.webHint, usb_mode_active() ? "Im USB Modus ist die gleiche Seite auch lokal auf dem PC offen." : "Im WLAN oder AP direkt mit dem Handy aufrufen.");
+        set_label_text(g_ui.webHint, usb_bridge_web_selected() ? "Im USB-only oder aktivem USB-Pfad ist die gleiche Seite auch lokal auf dem PC offen." : "Im WLAN oder AP direkt mit dem Handy aufrufen.");
     }
 
     void update_logo_overlay()

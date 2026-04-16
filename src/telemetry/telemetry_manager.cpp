@@ -12,7 +12,16 @@ namespace
 {
     constexpr unsigned long OBD_FRESH_TIMEOUT_MS = 1200;
     constexpr unsigned long SIMHUB_FRESH_TIMEOUT_MS = 2000;
-    constexpr unsigned long TELEMETRY_SOURCE_HOLD_MS = 8000;
+    // When Auto-mode loses its active source, stick with it briefly so a short
+    // lull does not rip the LEDs dark. Shortened from 8000 ms — at the old
+    // value the stale values could linger for many seconds after the game
+    // closed, which looked like "LEDs freeze on last value".
+    constexpr unsigned long TELEMETRY_SOURCE_HOLD_MS = 500;
+    // Once no source is active, RPM decays linearly toward zero at this rate
+    // so the LED bar smoothly empties instead of cutting from a stale value
+    // straight to black.
+    constexpr float RPM_DECAY_PER_MS = 20.0f; // 20000 RPM / 1000 ms → full bar empties in ~1s
+    unsigned long g_lastDecayMs = 0;
 
     bool isObdFresh(unsigned long nowMs)
     {
@@ -21,22 +30,57 @@ namespace
 
     bool isSimHubFresh(unsigned long nowMs)
     {
-        return g_simHubEverReceived && g_lastSimHubTelemetryMs > 0 && (nowMs - g_lastSimHubTelemetryMs) <= SIMHUB_FRESH_TIMEOUT_MS;
+        return g_lastSimHubNetworkTelemetryMs > 0 && (nowMs - g_lastSimHubNetworkTelemetryMs) <= SIMHUB_FRESH_TIMEOUT_MS;
+    }
+
+    ActiveTelemetrySource selectSimRuntimeSource(SimRuntimeTransportMode mode, bool usbFresh, bool simHubFresh)
+    {
+        // Transport policy is evaluated independently from overall OBD fallback.
+        switch (mode)
+        {
+        case SimRuntimeTransportMode::UsbOnly:
+            return usbFresh ? ActiveTelemetrySource::UsbSim : ActiveTelemetrySource::None;
+        case SimRuntimeTransportMode::NetworkOnly:
+            return simHubFresh ? ActiveTelemetrySource::SimHubNetwork : ActiveTelemetrySource::None;
+        case SimRuntimeTransportMode::Auto:
+            if (usbFresh)
+            {
+                return ActiveTelemetrySource::UsbSim;
+            }
+            if (simHubFresh)
+            {
+                return ActiveTelemetrySource::SimHubNetwork;
+            }
+            return ActiveTelemetrySource::None;
+        case SimRuntimeTransportMode::Disabled:
+        default:
+            return ActiveTelemetrySource::None;
+        }
     }
 
     void applyActiveTelemetry(ActiveTelemetrySource source, unsigned long nowMs)
     {
         switch (source)
         {
-        case ActiveTelemetrySource::SimHubNetwork:
         case ActiveTelemetrySource::UsbSim:
+            g_currentRpm = g_usbSimCurrentRpm;
+            g_maxSeenRpm = max(g_usbSimMaxSeenRpm, g_usbSimCurrentRpm);
+            g_vehicleSpeedKmh = g_usbSimVehicleSpeedKmh;
+            g_estimatedGear = g_usbSimGear;
+            g_currentThrottle = g_usbSimThrottle;
+            g_pitLimiterActive = g_usbSimPitLimiterActive;
+            g_lastObdMs = g_lastUsbTelemetryMs;
+            g_ignitionOn = true;
+            g_engineRunning = g_currentRpm > ENGINE_START_RPM_THRESHOLD;
+            break;
+        case ActiveTelemetrySource::SimHubNetwork:
             g_currentRpm = g_simHubCurrentRpm;
             g_maxSeenRpm = max(g_simHubMaxSeenRpm, g_simHubCurrentRpm);
             g_vehicleSpeedKmh = g_simHubVehicleSpeedKmh;
             g_estimatedGear = g_simHubGear;
             g_currentThrottle = g_simHubThrottle;
             g_pitLimiterActive = g_simHubPitLimiterActive;
-            g_lastObdMs = g_lastSimHubTelemetryMs;
+            g_lastObdMs = g_lastSimHubNetworkTelemetryMs;
             g_ignitionOn = true;
             g_engineRunning = g_currentRpm > ENGINE_START_RPM_THRESHOLD;
             break;
@@ -53,7 +97,19 @@ namespace
             break;
         case ActiveTelemetrySource::None:
         default:
-            g_currentRpm = 0;
+        {
+            // Instead of slamming to zero (which used to cause a "freeze then
+            // disappear" visual when the 8s hold expired), ramp RPM down at a
+            // constant rate. Everything else snaps to zero immediately because
+            // they have no natural decay meaning (gear, throttle, speed).
+            unsigned long dtMs = (g_lastDecayMs == 0) ? 0 : (nowMs - g_lastDecayMs);
+            // Clamp dt so an overflowed/first-call gap cannot wipe the value.
+            if (dtMs > 200)
+            {
+                dtMs = 200;
+            }
+            const int decay = static_cast<int>(RPM_DECAY_PER_MS * static_cast<float>(dtMs));
+            g_currentRpm = (decay >= g_currentRpm) ? 0 : (g_currentRpm - decay);
             g_vehicleSpeedKmh = 0;
             g_estimatedGear = 0;
             g_currentThrottle = 0.0f;
@@ -65,6 +121,9 @@ namespace
             }
             break;
         }
+        }
+        // Remember the last apply tick so decay math can use elapsed time.
+        g_lastDecayMs = nowMs;
     }
 
     unsigned long lastSampleForSource(ActiveTelemetrySource source)
@@ -74,8 +133,9 @@ namespace
         case ActiveTelemetrySource::Obd:
             return g_lastObdTelemetryMs;
         case ActiveTelemetrySource::SimHubNetwork:
+            return g_lastSimHubNetworkTelemetryMs;
         case ActiveTelemetrySource::UsbSim:
-            return g_lastSimHubTelemetryMs;
+            return g_lastUsbTelemetryMs;
         case ActiveTelemetrySource::None:
         default:
             return 0;
@@ -97,19 +157,6 @@ namespace
             return "None";
         }
     }
-
-    bool preferUsbTransport()
-    {
-        if (cfg.simTransportPreference == SimTransportPreference::UsbSerial)
-        {
-            return true;
-        }
-        if (cfg.simTransportPreference == SimTransportPreference::Network)
-        {
-            return false;
-        }
-        return usbSimBridgeOnline();
-    }
 }
 
 TelemetryPreference nextTelemetryPreference(TelemetryPreference current)
@@ -126,33 +173,94 @@ TelemetryPreference nextTelemetryPreference(TelemetryPreference current)
     }
 }
 
-ActiveTelemetrySource selectTelemetryRuntimeSource(TelemetryPreference preference, bool usbFresh, bool simHubFresh, bool obdFresh)
+SimRuntimeTransportMode resolveSimRuntimeTransportMode(TelemetryPreference preference, SimTransportPreference transportPreference)
 {
+    if (preference == TelemetryPreference::Obd)
+    {
+        return SimRuntimeTransportMode::Disabled;
+    }
+
+    switch (transportPreference)
+    {
+    case SimTransportPreference::UsbSerial:
+        return SimRuntimeTransportMode::UsbOnly;
+    case SimTransportPreference::Network:
+        return SimRuntimeTransportMode::NetworkOnly;
+    case SimTransportPreference::Auto:
+    default:
+        return SimRuntimeTransportMode::Auto;
+    }
+}
+
+const char *simRuntimeTransportModeName(SimRuntimeTransportMode mode)
+{
+    switch (mode)
+    {
+    case SimRuntimeTransportMode::UsbOnly:
+        return "USB_ONLY";
+    case SimRuntimeTransportMode::NetworkOnly:
+        return "NETWORK_ONLY";
+    case SimRuntimeTransportMode::Auto:
+        return "AUTO";
+    case SimRuntimeTransportMode::Disabled:
+    default:
+        return "DISABLED";
+    }
+}
+
+bool telemetryAllowsUsbSim(TelemetryPreference preference, SimTransportPreference transportPreference)
+{
+    const SimRuntimeTransportMode mode = resolveSimRuntimeTransportMode(preference, transportPreference);
+    return mode == SimRuntimeTransportMode::Auto || mode == SimRuntimeTransportMode::UsbOnly;
+}
+
+bool telemetryAllowsNetworkSim(TelemetryPreference preference, SimTransportPreference transportPreference)
+{
+    const SimRuntimeTransportMode mode = resolveSimRuntimeTransportMode(preference, transportPreference);
+    return mode == SimRuntimeTransportMode::Auto || mode == SimRuntimeTransportMode::NetworkOnly;
+}
+
+bool telemetrySupportsTransportFallback(TelemetryPreference preference, SimTransportPreference transportPreference)
+{
+    return resolveSimRuntimeTransportMode(preference, transportPreference) == SimRuntimeTransportMode::Auto;
+}
+
+bool telemetrySourceIsFallback(ActiveTelemetrySource source, TelemetryPreference preference, SimTransportPreference transportPreference)
+{
+    if (source == ActiveTelemetrySource::None)
+    {
+        return false;
+    }
+
+    if (telemetrySupportsTransportFallback(preference, transportPreference) &&
+        source == ActiveTelemetrySource::SimHubNetwork)
+    {
+        return true;
+    }
+
+    return preference == TelemetryPreference::Auto && source == ActiveTelemetrySource::Obd;
+}
+
+ActiveTelemetrySource selectTelemetryRuntimeSource(TelemetryPreference preference,
+                                                   SimTransportPreference transportPreference,
+                                                   bool usbFresh,
+                                                   bool simHubFresh,
+                                                   bool obdFresh)
+{
+    const ActiveTelemetrySource simSource =
+        selectSimRuntimeSource(resolveSimRuntimeTransportMode(preference, transportPreference), usbFresh, simHubFresh);
+
     switch (preference)
     {
     case TelemetryPreference::Obd:
         return obdFresh ? ActiveTelemetrySource::Obd : ActiveTelemetrySource::None;
     case TelemetryPreference::SimHub:
-        if (preferUsbTransport())
-        {
-            return usbFresh ? ActiveTelemetrySource::UsbSim : ActiveTelemetrySource::None;
-        }
-        return simHubFresh ? ActiveTelemetrySource::SimHubNetwork : ActiveTelemetrySource::None;
+        return simSource;
     case TelemetryPreference::Auto:
     default:
-        if (usbFresh)
-        {
-            return ActiveTelemetrySource::UsbSim;
-        }
-        if (simHubFresh)
-        {
-            return ActiveTelemetrySource::SimHubNetwork;
-        }
-        if (obdFresh)
-        {
-            return ActiveTelemetrySource::Obd;
-        }
-        return ActiveTelemetrySource::None;
+        return simSource != ActiveTelemetrySource::None
+                   ? simSource
+                   : (obdFresh ? ActiveTelemetrySource::Obd : ActiveTelemetrySource::None);
     }
 }
 
@@ -160,8 +268,8 @@ void initTelemetry()
 {
     initUsbSimBridge();
     initSimHubClient();
-    simHubClientUpdateConfig();
     usbSimBridgeUpdateConfig();
+    simHubClientUpdateConfig();
 }
 
 void telemetryLoop()
@@ -170,9 +278,16 @@ void telemetryLoop()
     simHubClientUpdateConfig();
 
     const unsigned long nowMs = millis();
-    ActiveTelemetrySource nextSource = selectTelemetryRuntimeSource(cfg.telemetryPreference, usbSimTelemetryFresh(nowMs), isSimHubFresh(nowMs), isObdFresh(nowMs));
+    const bool usbFresh = usbSimTelemetryFresh(nowMs);
+    const bool simHubFresh = isSimHubFresh(nowMs);
+    const bool obdFresh = isObdFresh(nowMs);
+    ActiveTelemetrySource nextSource =
+        selectTelemetryRuntimeSource(cfg.telemetryPreference, cfg.simTransportPreference, usbFresh, simHubFresh, obdFresh);
 
-    if (nextSource == ActiveTelemetrySource::None && g_activeTelemetrySource != ActiveTelemetrySource::None)
+    // The hold window is only for Auto transport so short gaps do not flap between USB and network.
+    if (telemetrySupportsTransportFallback(cfg.telemetryPreference, cfg.simTransportPreference) &&
+        nextSource == ActiveTelemetrySource::None &&
+        g_activeTelemetrySource != ActiveTelemetrySource::None)
     {
         const unsigned long lastSampleMs = lastSampleForSource(g_activeTelemetrySource);
         if (lastSampleMs > 0 && (nowMs - lastSampleMs) <= TELEMETRY_SOURCE_HOLD_MS)
@@ -183,7 +298,14 @@ void telemetryLoop()
 
     if (nextSource != g_activeTelemetrySource)
     {
-        LOG_INFO("TELEMETRY", "SOURCE_SWITCH", String("active=") + sourceName(nextSource));
+        const SimRuntimeTransportMode mode = resolveSimRuntimeTransportMode(cfg.telemetryPreference, cfg.simTransportPreference);
+        LOG_INFO("TELEMETRY", "SOURCE_SWITCH",
+                 String("from=") + sourceName(g_activeTelemetrySource) +
+                     " to=" + sourceName(nextSource) +
+                     " mode=" + simRuntimeTransportModeName(mode) +
+                     " usbFresh=" + (usbFresh ? "1" : "0") +
+                     " netFresh=" + (simHubFresh ? "1" : "0") +
+                     " obdFresh=" + (obdFresh ? "1" : "0"));
         g_activeTelemetrySource = nextSource;
     }
 

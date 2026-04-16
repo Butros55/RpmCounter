@@ -4,6 +4,7 @@
 #include "core/state.h"
 #include "bluetooth/ble_obd.h"
 #include "web/web_ui.h"
+#include "hardware/ambient_light.h"
 #include "hardware/led_bar.h"
 #include "hardware/logo_anim.h"
 #include "telemetry/telemetry_manager.h"
@@ -18,6 +19,11 @@
 void setup()
 {
     Serial.begin(115200);
+    // Bump the CDC RX buffer well above the default (256 B). The Python bridge
+    // can emit a TELEMETRY frame every ~16 ms (~150 B each); if the main loop
+    // is briefly busy with WiFi/BLE work, several frames can queue up, and
+    // the default buffer would drop bytes which breaks line framing.
+    Serial.setRxBufferSize(2048);
     delay(100); // Wait for serial to stabilize
 
     Serial.println();
@@ -35,6 +41,10 @@ void setup()
 
     Serial.println("[BOOT] Initializing LEDs...");
     initLeds();
+
+    Serial.println("[BOOT] Initializing ambient light sensor...");
+    initAmbientLight();
+    ledBarRefreshBrightness();
 
     Serial.println("[BOOT] Setting up WiFi...");
     setupWifiFromConfig(cfg);
@@ -57,6 +67,18 @@ void setup()
     displayInit();
 #endif
 
+    // --- Spawn dedicated worker tasks --------------------------------------
+    // The USB serial bridge runs on Core 0 at priority 3 so incoming sim data
+    // is drained every ~2 ms regardless of what the main loop is doing. The
+    // LED renderer runs on Core 1 at priority 2 and ticks at 100 Hz so shift
+    // lights react to new RPM values within one frame, independent of BLE,
+    // HTTP or display work.
+    Serial.println("[BOOT] Starting USB bridge task...");
+    startUsbSimBridgeTask();
+
+    Serial.println("[BOOT] Starting LED bar task...");
+    startLedBarTask();
+
     Serial.println();
     Serial.println("============================================");
     Serial.println("          BOOT COMPLETE - READY");
@@ -69,11 +91,16 @@ void loop()
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
     display_s3_loop();
 #endif
+    // usbSimBridgeLoop() is now driven by its own task; the call is kept as a
+    // safety net and is a no-op once the task is running.
     usbSimBridgeLoop();
     webUiLoop();
     wifiLoop();
     telemetryLoop();
     bleObdLoop();
+    ambientLightLoop();
+    // ledBarLoop() is likewise owned by the dedicated LED task — the call
+    // here is a no-op while the task is running.
     ledBarLoop();
     logoAnimLoop();
 }

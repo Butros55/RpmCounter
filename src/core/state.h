@@ -25,6 +25,52 @@ struct BleDeviceInfo
     String address;
 };
 
+struct UsbTelemetryDebugStats
+{
+    uint32_t framesReceived = 0;
+    uint32_t parseErrors = 0;
+    uint32_t glitchRejects = 0;
+    uint32_t gapEvents = 0;
+    uint32_t seqGapEvents = 0;
+    uint32_t seqGapFrames = 0;
+    uint32_t seqDuplicates = 0;
+    uint32_t lineOverflows = 0;
+    unsigned long lastFrameMs = 0;
+    unsigned long lastGapMs = 0;
+    unsigned long maxGapMs = 0;
+    uint32_t lastSeq = 0;
+    int lastRawRpm = 0;
+    int lastAcceptedRpm = 0;
+};
+
+struct SimHubDebugStats
+{
+    uint32_t pollSuccessCount = 0;
+    uint32_t pollErrorCount = 0;
+    uint32_t suppressedWhileUsbCount = 0;
+    unsigned long lastSuccessMs = 0;
+    unsigned long lastErrorMs = 0;
+    String lastError;
+};
+
+struct LedRenderDebugStats
+{
+    uint32_t renderCalls = 0;
+    uint32_t frameShowCount = 0;
+    uint32_t frameSkipCount = 0;
+    uint32_t brightnessUpdateCount = 0;
+    int lastRawRpm = 0;
+    int lastFilteredRpm = 0;
+    int lastStartRpm = 0;
+    int lastDisplayedLeds = 0;
+    uint8_t lastAppliedBrightness = 0;
+    bool lastShiftBlink = false;
+    bool pitLimiterOnly = false;
+    uint8_t lastRenderMode = 0;
+    uint32_t filterAdjustCount = 0;
+    unsigned long lastShowMs = 0;
+};
+
 enum class ActiveTelemetrySource : uint8_t
 {
     None = 0,
@@ -83,10 +129,18 @@ extern int g_simHubGear;
 extern float g_simHubThrottle;
 extern bool g_simHubPitLimiterActive;
 extern unsigned long g_lastSimHubTelemetryMs;
+extern unsigned long g_lastSimHubNetworkTelemetryMs;
 extern bool g_simHubEverReceived;
 extern bool g_simHubReachable;
 extern bool g_simHubWaitingForData;
 extern SimHubConnectionState g_simHubConnectionState;
+
+extern int g_usbSimCurrentRpm;
+extern int g_usbSimMaxSeenRpm;
+extern int g_usbSimVehicleSpeedKmh;
+extern int g_usbSimGear;
+extern float g_usbSimThrottle;
+extern bool g_usbSimPitLimiterActive;
 
 extern bool g_usbSerialConnected;
 extern bool g_usbBridgeConnected;
@@ -149,6 +203,10 @@ extern std::vector<BleDeviceInfo> g_bleScanResults;
 extern bool g_animationActive;
 extern bool g_logoPlayedThisCycle;
 extern bool g_leavingPlayedThisCycle;
+
+extern UsbTelemetryDebugStats g_usbTelemetryDebug;
+extern SimHubDebugStats g_simHubDebug;
+extern LedRenderDebugStats g_ledRenderDebug;
 
 extern String g_lastTxInfo;
 extern String g_lastObdInfo;

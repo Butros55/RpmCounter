@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, jsonify, redirect, render_template_string, request
+from flask import Flask, Response, jsonify, redirect, render_template_string, request
 import serial
 from serial import SerialException
 from serial.tools import list_ports
@@ -47,6 +47,9 @@ class EspState:
     obd_allowed: bool = True
     telemetry_preference: str = "AUTO"
     sim_transport: str = "AUTO"
+    sim_transport_mode: str = "AUTO"
+    simhub_state: str = "Deaktiviert"
+    telemetry_fallback: bool = False
     display_focus: str = "RPM"
     rpm: int = 0
     speed: int = 0
@@ -76,16 +79,30 @@ class UsbSimBridge:
         self.rx_buffer = ""
         self.rpc_counter = 0
         self.rpc_waiters: dict[int, queue.Queue[dict[str, Any]]] = {}
+        self.rpc_commands: dict[int, str] = {}
         self.last_hello_monotonic = 0.0
         self.last_status_ok_monotonic = 0.0
         self.serial_open_monotonic = 0.0
         self.simhub = SimHubState()
         self.esp = EspState()
         self.config_cache: dict[str, Any] = {}
+        self.telemetry_seq = 0
+        self.telemetry_tx_count = 0
+        self.telemetry_tx_error_count = 0
+        self.last_telemetry_tx_monotonic = 0.0
+        self.last_telemetry_gap_ms = 0.0
+        self.max_telemetry_gap_ms = 0.0
+        self.status_rpc_count = 0
+        self.status_rpc_error_count = 0
+
+    @staticmethod
+    def _timestamp() -> str:
+        now = time.time()
+        return time.strftime("%H:%M:%S", time.localtime(now)) + f".{int((now % 1.0) * 1000):03d}"
 
     def log(self, text: str) -> None:
         if self.debug:
-            print(f"[USB-BRIDGE] {text}", flush=True)
+            print(f"[USB-BRIDGE {self._timestamp()}] {text}", flush=True)
 
     @staticmethod
     def _normalize_throttle(value: float) -> float:
@@ -106,6 +123,36 @@ class UsbSimBridge:
     def _bridge_recently_seen(self, timeout: float = 8.0) -> bool:
         latest = max(self.last_hello_monotonic, self.last_status_ok_monotonic)
         return latest > 0.0 and (time.monotonic() - latest) <= timeout
+
+    def _log_esp_status_change(self, previous: EspState, current: EspState) -> None:
+        changes: list[str] = []
+        if previous.serial_connected != current.serial_connected:
+            changes.append(f"serial={current.serial_connected}")
+        if previous.bridge_connected != current.bridge_connected:
+            changes.append(f"bridge={current.bridge_connected}")
+        if previous.usb_state != current.usb_state:
+            changes.append(f"usb={current.usb_state}")
+        if previous.active_telemetry != current.active_telemetry:
+            changes.append(f"source={current.active_telemetry}")
+        if previous.sim_transport_mode != current.sim_transport_mode:
+            changes.append(f"transport={current.sim_transport_mode}")
+        if previous.telemetry_fallback != current.telemetry_fallback:
+            changes.append(f"fallback={current.telemetry_fallback}")
+        if previous.error != current.error and current.error:
+            changes.append(f"error={current.error}")
+        if changes:
+            self.log("status change: " + ", ".join(changes))
+
+    def _log_simhub_state_change(self, previous: SimHubState, current: SimHubState) -> None:
+        changes: list[str] = []
+        if previous.reachable != current.reachable:
+            changes.append(f"reachable={current.reachable}")
+        if previous.live != current.live:
+            changes.append(f"live={current.live}")
+        if previous.error != current.error and current.error:
+            changes.append(f"error={current.error}")
+        if changes:
+            self.log("simhub change: " + ", ".join(changes))
 
     def start(self) -> None:
         threading.Thread(target=self._serial_loop, name="usb-serial", daemon=True).start()
@@ -157,6 +204,7 @@ class UsbSimBridge:
                 self.esp.port = ""
                 self.esp.serial_connected = False
                 self.esp.bridge_connected = False
+                self.esp.usb_state = "USB getrennt"
             return
         try:
             ser = serial.Serial(port=port, baudrate=self.baudrate, timeout=0.05, write_timeout=0.2)
@@ -177,6 +225,7 @@ class UsbSimBridge:
                 self.esp.port = port
                 self.esp.serial_connected = False
                 self.esp.error = self._friendly_serial_error(exc)
+            self.log(f"serial open failed on {port}: {self._friendly_serial_error(exc)}")
 
     def _close_serial(self, reason: str) -> None:
         if self.serial:
@@ -193,6 +242,7 @@ class UsbSimBridge:
         self.last_hello_monotonic = 0.0
         self.last_status_ok_monotonic = 0.0
         self.serial_open_monotonic = 0.0
+        self.log(f"serial closed: {reason}")
 
     def _send_line(self, line: str) -> None:
         if not self.serial:
@@ -207,16 +257,21 @@ class UsbSimBridge:
             tail = line[len("USBSIM RES "):]
             req_text, _, payload = tail.partition(" ")
             try:
-                waiter = self.rpc_waiters.pop(int(req_text), None)
+                request_id = int(req_text)
+                waiter = self.rpc_waiters.pop(request_id, None)
                 data = json.loads(payload)
             except (ValueError, json.JSONDecodeError):
                 return
+            command = self.rpc_commands.pop(request_id, "")
             if waiter:
                 waiter.put(data)
+            if command == "STATUS":
+                self.log(f"rx STATUS id={req_text}")
             return
         if line.startswith("USBSIM HELLO ") or line.startswith("USBSIM PONG "):
             payload = line.split(" ", 2)[2] if line.count(" ") >= 2 else ""
             fields = urllib.parse.parse_qs(payload, keep_blank_values=True)
+            command = "HELLO" if line.startswith("USBSIM HELLO ") else "PONG"
             with self.state_lock:
                 self.last_hello_monotonic = time.monotonic()
                 self.esp.bridge_connected = True
@@ -226,6 +281,10 @@ class UsbSimBridge:
                     self.esp.usb_state = fields["state"][0]
                 if "device" in fields and fields["device"]:
                     self.esp.usb_host = fields["device"][0]
+            self.log(f"rx {command} payload={payload}")
+            return
+        if line.startswith("USBSIM TELEMETRY "):
+            self.log(f"rx TELEMETRY payload={line[len('USBSIM TELEMETRY '):]}")
             return
         if not line.startswith("USBSIM "):
             self.log(f"log: {line}")
@@ -238,7 +297,9 @@ class UsbSimBridge:
             request_id = self.rpc_counter
             waiter: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)
             self.rpc_waiters[request_id] = waiter
+            self.rpc_commands[request_id] = command.split(" ", 1)[0]
             try:
+                self.log(f"tx RPC id={request_id} cmd={command}")
                 self._send_line(f"USBSIM RPC {request_id} {command}")
                 return waiter.get(timeout=timeout)
             except queue.Empty as exc:
@@ -249,6 +310,7 @@ class UsbSimBridge:
                 raise RuntimeError(message) from exc
             finally:
                 self.rpc_waiters.pop(request_id, None)
+                self.rpc_commands.pop(request_id, None)
 
     def _serial_loop(self) -> None:
         next_ping = 0.0
@@ -269,11 +331,19 @@ class UsbSimBridge:
                 if now >= next_ping:
                     ping = urllib.parse.urlencode({"host": self.web_public_host, "device": self.hostname, "web": 1})
                     self._send_line(f"USBSIM PING {ping}")
-                    next_ping = now + 0.35
-                if now >= next_tx and not self.rpc_lock.locked():
+                    self.log(f"tx PING payload={ping}")
+                    next_ping = now + 0.2
+                if now >= next_tx:
                     simhub = self.get_simhub()
                     if simhub.live:
+                        if self.last_telemetry_tx_monotonic > 0.0:
+                            gap_ms = max(0.0, (now - self.last_telemetry_tx_monotonic) * 1000.0)
+                            self.last_telemetry_gap_ms = gap_ms
+                            self.max_telemetry_gap_ms = max(self.max_telemetry_gap_ms, gap_ms)
+                        self.last_telemetry_tx_monotonic = now
+                        self.telemetry_seq += 1
                         payload = urllib.parse.urlencode({
+                            "seq": self.telemetry_seq,
                             "rpm": simhub.rpm,
                             "speed": simhub.speed,
                             "gear": simhub.gear,
@@ -282,9 +352,12 @@ class UsbSimBridge:
                             "maxrpm": simhub.maxrpm,
                         })
                         self._send_line(f"USBSIM TELEMETRY {payload}")
+                        self.telemetry_tx_count += 1
+                        self.log(f"tx TELEMETRY payload={payload}")
                     next_tx = now + 0.016
                 time.sleep(0.01)
             except (SerialException, OSError) as exc:
+                self.telemetry_tx_error_count += 1
                 self.log(f"serial error: {exc}")
                 self._close_serial(self._friendly_serial_error(exc))
                 time.sleep(0.5)
@@ -329,14 +402,27 @@ class UsbSimBridge:
                         if raw in {"0", "false", "no", "off"}:
                             next_state.pit_limiter = False
                             break
-                    next_state.live = next_state.rpm > 0 or next_state.speed > 0 or next_state.gear > 0
+                    # Previously this gated "live" on rpm/speed/gear being > 0,
+                    # which flipped false whenever the car was stationary in
+                    # the pits (rpm=idle=maybe 0 for some games, speed=0,
+                    # gear=0). That made the ESP see the stream as "stale" and
+                    # flicker between Live and Error. If SimHub says the game
+                    # is running and NewData exists, trust it — the actual
+                    # values (0 or otherwise) are still forwarded faithfully.
+                    next_state.live = True
                     next_state.last_packet_ts = time.time()
+                    self.log(
+                        "rx TELEMETRY "
+                        f"rpm={next_state.rpm} speed={next_state.speed} gear={next_state.gear} throttle={next_state.throttle:.3f}"
+                    )
             except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
                 next_state.error = str(exc)
             with self.state_lock:
+                previous = SimHubState(**self.simhub.__dict__)
                 if next_state.last_packet_ts <= 0:
                     next_state.last_packet_ts = self.simhub.last_packet_ts
                 self.simhub = next_state
+            self._log_simhub_state_change(previous, next_state)
             time.sleep(0.025)
 
     def _status_loop(self) -> None:
@@ -352,7 +438,9 @@ class UsbSimBridge:
                     continue
 
                 status = self._rpc("STATUS", timeout=0.9)
+                self.status_rpc_count += 1
                 with self.state_lock:
+                    previous = EspState(**self.esp.__dict__)
                     self.last_status_ok_monotonic = now
                     self.esp.bridge_connected = True
                     self.esp.raw = status
@@ -363,6 +451,9 @@ class UsbSimBridge:
                     self.esp.obd_allowed = bool(status.get("obdAllowed", True))
                     self.esp.telemetry_preference = str(status.get("telemetryPreference", "AUTO"))
                     self.esp.sim_transport = str(status.get("simTransport", "AUTO"))
+                    self.esp.sim_transport_mode = str(status.get("simTransportMode", self.esp.sim_transport_mode or "AUTO"))
+                    self.esp.simhub_state = str(status.get("simHubState", self.esp.simhub_state or "Deaktiviert"))
+                    self.esp.telemetry_fallback = bool(status.get("telemetryFallback", False))
                     self.esp.display_focus = str(status.get("displayFocus", "RPM"))
                     self.esp.rpm = int(status.get("rpm", 0) or 0)
                     self.esp.speed = int(status.get("speed", 0) or 0)
@@ -371,18 +462,30 @@ class UsbSimBridge:
                     self.esp.pit_limiter = bool(status.get("pitLimiter", False))
                     self.esp.maxrpm = int(status.get("maxRpm", 0) or 0)
                     self.esp.error = str(status.get("usbError", "")) or self.esp.error
+                    current = EspState(**self.esp.__dict__)
+                self.log(
+                    "rx STATUS "
+                    f"usb={current.usb_state} source={current.active_telemetry} "
+                    f"transport={current.sim_transport_mode} fallback={current.telemetry_fallback}"
+                )
+                self._log_esp_status_change(previous, current)
                 if now >= next_config or not self.config_cache:
                     config = self._rpc("CONFIG_GET", timeout=1.5)
                     with self.state_lock:
                         self.config_cache = config
                     next_config = now + 8.0
             except RuntimeError as exc:
+                self.status_rpc_error_count += 1
                 with self.state_lock:
+                    previous = EspState(**self.esp.__dict__)
                     self.esp.bridge_connected = self._bridge_recently_seen()
                     if self.esp.bridge_connected and self.esp.usb_state in {"USB getrennt", "USB disconnected"}:
                         self.esp.usb_state = "Warte auf Status"
                     self.esp.error = str(exc)
-            time.sleep(0.25)
+                    current = EspState(**self.esp.__dict__)
+                self.log(f"status loop error: {exc}")
+                self._log_esp_status_change(previous, current)
+            time.sleep(0.5)
 
     def get_simhub(self) -> SimHubState:
         with self.state_lock:
@@ -391,6 +494,15 @@ class UsbSimBridge:
     def get_config(self) -> dict[str, Any]:
         with self.state_lock:
             return dict(self.config_cache)
+
+    def get_esp_web_base_url(self) -> str | None:
+        with self.state_lock:
+            raw = dict(self.esp.raw)
+
+        wifi_ip = str(raw.get("wifiIp", "") or "").strip()
+        if not wifi_ip or wifi_ip in {"0.0.0.0", "-", "Nicht verbunden"}:
+            return None
+        return f"http://{wifi_ip}"
 
     def default_config(self) -> dict[str, Any]:
         return {
@@ -450,6 +562,21 @@ class UsbSimBridge:
             "DISCONNECTED": "USB getrennt",
             "ERROR": "USB Fehler",
         }
+        transport_mode = (esp.sim_transport_mode or "AUTO").upper()
+        transport_labels = {
+            "AUTO": "Auto",
+            "USB_ONLY": "USB only",
+            "NETWORK_ONLY": "Network only",
+            "DISABLED": "Aus",
+        }
+        simhub_state_map = {
+            "LIVE": "Live",
+            "WAITING_DATA": "Warte auf Daten",
+            "WAITING_HOST": "Host fehlt",
+            "WAITING_NETWORK": "WLAN fehlt",
+            "ERROR": "Fehler",
+            "DISABLED": "Deaktiviert",
+        }
         usb_ready = esp.serial_connected and (esp.bridge_connected or bridge_recent)
         rpm = esp.rpm if usb_ready else simhub.rpm
         speed = esp.speed if usb_ready else simhub.speed
@@ -459,7 +586,31 @@ class UsbSimBridge:
         maxrpm = esp.maxrpm if usb_ready and esp.maxrpm > 0 else simhub.maxrpm
         shift_state = "SHIFT" if maxrpm > 0 and rpm >= max(maxrpm - 200, 1) else "Ready"
         usb_live = esp.usb_state.upper() == "LIVE" or esp.usb_state.lower() == "usb live"
-        simhub_live = simhub.live
+        usb_state_label = usb_state_labels.get(esp.usb_state.upper(), esp.usb_state)
+        simhub_state_label = simhub_state_map.get((esp.simhub_state or "").upper(), esp.simhub_state or ("Live" if simhub.live else ("Warte auf Daten" if simhub.reachable else "Nicht erreichbar")))
+        simhub_live = simhub.live or simhub_state_label == "Live"
+        if transport_mode == "USB_ONLY":
+            mode_summary = f"USB only: {usb_state_label or 'warte auf Bridge'}"
+        elif transport_mode == "NETWORK_ONLY":
+            mode_summary = f"Network only: {simhub_state_label or 'warte auf Netzwerk'}"
+        elif active_label == "USB Sim":
+            mode_summary = "Auto: USB aktiv"
+        elif active_label == "SimHub Netzwerk":
+            mode_summary = "Auto: Netzwerk Fallback" if esp.telemetry_fallback else "Auto: Netzwerk aktiv"
+        elif active_label == "OBD":
+            mode_summary = "Auto: OBD Fallback" if esp.telemetry_fallback else "OBD aktiv"
+        else:
+            mode_summary = "Auto: warte auf Quelle"
+        if transport_mode == "USB_ONLY":
+            wifi_summary = "USB-only pausiert WLAN"
+        else:
+            wifi_summary = "WLAN aktiv" if not esp.wifi_suspended else "WLAN pausiert"
+        if not esp.obd_allowed:
+            obd_summary = "Deaktiviert"
+        elif active_label == "OBD":
+            obd_summary = "Aktiv"
+        else:
+            obd_summary = "Bereit"
         return {
             "ok": True,
             "port": esp.port or "Kein ESP gefunden",
@@ -467,14 +618,16 @@ class UsbSimBridge:
             "usbConnected": esp.serial_connected,
             "usbBridgeConnected": usb_ready,
             "usbState": esp.usb_state,
-            "usbStateLabel": usb_state_labels.get(esp.usb_state.upper(), esp.usb_state),
+            "usbStateLabel": usb_state_label,
             "usbLive": usb_live,
             "usbHost": esp.usb_host or self.hostname,
             "activeTelemetry": esp.active_telemetry,
             "activeTelemetryLabel": active_label,
             "telemetryPreference": esp.telemetry_preference,
             "simTransport": esp.sim_transport,
-            "transportLabel": "USB Telemetrie" if esp.sim_transport in {"AUTO", "USB"} else "Netzwerk SimHub",
+            "simTransportMode": transport_mode,
+            "telemetryFallback": esp.telemetry_fallback,
+            "transportLabel": transport_labels.get(transport_mode, transport_mode),
             "rpm": rpm,
             "speed": speed,
             "gear": gear,
@@ -482,15 +635,57 @@ class UsbSimBridge:
             "throttle": throttle,
             "pitLimiter": pit_limiter,
             "shiftState": shift_state,
-            "modeSummary": "USB Sim aktiv" if esp.wifi_suspended or active_label == "USB Sim" else ("OBD aktiv" if active_label == "OBD" else "Warte auf Quelle"),
-            "wifiSummary": "Unterdrueckt" if esp.wifi_suspended else "Normal aktiv",
-            "obdSummary": "Deaktiviert" if not esp.obd_allowed else "Erlaubt",
+            "modeSummary": mode_summary,
+            "wifiSummary": wifi_summary,
+            "obdSummary": obd_summary,
             "lastError": esp.error or simhub.error,
-            "simHubState": "Live" if simhub_live else ("Warte auf Daten" if simhub.reachable else "Nicht erreichbar"),
-            "simHubStateLabel": "Live" if simhub_live else ("Warte auf Daten" if simhub.reachable else "Nicht erreichbar"),
-            "simHubReachable": simhub.reachable,
+            "simHubState": simhub_state_label,
+            "simHubStateLabel": simhub_state_label,
+            "simHubReachable": simhub.reachable or simhub_state_label in {"Live", "Warte auf Daten"},
             "simHubLive": simhub_live,
             "lastTelemetryAgeLabel": last_age,
+            "bridgeTelemetrySeq": self.telemetry_seq,
+            "bridgeTelemetryTxCount": self.telemetry_tx_count,
+            "bridgeTelemetryTxErrors": self.telemetry_tx_error_count,
+            "bridgeLastTelemetryGapMs": round(self.last_telemetry_gap_ms, 1),
+            "bridgeMaxTelemetryGapMs": round(self.max_telemetry_gap_ms, 1),
+            "bridgeLastTelemetryTxAgeMs": round(max(0.0, (time.monotonic() - self.last_telemetry_tx_monotonic) * 1000.0), 1) if self.last_telemetry_tx_monotonic > 0.0 else 0.0,
+            "bridgeStatusRpcCount": self.status_rpc_count,
+            "bridgeStatusRpcErrors": self.status_rpc_error_count,
+            "espUsbTelemetryAgeMs": int(esp.raw.get("usbTelemetryAgeMs", 0) or 0),
+            "espUsbTelemetryFrames": int(esp.raw.get("usbTelemetryFrames", 0) or 0),
+            "espUsbTelemetryParseErrors": int(esp.raw.get("usbTelemetryParseErrors", 0) or 0),
+            "espUsbTelemetryGlitchRejects": int(esp.raw.get("usbTelemetryGlitchRejects", 0) or 0),
+            "espUsbTelemetryGapEvents": int(esp.raw.get("usbTelemetryGapEvents", 0) or 0),
+            "espUsbTelemetryLastGapMs": int(esp.raw.get("usbTelemetryLastGapMs", 0) or 0),
+            "espUsbTelemetryMaxGapMs": int(esp.raw.get("usbTelemetryMaxGapMs", 0) or 0),
+            "espUsbTelemetrySeq": int(esp.raw.get("usbTelemetrySeq", 0) or 0),
+            "espUsbTelemetrySeqGapEvents": int(esp.raw.get("usbTelemetrySeqGapEvents", 0) or 0),
+            "espUsbTelemetrySeqGapFrames": int(esp.raw.get("usbTelemetrySeqGapFrames", 0) or 0),
+            "espUsbTelemetrySeqDuplicates": int(esp.raw.get("usbTelemetrySeqDuplicates", 0) or 0),
+            "espUsbTelemetryLineOverflows": int(esp.raw.get("usbTelemetryLineOverflows", 0) or 0),
+            "espLedRawRpm": int(esp.raw.get("ledRawRpm", 0) or 0),
+            "espLedFilteredRpm": int(esp.raw.get("ledFilteredRpm", 0) or 0),
+            "espLedStartRpm": int(esp.raw.get("ledStartRpm", 0) or 0),
+            "espLedDisplayedLeds": int(esp.raw.get("ledDisplayedLeds", 0) or 0),
+            "espLedFilterAdjusts": int(esp.raw.get("ledFilterAdjusts", 0) or 0),
+            "espLedRenderCalls": int(esp.raw.get("ledRenderCalls", 0) or 0),
+            "espLedFrameShows": int(esp.raw.get("ledFrameShows", 0) or 0),
+            "espLedFrameSkips": int(esp.raw.get("ledFrameSkips", 0) or 0),
+            "espLedBrightnessUpdates": int(esp.raw.get("ledBrightnessUpdates", 0) or 0),
+            "espLedShiftBlink": bool(esp.raw.get("ledShiftBlink", False)),
+            "espLedPitLimiterOnly": bool(esp.raw.get("ledPitLimiterOnly", False)),
+            "espLedDiagnosticMode": str(esp.raw.get("ledDiagnosticMode", "") or ""),
+            "espLedRenderMode": str(esp.raw.get("ledRenderMode", "") or ""),
+            "espLedLastShowAgeMs": int(esp.raw.get("ledLastShowAgeMs", 0) or 0),
+            "gearSource": str(esp.raw.get("gearSource", "") or ""),
+            "espWifiIp": str(esp.raw.get("wifiIp", "") or ""),
+            "espSimHubPollOk": int(esp.raw.get("simHubPollOk", 0) or 0),
+            "espSimHubPollErr": int(esp.raw.get("simHubPollErr", 0) or 0),
+            "espSimHubSuppressedWhileUsb": int(esp.raw.get("simHubSuppressedWhileUsb", 0) or 0),
+            "espSimHubLastOkAgeMs": int(esp.raw.get("simHubLastOkAgeMs", 0) or 0),
+            "espSimHubLastErrAgeMs": int(esp.raw.get("simHubLastErrAgeMs", 0) or 0),
+            "espSimHubLastError": str(esp.raw.get("simHubLastError", "") or ""),
         }
 
     def build_status_compat(self) -> dict[str, Any]:
@@ -518,7 +713,9 @@ class UsbSimBridge:
             "vehicleInfoAge": 0,
             "telemetryPreference": status["telemetryPreference"],
             "simTransport": status["simTransport"],
+            "simTransportMode": status["simTransportMode"],
             "activeTelemetry": status["activeTelemetryLabel"],
+            "telemetryFallback": status["telemetryFallback"],
             "simHubState": status["simHubStateLabel"],
             "usbState": status["usbStateLabel"],
             "usbConnected": status["usbConnected"],
@@ -526,7 +723,7 @@ class UsbSimBridge:
             "usbBridgeWebActive": True,
             "usbHost": status["usbHost"],
             "usbError": status["lastError"],
-            "wifiSuspended": status["wifiSummary"] == "Unterdrueckt",
+            "wifiSuspended": status["simTransportMode"] == "USB_ONLY",
             "obdAllowed": status["obdSummary"] != "Deaktiviert",
             "displayFocus": display_focus_map.get((esp.display_focus or "RPM").upper(), 0),
             "simHubConfigured": True,
@@ -538,7 +735,7 @@ class UsbSimBridge:
 
     def build_wifi_status_compat(self) -> dict[str, Any]:
         status = self.build_status()
-        suspended = status["wifiSummary"] == "Unterdrueckt"
+        suspended = status["simTransportMode"] == "USB_ONLY"
         return {
             "mode": "USB_BRIDGE",
             "apActive": False,
@@ -600,13 +797,106 @@ def create_app(bridge: UsbSimBridge) -> Flask:
             "simHubPollMs": int(form.get("simHubPollMs", 75) or 75),
         }
 
-    @app.get("/")
-    def index() -> str:
-        return render_template_string(template)
+    def bridge_template_response(status_code: int = 200):
+        return Response(render_template_string(template), status=status_code, mimetype="text/html")
 
-    @app.get("/settings")
-    @app.get("/settings/")
-    def settings_page() -> str:
+    def rewrite_location(location: str, base_url: str) -> str:
+        if not location:
+            return location
+        parsed = urllib.parse.urlsplit(location)
+        base = urllib.parse.urlsplit(base_url)
+        if not parsed.netloc:
+            return location
+        if parsed.scheme == base.scheme and parsed.netloc == base.netloc:
+            rewritten = parsed.path or "/"
+            if parsed.query:
+                rewritten += "?" + parsed.query
+            if parsed.fragment:
+                rewritten += "#" + parsed.fragment
+            return rewritten
+        return location
+
+    def proxy_esp_request(path: str) -> Response | None:
+        base_url = bridge.get_esp_web_base_url()
+        if not base_url:
+            return None
+
+        target = base_url + path
+        query = request.query_string.decode("utf-8", errors="ignore")
+        if query:
+            target += "?" + query
+
+        headers: dict[str, str] = {}
+        for name in ("Content-Type", "Accept"):
+            value = request.headers.get(name)
+            if value:
+                headers[name] = value
+
+        data = request.get_data() if request.method in {"POST", "PUT", "PATCH"} else None
+        upstream = urllib.request.Request(target, data=data if data else None, headers=headers, method=request.method)
+        try:
+            with urllib.request.urlopen(upstream, timeout=3.0) as response:
+                body = response.read()
+                response_headers: dict[str, str] = {}
+                content_type = response.headers.get("Content-Type")
+                if content_type:
+                    response_headers["Content-Type"] = content_type
+                location = response.headers.get("Location")
+                if location:
+                    response_headers["Location"] = rewrite_location(location, base_url)
+                return Response(body, status=response.status, headers=response_headers)
+        except urllib.error.HTTPError as exc:
+            body = exc.read()
+            response_headers = {}
+            content_type = exc.headers.get("Content-Type")
+            if content_type:
+                response_headers["Content-Type"] = content_type
+            location = exc.headers.get("Location")
+            if location:
+                response_headers["Location"] = rewrite_location(location, base_url)
+            return Response(body, status=exc.code, headers=response_headers)
+        except Exception as exc:
+            bridge.log(f"esp proxy failed path={path}: {exc}")
+            return None
+
+    def fallback_compat_route(path: str):
+        if request.method == "GET" and path in {"/", "/settings", "/settings/"}:
+            return bridge_template_response()
+        if request.method == "GET" and path == "/status":
+            return jsonify(bridge.build_status_compat())
+        if request.method == "GET" and path == "/wifi/status":
+            return jsonify(bridge.build_wifi_status_compat())
+        if request.method == "GET" and path == "/ble/status":
+            return jsonify(bridge.build_ble_status_compat())
+        if request.method == "POST" and path == "/wifi/scan":
+            return jsonify({"status": "busy", "reason": "usb-mode"})
+        if request.method == "POST" and path == "/wifi/disconnect":
+            return jsonify({"status": "ok"})
+        if request.method == "POST" and path == "/ble/scan":
+            return jsonify({"status": "busy", "reason": "usb-mode"})
+        if request.method == "POST" and path in {"/save", "/settings", "/settings/"}:
+            payload = request_payload()
+            try:
+                bridge.save_config(payload)
+                if request.is_json:
+                    return jsonify({"ok": True})
+                return redirect("/bridge/?saved=1", code=303)
+            except Exception as exc:
+                if request.is_json:
+                    return jsonify({"ok": False, "error": str(exc)}), 503
+                return bridge_template_response(status_code=503)
+        if request.method == "GET" and path == "/favicon.ico":
+            return Response(status=404)
+        return Response("ESP Web UI ist aktuell nicht ueber WLAN erreichbar. Bridge-Diagnose bleibt unter /bridge/ verfuegbar.", status=503, mimetype="text/plain")
+
+    @app.get("/bridge")
+    def bridge_index_redirect():
+        return redirect("/bridge/", code=303)
+
+    @app.get("/bridge/")
+    @app.get("/bridge/settings")
+    @app.get("/bridge/settings/")
+    def bridge_index() -> Response:
         return render_template_string(template)
 
     @app.get("/api/status")
@@ -655,20 +945,17 @@ def create_app(bridge: UsbSimBridge) -> Flask:
         except Exception as exc:
             return jsonify({"ok": False, "error": str(exc)}), 503
 
-    @app.post("/save")
-    @app.post("/settings")
-    @app.post("/settings/")
-    def compat_save():
-        payload = request_payload()
-        try:
-            bridge.save_config(payload)
-            if request.is_json:
-                return jsonify({"ok": True})
-            return redirect("/settings?saved=1", code=303)
-        except Exception as exc:
-            if request.is_json:
-                return jsonify({"ok": False, "error": str(exc)}), 503
-            return render_template_string(template), 503
+    @app.route("/", defaults={"path": ""}, methods=["GET", "POST"])
+    @app.route("/<path:path>", methods=["GET", "POST"])
+    def esp_ui_or_bridge_fallback(path: str):
+        normalized = "/" + path
+        if normalized.startswith("/api/") or normalized.startswith("/bridge"):
+            return Response("Not found", status=404, mimetype="text/plain")
+
+        proxied = proxy_esp_request(normalized)
+        if proxied is not None:
+            return proxied
+        return fallback_compat_route(normalized)
 
     return app
 

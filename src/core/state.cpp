@@ -31,10 +31,18 @@ int g_simHubGear = 0;
 float g_simHubThrottle = 0.0f;
 bool g_simHubPitLimiterActive = false;
 unsigned long g_lastSimHubTelemetryMs = 0;
+unsigned long g_lastSimHubNetworkTelemetryMs = 0;
 bool g_simHubEverReceived = false;
 bool g_simHubReachable = false;
 bool g_simHubWaitingForData = false;
 SimHubConnectionState g_simHubConnectionState = SimHubConnectionState::Disabled;
+
+int g_usbSimCurrentRpm = 0;
+int g_usbSimMaxSeenRpm = 0;
+int g_usbSimVehicleSpeedKmh = 0;
+int g_usbSimGear = 0;
+float g_usbSimThrottle = 0.0f;
+bool g_usbSimPitLimiterActive = false;
 
 bool g_usbSerialConnected = false;
 bool g_usbBridgeConnected = false;
@@ -72,6 +80,10 @@ bool g_ignitionLogoShown = false;
 bool g_animationActive = false;
 bool g_logoPlayedThisCycle = false;
 bool g_leavingPlayedThisCycle = false;
+
+UsbTelemetryDebugStats g_usbTelemetryDebug{};
+SimHubDebugStats g_simHubDebug{};
+LedRenderDebugStats g_ledRenderDebug{};
 
 String g_lastTxInfo;
 String g_lastObdInfo;
@@ -148,10 +160,18 @@ void initGlobalState()
     g_simHubThrottle = 0.0f;
     g_simHubPitLimiterActive = false;
     g_lastSimHubTelemetryMs = 0;
+    g_lastSimHubNetworkTelemetryMs = 0;
     g_simHubEverReceived = false;
     g_simHubReachable = false;
     g_simHubWaitingForData = false;
     g_simHubConnectionState = SimHubConnectionState::Disabled;
+
+    g_usbSimCurrentRpm = 0;
+    g_usbSimMaxSeenRpm = 0;
+    g_usbSimVehicleSpeedKmh = 0;
+    g_usbSimGear = 0;
+    g_usbSimThrottle = 0.0f;
+    g_usbSimPitLimiterActive = false;
 
     g_usbSerialConnected = false;
     g_usbBridgeConnected = false;
@@ -189,6 +209,10 @@ void initGlobalState()
     g_animationActive = false;
     g_logoPlayedThisCycle = false;
     g_leavingPlayedThisCycle = false;
+
+    g_usbTelemetryDebug = UsbTelemetryDebugStats{};
+    g_simHubDebug = SimHubDebugStats{};
+    g_ledRenderDebug = LedRenderDebugStats{};
 
     g_lastTxInfo = "–";
     g_lastObdInfo = "–";

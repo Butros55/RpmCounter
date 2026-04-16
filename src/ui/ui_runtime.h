@@ -42,11 +42,29 @@ enum class UiTelemetrySource : uint8_t
     UsbBridge
 };
 
+enum class UiSimTransportMode : uint8_t
+{
+    Disabled = 0,
+    Auto,
+    UsbOnly,
+    NetworkOnly
+};
+
 enum class UiTelemetryPreference : uint8_t
 {
     Auto = 0,
     Obd,
     SimHub
+};
+
+enum class UiSimHubState : uint8_t
+{
+    Disabled = 0,
+    WaitingForHost,
+    WaitingForNetwork,
+    WaitingForData,
+    Live,
+    Error
 };
 
 enum class UiDisplayFocusMetric : uint8_t
@@ -112,9 +130,11 @@ struct UiRuntimeState
     std::vector<UiBleScanItem> bleScanResults;
 
     UiTelemetrySource telemetrySource = UiTelemetrySource::Esp32Obd;
+    UiSimTransportMode simTransportMode = UiSimTransportMode::Disabled;
     bool telemetryStale = false;
     bool telemetryUsingFallback = false;
     bool simHubConfigured = false;
+    UiSimHubState simHubState = UiSimHubState::Disabled;
     bool simHubReachable = false;
     float throttle = 0.0f;
     uint32_t telemetryTimestampMs = 0;

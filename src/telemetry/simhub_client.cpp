@@ -10,6 +10,7 @@
 #include "core/logging.h"
 #include "core/state.h"
 #include "core/wifi.h"
+#include "telemetry/telemetry_manager.h"
 #include "telemetry/usb_sim_bridge.h"
 
 namespace
@@ -28,6 +29,24 @@ namespace
     portMUX_TYPE g_simHubConfigMux = portMUX_INITIALIZER_UNLOCKED;
     SimHubClientConfigSnapshot g_simHubConfig{};
     TaskHandle_t g_simHubTaskHandle = nullptr;
+    bool g_simHubPollSuppressed = false;
+
+    bool shouldPollSimHubNetwork(SimRuntimeTransportMode mode,
+                                 ActiveTelemetrySource activeSource,
+                                 bool usbFresh)
+    {
+        switch (mode)
+        {
+        case SimRuntimeTransportMode::NetworkOnly:
+            return true;
+        case SimRuntimeTransportMode::UsbOnly:
+        case SimRuntimeTransportMode::Disabled:
+            return false;
+        case SimRuntimeTransportMode::Auto:
+        default:
+            return !(activeSource == ActiveTelemetrySource::UsbSim || usbFresh);
+        }
+    }
 
     String trimmed(const String &value)
     {
@@ -234,6 +253,9 @@ namespace
         String gameData;
         if (!httpGetText(config.host, config.port, "/Api/GetGameData", gameData))
         {
+            ++g_simHubDebug.pollErrorCount;
+            g_simHubDebug.lastErrorMs = millis();
+            g_simHubDebug.lastError = F("GetGameData failed");
             setSimHubState(SimHubConnectionState::Error, false, true);
             return false;
         }
@@ -251,6 +273,9 @@ namespace
         String simpleData;
         if (!httpGetText(config.host, config.port, "/Api/GetGameDataSimple", simpleData))
         {
+            ++g_simHubDebug.pollErrorCount;
+            g_simHubDebug.lastErrorMs = millis();
+            g_simHubDebug.lastError = F("GetGameDataSimple failed");
             setSimHubState(SimHubConnectionState::Error, false, true);
             return false;
         }
@@ -290,8 +315,16 @@ namespace
         g_simHubThrottle = normalizeSimHubThrottle(throttle);
         g_simHubPitLimiterActive = pitLimiterActive;
         g_simHubMaxSeenRpm = max(max(g_simHubMaxSeenRpm, g_simHubCurrentRpm), maxRpm);
-        g_lastSimHubTelemetryMs = millis();
+        // Only the network timestamp is authoritative for the network source.
+        // g_lastSimHubTelemetryMs is kept as a mirror of the network value
+        // purely for legacy readers; it is no longer written by the USB path.
+        const unsigned long nowMs = millis();
+        g_lastSimHubNetworkTelemetryMs = nowMs;
+        g_lastSimHubTelemetryMs = nowMs;
         g_simHubEverReceived = true;
+        ++g_simHubDebug.pollSuccessCount;
+        g_simHubDebug.lastSuccessMs = nowMs;
+        g_simHubDebug.lastError = "";
         setSimHubState(SimHubConnectionState::Live, true, false);
 
         LOG_DEBUG("SIMHUB", "SIMHUB_SAMPLE", String("rpm=") + g_simHubCurrentRpm + " speed=" + g_simHubVehicleSpeedKmh + " gear=" + g_simHubGear);
@@ -307,7 +340,7 @@ namespace
             snapshot = g_simHubConfig;
             portEXIT_CRITICAL(&g_simHubConfigMux);
 
-            if (!snapshot.enabled || snapshot.preference == TelemetryPreference::Obd)
+            if (!snapshot.enabled)
             {
                 setSimHubState(SimHubConnectionState::Disabled, false, false);
                 vTaskDelay(pdMS_TO_TICKS(250));
@@ -349,6 +382,10 @@ void simHubClientUpdateConfig()
 {
     const WifiStatus wifiStatus = getWifiStatus();
     const String host = trimmed(cfg.simHubHost);
+    const SimRuntimeTransportMode runtimeMode =
+        resolveSimRuntimeTransportMode(cfg.telemetryPreference, cfg.simTransportPreference);
+    const bool usbFresh = usbSimTelemetryFresh(millis());
+    const bool shouldPoll = shouldPollSimHubNetwork(runtimeMode, g_activeTelemetrySource, usbFresh);
 
     SimHubClientConfigSnapshot next{};
     host.toCharArray(next.host, sizeof(next.host));
@@ -357,9 +394,19 @@ void simHubClientUpdateConfig()
     next.preference = cfg.telemetryPreference;
     next.transport = cfg.simTransportPreference;
     next.networkAvailable = wifiStatus.staConnected || wifiStatus.apActive;
-    next.enabled = cfg.telemetryPreference != TelemetryPreference::Obd &&
-                   (cfg.simTransportPreference == SimTransportPreference::Network ||
-                    (cfg.simTransportPreference == SimTransportPreference::Auto && !usbSimBridgeOnline()));
+    if (!shouldPoll && telemetryAllowsNetworkSim(cfg.telemetryPreference, cfg.simTransportPreference))
+    {
+        if (!g_simHubPollSuppressed)
+        {
+            ++g_simHubDebug.suppressedWhileUsbCount;
+            g_simHubPollSuppressed = true;
+        }
+    }
+    else
+    {
+        g_simHubPollSuppressed = false;
+    }
+    next.enabled = telemetryAllowsNetworkSim(cfg.telemetryPreference, cfg.simTransportPreference) && shouldPoll;
 
     portENTER_CRITICAL(&g_simHubConfigMux);
     g_simHubConfig = next;

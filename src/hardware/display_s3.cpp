@@ -609,13 +609,10 @@ void displayInit()
 
 void displayClear()
 {
-    if (!g_displayReady)
-        return;
-
+    // Keep LVGL access single-threaded on the Arduino loop task. These wrappers
+    // can be hit from BLE/LED worker tasks, so they only update shared state.
     g_cachedShift = false;
     g_shiftBlinkActive = false;
-    ui_s3_set_shiftlight(false);
-    ui_s3_set_gear(g_cachedGear);
 }
 
 void displayShowTestLogo()
@@ -633,20 +630,12 @@ void displaySetGear(int gear)
         gear = 0;
 
     g_cachedGear = gear;
-    if (!g_displayReady)
-        return;
-
-    ui_s3_set_gear(gear);
 }
 
 void displaySetShiftBlink(bool active)
 {
     g_cachedShift = active;
     g_shiftBlinkActive = active;
-    if (!g_displayReady)
-        return;
-
-    ui_s3_set_shiftlight(active);
 }
 
 void display_s3_init()

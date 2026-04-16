@@ -7,6 +7,7 @@
 #include "bluetooth/ble_obd.h"
 #include "core/config.h"
 #include "core/wifi.h"
+#include "hardware/ambient_light.h"
 #include "hardware/led_bar.h"
 #include "hardware/logo_anim.h"
 #include "core/vehicle_info.h"
@@ -150,6 +151,22 @@ namespace
         }
     }
 
+    String simTransportModeToString(SimRuntimeTransportMode mode)
+    {
+        switch (mode)
+        {
+        case SimRuntimeTransportMode::UsbOnly:
+            return "USB_ONLY";
+        case SimRuntimeTransportMode::NetworkOnly:
+            return "NETWORK_ONLY";
+        case SimRuntimeTransportMode::Auto:
+            return "AUTO";
+        case SimRuntimeTransportMode::Disabled:
+        default:
+            return "DISABLED";
+        }
+    }
+
     String activeTelemetrySourceLabel(ActiveTelemetrySource source)
     {
         switch (source)
@@ -203,6 +220,21 @@ namespace
         case SimHubConnectionState::Disabled:
         default:
             return "Deaktiviert";
+        }
+    }
+
+    String gearSourceLabel()
+    {
+        switch (g_activeTelemetrySource)
+        {
+        case ActiveTelemetrySource::UsbSim:
+        case ActiveTelemetrySource::SimHubNetwork:
+            return "SimHub direkt";
+        case ActiveTelemetrySource::Obd:
+            return "OBD berechnet";
+        case ActiveTelemetrySource::None:
+        default:
+            return "Keine Quelle";
         }
     }
 
@@ -2158,7 +2190,12 @@ namespace
         {
             int v = clampInt(server.arg("val").toInt(), 0, 255);
             cfg.brightness = v;
-            strip.setBrightness(cfg.brightness);
+            if (cfg.autoBrightnessMin > cfg.brightness)
+            {
+                cfg.autoBrightnessMin = cfg.brightness;
+            }
+            ambientLightOnConfigChanged();
+            ledBarRefreshBrightness();
             strip.show();
             g_brightnessPreviewActive = true;
             g_lastBrightnessChangeMs = millis();
@@ -2179,13 +2216,48 @@ namespace
         if (server.hasArg("brightness"))
         {
             cfg.brightness = clampInt(server.arg("brightness").toInt(), 0, 255);
-            strip.setBrightness(cfg.brightness);
-            strip.show();
+        }
+
+        cfg.autoBrightnessEnabled = server.hasArg("autoBrightnessEnabled");
+        if (server.hasArg("ambientLightSdaPin"))
+        {
+            cfg.ambientLightSdaPin = clampInt(server.arg("ambientLightSdaPin").toInt(), 0, 48);
+        }
+        if (server.hasArg("ambientLightSclPin"))
+        {
+            cfg.ambientLightSclPin = clampInt(server.arg("ambientLightSclPin").toInt(), 0, 48);
+        }
+        if (server.hasArg("autoBrightnessStrengthPct"))
+        {
+            cfg.autoBrightnessStrengthPct = clampInt(server.arg("autoBrightnessStrengthPct").toInt(), 25, 200);
+        }
+        if (server.hasArg("autoBrightnessMin"))
+        {
+            cfg.autoBrightnessMin = clampInt(server.arg("autoBrightnessMin").toInt(), 0, 255);
+        }
+        if (server.hasArg("autoBrightnessResponsePct"))
+        {
+            cfg.autoBrightnessResponsePct = clampInt(server.arg("autoBrightnessResponsePct").toInt(), 1, 100);
+        }
+        if (server.hasArg("autoBrightnessLuxMin"))
+        {
+            cfg.autoBrightnessLuxMin = clampInt(server.arg("autoBrightnessLuxMin").toInt(), 0, 120000);
+        }
+        if (server.hasArg("autoBrightnessLuxMax"))
+        {
+            cfg.autoBrightnessLuxMax =
+                clampInt(server.arg("autoBrightnessLuxMax").toInt(), cfg.autoBrightnessLuxMin + 1, 120000);
+        }
+        if (cfg.autoBrightnessMin > cfg.brightness)
+        {
+            cfg.autoBrightnessMin = cfg.brightness;
         }
 
         cfg.autoScaleMaxRpm = server.hasArg("autoscale");
         if (server.hasArg("fixedMaxRpm"))
             cfg.fixedMaxRpm = clampInt(server.arg("fixedMaxRpm").toInt(), 1000, 8000);
+        if (server.hasArg("rpmStartRpm"))
+            cfg.rpmStartRpm = clampInt(server.arg("rpmStartRpm").toInt(), 0, 12000);
 
         int gPct = cfg.greenEndPct;
         int yPct = cfg.yellowEndPct;
@@ -2215,6 +2287,8 @@ namespace
         cfg.logoOnIgnitionOn = server.hasArg("logoIgnOn");
         cfg.logoOnEngineStart = server.hasArg("logoEngStart");
         cfg.logoOnIgnitionOff = server.hasArg("logoIgnOff");
+        ambientLightOnConfigChanged();
+        ledBarRefreshBrightness();
 
         if (allowAutoReconnect)
         {
@@ -2353,6 +2427,7 @@ namespace
         unsigned long now = millis();
         int vehicleAge = 0;
         bool ready = g_vehicleInfoAvailable;
+        const AmbientLightDebugInfo ambientInfo = ambientLightGetDebugInfo();
         if (g_vehicleInfoAvailable && g_vehicleInfoLastUpdate > 0)
             vehicleAge = static_cast<int>((now - g_vehicleInfoLastUpdate) / 1000UL);
 
@@ -2361,6 +2436,7 @@ namespace
         json += ",\"maxRpm\":" + String(g_maxSeenRpm);
         json += ",\"speed\":" + String(g_vehicleSpeedKmh);
         json += ",\"gear\":" + String(g_estimatedGear);
+        json += ",\"gearSource\":\"" + jsonEscape(gearSourceLabel()) + "\"";
         json += ",\"pitLimiter\":" + String(g_pitLimiterActive ? "true" : "false");
         json += ",\"lastTx\":\"" + jsonEscape(g_lastTxInfo) + "\"";
         json += ",\"lastObd\":\"" + jsonEscape(g_lastObdInfo) + "\"";
@@ -2378,6 +2454,8 @@ namespace
         json += ",\"vehicleInfoAge\":" + String(vehicleAge);
         json += ",\"telemetryPreference\":\"" + telemetryPreferenceToString(cfg.telemetryPreference) + "\"";
         json += ",\"simTransport\":\"" + simTransportPreferenceToString(cfg.simTransportPreference) + "\"";
+        json += ",\"simTransportMode\":\"" + simTransportModeToString(resolveSimRuntimeTransportMode(cfg.telemetryPreference, cfg.simTransportPreference)) + "\"";
+        json += ",\"telemetryFallback\":" + String(telemetrySourceIsFallback(g_activeTelemetrySource, cfg.telemetryPreference, cfg.simTransportPreference) ? "true" : "false");
         json += ",\"activeTelemetry\":\"" + activeTelemetrySourceLabel(g_activeTelemetrySource) + "\"";
         json += ",\"simHubState\":\"" + jsonEscape(simHubConnectionStateLabel(g_simHubConnectionState)) + "\"";
         json += ",\"usbState\":\"" + jsonEscape(usbBridgeStateLabel(g_usbBridgeConnectionState)) + "\"";
@@ -2388,6 +2466,56 @@ namespace
         json += ",\"usbError\":\"" + jsonEscape(g_usbBridgeLastError) + "\"";
         json += ",\"wifiSuspended\":" + String(isWifiSuspendedForUsb() ? "true" : "false");
         json += ",\"obdAllowed\":" + String(telemetryShouldAllowObd() ? "true" : "false");
+        json += ",\"usbTelemetryAgeMs\":" + String(g_usbTelemetryDebug.lastFrameMs > 0 ? (now - g_usbTelemetryDebug.lastFrameMs) : 0);
+        json += ",\"usbTelemetryFrames\":" + String(g_usbTelemetryDebug.framesReceived);
+        json += ",\"usbTelemetryParseErrors\":" + String(g_usbTelemetryDebug.parseErrors);
+        json += ",\"usbTelemetryGlitchRejects\":" + String(g_usbTelemetryDebug.glitchRejects);
+        json += ",\"usbTelemetryGapEvents\":" + String(g_usbTelemetryDebug.gapEvents);
+        json += ",\"usbTelemetryLastGapMs\":" + String(g_usbTelemetryDebug.lastGapMs);
+        json += ",\"usbTelemetryMaxGapMs\":" + String(g_usbTelemetryDebug.maxGapMs);
+        json += ",\"usbTelemetrySeq\":" + String(g_usbTelemetryDebug.lastSeq);
+        json += ",\"usbTelemetrySeqGapEvents\":" + String(g_usbTelemetryDebug.seqGapEvents);
+        json += ",\"usbTelemetrySeqGapFrames\":" + String(g_usbTelemetryDebug.seqGapFrames);
+        json += ",\"usbTelemetrySeqDuplicates\":" + String(g_usbTelemetryDebug.seqDuplicates);
+        json += ",\"usbTelemetryLineOverflows\":" + String(g_usbTelemetryDebug.lineOverflows);
+        json += ",\"usbTelemetryLastRawRpm\":" + String(g_usbTelemetryDebug.lastRawRpm);
+        json += ",\"usbTelemetryLastAcceptedRpm\":" + String(g_usbTelemetryDebug.lastAcceptedRpm);
+        json += ",\"simHubPollOk\":" + String(g_simHubDebug.pollSuccessCount);
+        json += ",\"simHubPollErr\":" + String(g_simHubDebug.pollErrorCount);
+        json += ",\"simHubSuppressedWhileUsb\":" + String(g_simHubDebug.suppressedWhileUsbCount);
+        json += ",\"simHubLastOkAgeMs\":" + String(g_simHubDebug.lastSuccessMs > 0 ? (now - g_simHubDebug.lastSuccessMs) : 0);
+        json += ",\"simHubLastErrAgeMs\":" + String(g_simHubDebug.lastErrorMs > 0 ? (now - g_simHubDebug.lastErrorMs) : 0);
+        json += ",\"simHubLastError\":\"" + jsonEscape(g_simHubDebug.lastError) + "\"";
+        json += ",\"ledRawRpm\":" + String(g_ledRenderDebug.lastRawRpm);
+        json += ",\"ledFilteredRpm\":" + String(g_ledRenderDebug.lastFilteredRpm);
+        json += ",\"ledStartRpm\":" + String(g_ledRenderDebug.lastStartRpm);
+        json += ",\"ledDisplayedLeds\":" + String(g_ledRenderDebug.lastDisplayedLeds);
+        json += ",\"ledFilterAdjusts\":" + String(g_ledRenderDebug.filterAdjustCount);
+        json += ",\"ledRenderCalls\":" + String(g_ledRenderDebug.renderCalls);
+        json += ",\"ledFrameShows\":" + String(g_ledRenderDebug.frameShowCount);
+        json += ",\"ledFrameSkips\":" + String(g_ledRenderDebug.frameSkipCount);
+        json += ",\"ledBrightnessUpdates\":" + String(g_ledRenderDebug.brightnessUpdateCount);
+        json += ",\"ledShiftBlink\":" + String(g_ledRenderDebug.lastShiftBlink ? "true" : "false");
+        json += ",\"ledPitLimiterOnly\":" + String(g_ledRenderDebug.pitLimiterOnly ? "true" : "false");
+        json += ",\"ledDiagnosticMode\":\"" + jsonEscape(String(ledBarGetDiagnosticModeName())) + "\"";
+        json += ",\"ledRenderMode\":\"" + jsonEscape(String(ledBarGetLastRenderModeName())) + "\"";
+        json += ",\"ledLastShowAgeMs\":" + String(g_ledRenderDebug.lastShowMs > 0 ? (now - g_ledRenderDebug.lastShowMs) : 0);
+        json += ",\"rpmStartRpm\":" + String(cfg.rpmStartRpm);
+        json += ",\"ledManualBrightness\":" + String(cfg.brightness);
+        json += ",\"ledAppliedBrightness\":" + String(ledBarGetAppliedBrightness());
+        json += ",\"autoBrightnessEnabled\":" + String(cfg.autoBrightnessEnabled ? "true" : "false");
+        json += ",\"ambientLightDetected\":" + String(ambientInfo.sensorDetected ? "true" : "false");
+        json += ",\"ambientLightActive\":" + String(ambientInfo.sensorActive ? "true" : "false");
+        json += ",\"ambientLightSdaPin\":" + String(cfg.ambientLightSdaPin);
+        json += ",\"ambientLightSclPin\":" + String(cfg.ambientLightSclPin);
+        json += ",\"ambientLux\":" + String(ambientInfo.filteredLux, 1);
+        json += ",\"ambientRawLux\":" + String(ambientInfo.rawLux, 1);
+        json += ",\"ambientTargetBrightness\":" + String(ambientInfo.targetBrightness);
+        json += ",\"ambientDesiredBrightness\":" + String(ambientInfo.desiredBrightness);
+        json += ",\"ambientReadCount\":" + String(ambientInfo.readCount);
+        json += ",\"ambientReadErrors\":" + String(ambientInfo.readErrorCount);
+        json += ",\"ambientLastReadAgeMs\":" + String(ambientInfo.lastReadMs > 0 ? (now - ambientInfo.lastReadMs) : 0);
+        json += ",\"ambientLastError\":\"" + jsonEscape(ambientInfo.lastError) + "\"";
         json += ",\"displayFocus\":" + String(static_cast<int>(cfg.uiDisplayFocus));
         json += ",\"simHubConfigured\":" + String(cfg.simHubHost.length() > 0 ? "true" : "false");
         json += ",\"bleConnectInProgress\":" + String(g_bleConnectInProgress ? "true" : "false");
@@ -2655,6 +2783,46 @@ namespace
         server.send(200, "application/json", "{\"status\":\"ok\"}");
     }
 
+    void handleDevLedMode()
+    {
+        markHttpActivity("WEB_DEV_LED_MODE");
+        if (server.method() != HTTP_POST)
+        {
+            server.send(405, "text/plain", "Method Not Allowed");
+            return;
+        }
+
+        LedDiagnosticMode mode = LedDiagnosticMode::Live;
+        if (server.hasArg("mode"))
+        {
+            String value = server.arg("mode");
+            value.trim();
+            value.toLowerCase();
+            if (value == "off")
+            {
+                mode = LedDiagnosticMode::Off;
+            }
+            else if (value == "static-green")
+            {
+                mode = LedDiagnosticMode::StaticGreen;
+            }
+            else if (value == "static-white")
+            {
+                mode = LedDiagnosticMode::StaticWhite;
+            }
+            else if (value == "pit" || value == "pit-markers")
+            {
+                mode = LedDiagnosticMode::PitMarkers;
+            }
+        }
+
+        ledBarSetDiagnosticMode(mode);
+        String json = "{\"status\":\"ok\",\"mode\":\"";
+        json += ledBarGetDiagnosticModeName();
+        json += "\"}";
+        server.send(200, "application/json", json);
+    }
+
     void handleNotFound()
     {
         markHttpActivity("WEB_NOT_FOUND");
@@ -2687,6 +2855,7 @@ void initWebUi()
     server.on("/dev/display-logo", HTTP_POST, handleDevDisplayLogo);
     server.on("/dev/display-status", HTTP_GET, handleDevDisplayStatus);
     server.on("/dev/display-pattern", HTTP_POST, handleDevDisplayPattern);
+    server.on("/dev/led-mode", HTTP_POST, handleDevLedMode);
     server.on("/dev/obd-send", HTTP_POST, handleDevObdSend);
     server.onNotFound(handleNotFound);
 

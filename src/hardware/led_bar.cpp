@@ -1,11 +1,16 @@
 #include "led_bar.h"
 
 #include <Arduino.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <math.h>
 
 #include "core/config.h"
 #include "core/state.h"
+#include "core/utils.h"
+#include "hardware/ambient_light.h"
 #include "hardware/display.h"
+#include "signal_utils.h"
 
 Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_GRB + NEO_KHZ800);
 // Adafruit_NeoPixel strip(NUM_LEDS, LED_PIN, NEO_RGB + NEO_KHZ800);
@@ -19,16 +24,140 @@ namespace
     constexpr int GT3_PIT_MARKER_COUNT = 2;
     const RgbColor GT3_PIT_COLOR = {255, 0, 170};
 
+    enum class LedFrameMode : uint8_t
+    {
+        None = 0,
+        Linear = 1,
+        Gt3 = 2,
+        Gt3PitOnly = 3,
+        DiagnosticOff = 4,
+        DiagnosticStaticGreen = 5,
+        DiagnosticStaticWhite = 6,
+        DiagnosticPitMarkers = 7,
+        BrightnessPreview = 8
+    };
+
     const unsigned long PREVIEW_HOLD_MS = 2500;
     const unsigned long PREVIEW_FADE_MS = 900;
     bool previewFadeActive = false;
     unsigned long previewFadeStart = 0;
     uint32_t previewSnapshot[NUM_LEDS];
     bool previewSnapshotValid = false;
+    uint32_t g_ledFrameCache[NUM_LEDS] = {};
+    bool g_ledFrameCacheValid = false;
+    bool g_forceNextStripShow = true;
+    bool g_lastDisplayBlinkState = false;
+    LedDiagnosticMode g_ledDiagnosticMode = LedDiagnosticMode::Live;
+    int g_ledMedianSamples[3] = {0, 0, 0};
+    uint8_t g_ledMedianCount = 0;
+    uint8_t g_ledMedianIndex = 0;
+    uint8_t g_appliedStripBrightness = DEFAULT_BRIGHTNESS;
+
+    void invalidateLedFrameCacheInternal()
+    {
+        g_ledFrameCacheValid = false;
+        g_forceNextStripShow = true;
+        if (g_lastDisplayBlinkState)
+        {
+            displaySetShiftBlink(false);
+            g_lastDisplayBlinkState = false;
+        }
+    }
+
+    void setLastRenderMode(LedFrameMode mode)
+    {
+        g_ledRenderDebug.lastRenderMode = static_cast<uint8_t>(mode);
+    }
+
+    void applyStripBrightness(uint8_t brightness)
+    {
+        if (brightness == g_appliedStripBrightness)
+        {
+            return;
+        }
+
+        strip.setBrightness(brightness);
+        g_appliedStripBrightness = brightness;
+        ambientLightNoteAppliedBrightness(brightness);
+        ++g_ledRenderDebug.brightnessUpdateCount;
+        g_ledRenderDebug.lastAppliedBrightness = brightness;
+        g_forceNextStripShow = true;
+    }
+
+    void resetLedMedianFilter(int seedRpm)
+    {
+        g_ledMedianSamples[0] = seedRpm;
+        g_ledMedianSamples[1] = seedRpm;
+        g_ledMedianSamples[2] = seedRpm;
+        g_ledMedianCount = 0;
+        g_ledMedianIndex = 0;
+    }
+
+    int filterLedRpm(int rpm, bool bypass)
+    {
+        if (bypass)
+        {
+            resetLedMedianFilter(rpm);
+            return rpm;
+        }
+
+        g_ledMedianSamples[g_ledMedianIndex] = rpm;
+        g_ledMedianIndex = static_cast<uint8_t>((g_ledMedianIndex + 1U) % 3U);
+        if (g_ledMedianCount < 3)
+        {
+            ++g_ledMedianCount;
+        }
+
+        if (g_ledMedianCount < 3)
+        {
+            return rpm;
+        }
+
+        return median3Int(g_ledMedianSamples[0], g_ledMedianSamples[1], g_ledMedianSamples[2]);
+    }
 
     uint32_t toStripColor(const RgbColor &c)
     {
         return strip.Color(c.r, c.g, c.b);
+    }
+
+    void clearFrame(uint32_t *frame)
+    {
+        for (int i = 0; i < NUM_LEDS; ++i)
+        {
+            frame[i] = 0;
+        }
+    }
+
+    void pushFrameToStrip(const uint32_t *frame)
+    {
+        for (int i = 0; i < NUM_LEDS; ++i)
+        {
+            strip.setPixelColor(i, frame[i]);
+            g_ledFrameCache[i] = frame[i];
+        }
+        strip.show();
+        g_ledFrameCacheValid = true;
+        g_forceNextStripShow = false;
+        ++g_ledRenderDebug.frameShowCount;
+        g_ledRenderDebug.lastShowMs = millis();
+        g_ledRenderDebug.lastAppliedBrightness = g_appliedStripBrightness;
+    }
+
+    bool frameDiffersFromCache(const uint32_t *frame)
+    {
+        if (!g_ledFrameCacheValid)
+        {
+            return true;
+        }
+        for (int i = 0; i < NUM_LEDS; ++i)
+        {
+            if (g_ledFrameCache[i] != frame[i])
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     uint32_t zoneColor(float pos)
@@ -46,7 +175,7 @@ namespace
         return toStripColor(cfg.redColor);
     }
 
-    void overlayPitLimiterMarkers(bool enabled)
+    void overlayPitLimiterMarkers(uint32_t *frame, bool enabled)
     {
         if (!enabled)
         {
@@ -56,16 +185,18 @@ namespace
         const uint32_t pitColor = toStripColor(GT3_PIT_COLOR);
         for (int offset = 0; offset < GT3_PIT_MARKER_COUNT && offset < NUM_LEDS; ++offset)
         {
-            strip.setPixelColor(offset, pitColor);
-            strip.setPixelColor(NUM_LEDS - 1 - offset, pitColor);
+            frame[offset] = pitColor;
+            frame[NUM_LEDS - 1 - offset] = pitColor;
         }
     }
 
-    void renderLinearPattern(int ledsOn, bool aggressiveFullBlink, bool shiftBlink, bool blinkState, float greenEnd, float yellowEnd, bool &displayBlink)
+    void renderLinearPattern(uint32_t *frame, int ledsOn, bool aggressiveFullBlink, bool shiftBlink, bool blinkState, float greenEnd, float yellowEnd, bool &displayBlink)
     {
+        g_ledRenderDebug.pitLimiterOnly = false;
+        setLastRenderMode(LedFrameMode::Linear);
         for (int i = 0; i < NUM_LEDS; i++)
         {
-            uint32_t color = strip.Color(0, 0, 0);
+            uint32_t color = 0;
 
             if (i < ledsOn)
             {
@@ -73,7 +204,7 @@ namespace
 
                 if (aggressiveFullBlink)
                 {
-                    color = blinkState ? strip.Color(255, 0, 0) : strip.Color(0, 0, 0);
+                    color = blinkState ? strip.Color(255, 0, 0) : 0;
                 }
                 else if (pos < greenEnd)
                 {
@@ -85,7 +216,7 @@ namespace
                 }
                 else if (cfg.mode == LED_MODE_F1 && shiftBlink)
                 {
-                    color = blinkState ? toStripColor(cfg.redColor) : strip.Color(0, 0, 0);
+                    color = blinkState ? toStripColor(cfg.redColor) : 0;
                     displayBlink = blinkState;
                 }
                 else
@@ -94,12 +225,20 @@ namespace
                 }
             }
 
-            strip.setPixelColor(i, color);
+            frame[i] = color;
         }
     }
 
-    void renderGt3Pattern(float fraction, float blinkStart, bool blinkState, bool &displayBlink)
+    void renderGt3Pattern(uint32_t *frame, float fraction, float blinkStart, bool blinkState, bool &displayBlink)
     {
+        if (g_pitLimiterActive)
+        {
+            overlayPitLimiterMarkers(frame, true);
+            g_ledRenderDebug.pitLimiterOnly = true;
+            setLastRenderMode(LedFrameMode::Gt3PitOnly);
+            return;
+        }
+
         const int pairCount = (NUM_LEDS + 1) / 2;
         int pairsOn = (int)round(fraction * pairCount);
         if (pairsOn < 0)
@@ -110,12 +249,14 @@ namespace
         const bool finalBlink = fraction >= blinkStart;
         if (finalBlink)
         {
-            const uint32_t blinkColor = blinkState ? toStripColor(cfg.redColor) : strip.Color(0, 0, 0);
+            const uint32_t blinkColor = blinkState ? toStripColor(cfg.redColor) : 0;
             for (int i = 0; i < NUM_LEDS; ++i)
             {
-                strip.setPixelColor(i, blinkColor);
+                frame[i] = blinkColor;
             }
             displayBlink = blinkState;
+            g_ledRenderDebug.pitLimiterOnly = false;
+            setLastRenderMode(LedFrameMode::Gt3);
             return;
         }
 
@@ -123,17 +264,60 @@ namespace
         {
             const bool on = rank < pairsOn;
             const float pos = (pairCount > 1) ? (float)rank / (float)(pairCount - 1) : 1.0f;
-            const uint32_t color = on ? zoneColor(pos) : strip.Color(0, 0, 0);
+            const uint32_t color = on ? zoneColor(pos) : 0;
             const int left = rank;
             const int right = NUM_LEDS - 1 - rank;
-            strip.setPixelColor(left, color);
+            frame[left] = color;
             if (right != left)
             {
-                strip.setPixelColor(right, color);
+                frame[right] = color;
             }
         }
 
-        overlayPitLimiterMarkers(g_pitLimiterActive);
+        g_ledRenderDebug.pitLimiterOnly = false;
+        setLastRenderMode(LedFrameMode::Gt3);
+    }
+
+    void renderDiagnosticPattern(uint32_t *frame)
+    {
+        clearFrame(frame);
+        g_ledRenderDebug.pitLimiterOnly = false;
+
+        switch (g_ledDiagnosticMode)
+        {
+        case LedDiagnosticMode::Off:
+            setLastRenderMode(LedFrameMode::DiagnosticOff);
+            break;
+        case LedDiagnosticMode::StaticGreen:
+        {
+            const uint32_t color = toStripColor(cfg.greenColor);
+            for (int i = 0; i < NUM_LEDS; ++i)
+            {
+                frame[i] = color;
+            }
+            setLastRenderMode(LedFrameMode::DiagnosticStaticGreen);
+            break;
+        }
+        case LedDiagnosticMode::StaticWhite:
+        {
+            const uint32_t color = strip.Color(255, 255, 255);
+            for (int i = 0; i < NUM_LEDS; ++i)
+            {
+                frame[i] = color;
+            }
+            setLastRenderMode(LedFrameMode::DiagnosticStaticWhite);
+            break;
+        }
+        case LedDiagnosticMode::PitMarkers:
+            overlayPitLimiterMarkers(frame, true);
+            g_ledRenderDebug.pitLimiterOnly = true;
+            setLastRenderMode(LedFrameMode::DiagnosticPitMarkers);
+            break;
+        case LedDiagnosticMode::Live:
+        default:
+            setLastRenderMode(LedFrameMode::None);
+            break;
+        }
     }
 
     // Gleiche Kurve wie computeSimFraction() im HTML
@@ -232,6 +416,7 @@ namespace
             g_brightnessPreviewActive = false;
             strip.clear();
             strip.show();
+            invalidateLedFrameCacheInternal();
             if (!g_testActive)
             {
                 updateRpmBar(g_currentRpm);
@@ -257,6 +442,8 @@ namespace
         }
 
         strip.show();
+        setLastRenderMode(LedFrameMode::BrightnessPreview);
+        invalidateLedFrameCacheInternal();
     }
 }
 
@@ -281,9 +468,94 @@ void initLeds()
     setStatusLED(false);
 
     strip.begin();
-    strip.setBrightness(cfg.brightness);
+    g_appliedStripBrightness = static_cast<uint8_t>(clampInt(cfg.brightness, 0, 255));
+    strip.setBrightness(g_appliedStripBrightness);
+    ambientLightNoteAppliedBrightness(g_appliedStripBrightness);
     strip.clear();
     strip.show();
+    invalidateLedFrameCacheInternal();
+    resetLedMedianFilter(0);
+    g_ledDiagnosticMode = LedDiagnosticMode::Live;
+    g_ledRenderDebug.lastAppliedBrightness = g_appliedStripBrightness;
+    g_ledRenderDebug.lastStartRpm = cfg.rpmStartRpm;
+    g_ledRenderDebug.lastRenderMode = static_cast<uint8_t>(LedFrameMode::None);
+}
+
+void ledBarRefreshBrightness()
+{
+    applyStripBrightness(ambientLightGetLedBrightness());
+}
+
+void ledBarInvalidateFrameCache()
+{
+    invalidateLedFrameCacheInternal();
+}
+
+void ledBarSetDiagnosticMode(LedDiagnosticMode mode)
+{
+    if (g_ledDiagnosticMode == mode)
+    {
+        return;
+    }
+
+    g_ledDiagnosticMode = mode;
+    g_testActive = false;
+    g_brightnessPreviewActive = false;
+    invalidateLedFrameCacheInternal();
+}
+
+LedDiagnosticMode ledBarGetDiagnosticMode()
+{
+    return g_ledDiagnosticMode;
+}
+
+const char *ledBarGetDiagnosticModeName()
+{
+    switch (g_ledDiagnosticMode)
+    {
+    case LedDiagnosticMode::Off:
+        return "off";
+    case LedDiagnosticMode::StaticGreen:
+        return "static-green";
+    case LedDiagnosticMode::StaticWhite:
+        return "static-white";
+    case LedDiagnosticMode::PitMarkers:
+        return "pit-markers";
+    case LedDiagnosticMode::Live:
+    default:
+        return "live";
+    }
+}
+
+const char *ledBarGetLastRenderModeName()
+{
+    switch (static_cast<LedFrameMode>(g_ledRenderDebug.lastRenderMode))
+    {
+    case LedFrameMode::Linear:
+        return "linear";
+    case LedFrameMode::Gt3:
+        return "gt3";
+    case LedFrameMode::Gt3PitOnly:
+        return "gt3-pit-only";
+    case LedFrameMode::DiagnosticOff:
+        return "diag-off";
+    case LedFrameMode::DiagnosticStaticGreen:
+        return "diag-green";
+    case LedFrameMode::DiagnosticStaticWhite:
+        return "diag-white";
+    case LedFrameMode::DiagnosticPitMarkers:
+        return "diag-pit";
+    case LedFrameMode::BrightnessPreview:
+        return "brightness-preview";
+    case LedFrameMode::None:
+    default:
+        return "none";
+    }
+}
+
+uint8_t ledBarGetAppliedBrightness()
+{
+    return g_appliedStripBrightness;
 }
 
 void updateRpmBar(int rpm)
@@ -293,9 +565,19 @@ void updateRpmBar(int rpm)
         return;
     }
 
+    ++g_ledRenderDebug.renderCalls;
+
     if (rpm < 0)
     {
         rpm = 0;
+    }
+
+    const int filteredRpm = filterLedRpm(rpm, g_testActive);
+    g_ledRenderDebug.lastRawRpm = rpm;
+    g_ledRenderDebug.lastFilteredRpm = filteredRpm;
+    if (filteredRpm != rpm)
+    {
+        ++g_ledRenderDebug.filterAdjustCount;
     }
 
     int maxRpmForBar;
@@ -312,10 +594,21 @@ void updateRpmBar(int rpm)
         maxRpmForBar = (cfg.fixedMaxRpm > 1000) ? cfg.fixedMaxRpm : 2000;
     }
 
-    float fraction = (float)rpm / (float)maxRpmForBar;
-    if (fraction > 1.0f)
+    int startRpm = clampInt(cfg.rpmStartRpm, 0, 12000);
+    if (maxRpmForBar <= startRpm)
     {
-        fraction = 1.0f;
+        startRpm = max(0, maxRpmForBar - 1);
+    }
+    g_ledRenderDebug.lastStartRpm = startRpm;
+
+    float fraction = 0.0f;
+    if (filteredRpm > startRpm && maxRpmForBar > startRpm)
+    {
+        fraction = (float)(filteredRpm - startRpm) / (float)(maxRpmForBar - startRpm);
+        if (fraction > 1.0f)
+        {
+            fraction = 1.0f;
+        }
     }
 
     float greenEnd = cfg.greenEndPct / 100.0f;
@@ -336,12 +629,14 @@ void updateRpmBar(int rpm)
         blinkStart = 1.0f;
 
     int ledsOn = (int)round(fraction * NUM_LEDS);
+    g_ledRenderDebug.lastDisplayedLeds = ledsOn;
 
     static unsigned long lastBlink = 0;
     static bool blinkState = false;
     unsigned long now = millis();
 
     bool shiftBlink = ((cfg.mode == LED_MODE_F1 || cfg.mode == LED_MODE_AGGRESSIVE || cfg.mode == LED_MODE_GT3) && fraction >= blinkStart);
+    g_ledRenderDebug.lastShiftBlink = shiftBlink;
 
     if (shiftBlink && now - lastBlink > 100)
     {
@@ -356,52 +651,147 @@ void updateRpmBar(int rpm)
         ledsOn = NUM_LEDS;
         displayBlink = blinkState;
     }
-
-    strip.clear();
+    uint32_t frame[NUM_LEDS];
+    clearFrame(frame);
 
     if (cfg.mode == LED_MODE_GT3)
     {
-        renderGt3Pattern(fraction, blinkStart, blinkState, displayBlink);
+        renderGt3Pattern(frame, fraction, blinkStart, blinkState, displayBlink);
     }
     else
     {
-        renderLinearPattern(ledsOn, cfg.mode == LED_MODE_AGGRESSIVE && fraction >= blinkStart, shiftBlink, blinkState, greenEnd, yellowEnd, displayBlink);
+        renderLinearPattern(frame, ledsOn, cfg.mode == LED_MODE_AGGRESSIVE && fraction >= blinkStart, shiftBlink, blinkState, greenEnd, yellowEnd, displayBlink);
     }
 
-    strip.show();
-    displaySetShiftBlink(displayBlink);
+    const bool frameChanged = frameDiffersFromCache(frame);
+    const bool blinkChanged = displayBlink != g_lastDisplayBlinkState;
 
+    if (frameChanged || g_forceNextStripShow)
+    {
+        pushFrameToStrip(frame);
+    }
+    else
+    {
+        ++g_ledRenderDebug.frameSkipCount;
+    }
+
+    if (blinkChanged)
+    {
+        displaySetShiftBlink(displayBlink);
+        g_lastDisplayBlinkState = displayBlink;
+    }
+}
+
+namespace
+{
+    TaskHandle_t g_ledBarTaskHandle = nullptr;
+    volatile bool g_ledBarTaskRunning = false;
+
+    // Target 100 Hz. At fewer than 10 ms per frame we'd just be refreshing the
+    // NeoPixel bus faster than the eye can see without any data win; 10 ms is
+    // also comfortably above the WS2812 latch time so we never race the strip.
+    constexpr uint32_t LED_TASK_TICK_MS = 10;
+
+    void ledRenderOnce()
+    {
+        ledBarRefreshBrightness();
+
+        if (g_brightnessPreviewActive)
+        {
+            renderPreviewFade();
+            return;
+        }
+
+        if (g_ledDiagnosticMode != LedDiagnosticMode::Live)
+        {
+            ++g_ledRenderDebug.renderCalls;
+            uint32_t frame[NUM_LEDS];
+            renderDiagnosticPattern(frame);
+            const bool frameChanged = frameDiffersFromCache(frame);
+            if (frameChanged || g_forceNextStripShow)
+            {
+                pushFrameToStrip(frame);
+            }
+            else
+            {
+                ++g_ledRenderDebug.frameSkipCount;
+            }
+
+            if (g_lastDisplayBlinkState)
+            {
+                displaySetShiftBlink(false);
+                g_lastDisplayBlinkState = false;
+            }
+            g_ledRenderDebug.lastShiftBlink = false;
+            return;
+        }
+
+        if (g_testActive)
+        {
+            unsigned long now = millis();
+            unsigned long elapsed = now - g_testStartMs;
+            if (elapsed >= TEST_SWEEP_DURATION)
+            {
+                g_testActive = false;
+                updateRpmBar(g_currentRpm);
+            }
+            else
+            {
+                float t = (float)elapsed / (float)TEST_SWEEP_DURATION;
+                float pct = computeTestSweepPct(t);
+                int simRpm = (int)(pct * g_testMaxRpm);
+                updateRpmBar(simRpm);
+            }
+            return;
+        }
+
+        if (!g_animationActive)
+        {
+            updateRpmBar(g_currentRpm);
+        }
+    }
+
+    void ledBarTaskBody(void *)
+    {
+        TickType_t lastWake = xTaskGetTickCount();
+        for (;;)
+        {
+            ledRenderOnce();
+            vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(LED_TASK_TICK_MS));
+        }
+    }
 }
 
 void ledBarLoop()
 {
-    if (g_brightnessPreviewActive)
+    // When the dedicated task has taken over we must NOT also render from
+    // loop() — two renderers would fight over the strip buffer.
+    if (g_ledBarTaskRunning)
     {
-        renderPreviewFade();
         return;
     }
+    ledRenderOnce();
+}
 
-    if (g_testActive)
+void startLedBarTask()
+{
+    if (g_ledBarTaskRunning)
     {
-        unsigned long now = millis();
-        unsigned long elapsed = now - g_testStartMs;
-        if (elapsed >= TEST_SWEEP_DURATION)
-        {
-            g_testActive = false;
-            updateRpmBar(g_currentRpm);
-        }
-        else
-        {
-            float t = (float)elapsed / (float)TEST_SWEEP_DURATION; // 0..1
-            float pct = computeTestSweepPct(t);
-            int simRpm = (int)(pct * g_testMaxRpm);
-            updateRpmBar(simRpm);
-        }
         return;
     }
+    g_ledBarTaskRunning = true;
 
-    if (!g_animationActive)
-    {
-        updateRpmBar(g_currentRpm);
-    }
+    // Pinned to Core 1 so it shares a cache with the Arduino loop (config
+    // reads etc.) but runs as its own task with a higher priority than
+    // loop() (which is priority 1). Priority 2 is high enough that render
+    // jitter stays under a frame time, low enough that WiFi + BLE are not
+    // starved.
+    xTaskCreatePinnedToCore(
+        ledBarTaskBody,
+        "ledBar",
+        4096,
+        nullptr,
+        2,
+        &g_ledBarTaskHandle,
+        1);
 }

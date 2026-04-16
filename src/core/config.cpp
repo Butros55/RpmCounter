@@ -57,10 +57,19 @@ void initConfig()
 {
     cfg.autoScaleMaxRpm = true;
     cfg.fixedMaxRpm = 5000;
+    cfg.rpmStartRpm = 1000;
     cfg.greenEndPct = 60;
     cfg.yellowEndPct = 85;
     cfg.blinkStartPct = 90;
     cfg.brightness = DEFAULT_BRIGHTNESS;
+    cfg.autoBrightnessEnabled = false;
+    cfg.ambientLightSdaPin = AMBIENT_LIGHT_DEFAULT_SDA;
+    cfg.ambientLightSclPin = AMBIENT_LIGHT_DEFAULT_SCL;
+    cfg.autoBrightnessStrengthPct = 100;
+    cfg.autoBrightnessMin = 18;
+    cfg.autoBrightnessResponsePct = 35;
+    cfg.autoBrightnessLuxMin = 2;
+    cfg.autoBrightnessLuxMax = 5000;
     cfg.mode = 1;
     cfg.logoOnIgnitionOn = true;
     cfg.logoOnEngineStart = true;
@@ -109,6 +118,7 @@ void loadConfig()
 
     cfg.autoScaleMaxRpm = prefs.getBool("autoscale", cfg.autoScaleMaxRpm);
     cfg.fixedMaxRpm = clampInt(prefs.getInt("fixedMax", cfg.fixedMaxRpm), 1000, 8000);
+    cfg.rpmStartRpm = clampInt(prefs.getInt("rpmStart", cfg.rpmStartRpm), 0, 12000);
     cfg.greenEndPct = clampInt(prefs.getInt("greenEnd", cfg.greenEndPct), 0, 100);
     cfg.yellowEndPct = clampInt(prefs.getInt("yellowEnd", cfg.yellowEndPct), 0, 100);
     cfg.blinkStartPct = clampInt(prefs.getInt("blinkStart", cfg.blinkStartPct), 0, 100);
@@ -117,6 +127,17 @@ void loadConfig()
     if (cfg.blinkStartPct < cfg.yellowEndPct)
         cfg.blinkStartPct = cfg.yellowEndPct;
     cfg.brightness = clampInt(prefs.getInt("brightness", cfg.brightness), 0, 255);
+    cfg.autoBrightnessEnabled = prefs.getBool("autoBright", cfg.autoBrightnessEnabled);
+    cfg.ambientLightSdaPin = clampInt(prefs.getInt("ambSda", cfg.ambientLightSdaPin), 0, 48);
+    cfg.ambientLightSclPin = clampInt(prefs.getInt("ambScl", cfg.ambientLightSclPin), 0, 48);
+    cfg.autoBrightnessStrengthPct = clampInt(prefs.getInt("autoBrPct", cfg.autoBrightnessStrengthPct), 25, 200);
+    cfg.autoBrightnessMin = clampInt(prefs.getInt("autoBrMin", cfg.autoBrightnessMin), 0, 255);
+    cfg.autoBrightnessResponsePct = clampInt(prefs.getInt("autoResp", cfg.autoBrightnessResponsePct), 1, 100);
+    cfg.autoBrightnessLuxMin = clampInt(prefs.getInt("autoLuxMin", cfg.autoBrightnessLuxMin), 0, 120000);
+    cfg.autoBrightnessLuxMax =
+        clampInt(prefs.getInt("autoLuxMax", cfg.autoBrightnessLuxMax), cfg.autoBrightnessLuxMin + 1, 120000);
+    if (cfg.autoBrightnessMin > cfg.brightness)
+        cfg.autoBrightnessMin = cfg.brightness;
     cfg.mode = clampInt(prefs.getInt("mode", cfg.mode), 0, 3);
     cfg.displayBrightness = clampInt(prefs.getInt("dispBright", cfg.displayBrightness), 10, 255);
     cfg.uiTutorialSeen = prefs.getBool("uiTutSeen", cfg.uiTutorialSeen);
@@ -169,10 +190,19 @@ void saveConfig()
 
     prefs.putBool("autoscale", cfg.autoScaleMaxRpm);
     prefs.putInt("fixedMax", cfg.fixedMaxRpm);
+    prefs.putInt("rpmStart", cfg.rpmStartRpm);
     prefs.putInt("greenEnd", cfg.greenEndPct);
     prefs.putInt("yellowEnd", cfg.yellowEndPct);
     prefs.putInt("blinkStart", cfg.blinkStartPct);
     prefs.putInt("brightness", cfg.brightness);
+    prefs.putBool("autoBright", cfg.autoBrightnessEnabled);
+    prefs.putInt("ambSda", cfg.ambientLightSdaPin);
+    prefs.putInt("ambScl", cfg.ambientLightSclPin);
+    prefs.putInt("autoBrPct", cfg.autoBrightnessStrengthPct);
+    prefs.putInt("autoBrMin", cfg.autoBrightnessMin);
+    prefs.putInt("autoResp", cfg.autoBrightnessResponsePct);
+    prefs.putInt("autoLuxMin", cfg.autoBrightnessLuxMin);
+    prefs.putInt("autoLuxMax", cfg.autoBrightnessLuxMax);
     prefs.putInt("mode", cfg.mode);
     prefs.putInt("dispBright", cfg.displayBrightness);
     prefs.putBool("uiTutSeen", cfg.uiTutorialSeen);

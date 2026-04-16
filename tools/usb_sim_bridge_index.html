@@ -26,7 +26,7 @@
           <div>
             <div class="kicker">USB Sim Bridge</div>
             <div class="hero-title">ShiftLight am PC</div>
-            <div class="hero-copy">Lokale USB-Oberflaeche fuer den ESP32. Der PC liest SimHub und schiebt Telemetrie per USB-CDC auf das Board. WiFi und BLE werden in diesem Pfad am ESP unterdrueckt.</div>
+            <div class="hero-copy">Lokale USB-Oberflaeche fuer den ESP32. Der PC liest SimHub und schiebt Telemetrie per USB-CDC auf das Board. Nur in USB-only wird der ESP exklusiv auf USB festgelegt, Auto darf sauber auf Netzwerk ausweichen.</div>
           </div>
           <div class="pill-row">
             <span class="pill neutral" id="pillTelemetry">Initialisiere</span>
@@ -127,8 +127,16 @@
           <div class="info-list">
             <div class="info-row"><div class="info-label">Serieller Port</div><div class="info-value mono" id="diagPort">-</div></div>
             <div class="info-row"><div class="info-label">Bridge Host</div><div class="info-value" id="diagHost">-</div></div>
+            <div class="info-row"><div class="info-label">ESP WLAN IP</div><div class="info-value mono" id="diagEspIp">-</div></div>
             <div class="info-row"><div class="info-label">Letzter Fehler</div><div class="info-value" id="diagError">-</div></div>
             <div class="info-row"><div class="info-label">Letztes SimHub Paket</div><div class="info-value" id="diagAge">-</div></div>
+            <div class="info-row"><div class="info-label">ESP USB Alter</div><div class="info-value mono" id="diagEspAge">-</div></div>
+            <div class="info-row"><div class="info-label">USB Gaps</div><div class="info-value mono" id="diagUsbGap">-</div></div>
+            <div class="info-row"><div class="info-label">Seq / Dups</div><div class="info-value mono" id="diagUsbSeq">-</div></div>
+            <div class="info-row"><div class="info-label">LED Filter</div><div class="info-value mono" id="diagLedFilter">-</div></div>
+            <div class="info-row"><div class="info-label">LED Render</div><div class="info-value mono" id="diagLedRender">-</div></div>
+            <div class="info-row"><div class="info-label">Bridge TX</div><div class="info-value mono" id="diagBridgeGap">-</div></div>
+            <div class="info-row"><div class="info-label">Netzwerk Debug</div><div class="info-value mono" id="diagNetErr">-</div></div>
           </div>
           <div class="button-row" style="margin-top:14px">
             <button type="button" class="btn btn-secondary" id="refreshBtn">Status aktualisieren</button>
@@ -137,12 +145,12 @@
         </div>
         <div class="panel">
           <div class="panel-head">
-            <div><div class="section-title">Schnellstart</div><div class="panel-copy">Die Bridge stellt die Weboberflaeche lokal unter <span class="mono">localhost</span> bereit. Kein WiFi-Access-Point am ESP noetig.</div></div>
+            <div><div class="section-title">Schnellstart</div><div class="panel-copy">Unter <span class="mono">/</span> landet jetzt wieder die echte ESP-Weboberflaeche, solange das Board im WLAN haengt. Diese Seite bleibt unter <span class="mono">/bridge/</span> fuer Diagnose und USB-Checks.</div></div>
           </div>
           <div class="info-list">
             <div class="info-row"><div class="info-label">1</div><div class="info-value">ESP per USB anschliessen und die neue Firmware flashen</div></div>
             <div class="info-row"><div class="info-label">2</div><div class="info-value">SimHub starten und ACC in eine laufende Session bringen</div></div>
-            <div class="info-row"><div class="info-label">3</div><div class="info-value">Diese USB-Bridge offen lassen und die Seite hier nutzen</div></div>
+            <div class="info-row"><div class="info-label">3</div><div class="info-value">ESP-Setup unter <a href="/" style="color:var(--accent)">/</a> oeffnen, Bridge-Diagnose bei Bedarf unter <a href="/bridge/" style="color:var(--accent)">/bridge/</a></div></div>
           </div>
         </div>
       </div>
@@ -225,9 +233,22 @@
       state.usbReady = !!(data.usbConnected && data.usbBridgeConnected && data.usbLive);
       const rawThrottle = Number(data.throttle ?? 0);
       const throttlePct = Math.round(rawThrottle > 1 ? rawThrottle : rawThrottle * 100);
-      setPill('pillTelemetry', data.activeTelemetryLabel === 'USB Sim' ? 'ok' : (data.activeTelemetryLabel === 'OBD' ? 'warn' : 'neutral'), data.activeTelemetryLabel || 'Keine');
+      const transportMode = data.simTransportMode || 'AUTO';
+      const usbOnly = transportMode === 'USB_ONLY';
+      const networkOnly = transportMode === 'NETWORK_ONLY';
+      const telemetryTone = data.activeTelemetryLabel === 'USB Sim' ? 'ok' : (data.activeTelemetryLabel === 'OBD' ? 'warn' : (data.activeTelemetryLabel === 'Keine' ? 'bad' : 'neutral'));
+      let simTone = data.simHubLive ? 'ok' : (data.simHubReachable ? 'warn' : 'bad');
+      let simText = data.simHubStateLabel || 'SimHub';
+      if(usbOnly){
+        simTone = data.usbLive ? 'ok' : (data.usbConnected ? 'warn' : 'bad');
+        simText = data.usbStateLabel || 'USB wartet';
+      } else if(networkOnly){
+        simTone = data.simHubLive ? 'ok' : (data.simHubReachable ? 'warn' : 'bad');
+        simText = data.simHubStateLabel || 'Netzwerk wartet';
+      }
+      setPill('pillTelemetry', telemetryTone, (data.activeTelemetryLabel || 'Keine') + ((data.telemetryFallback && transportMode === 'AUTO') ? ' Fallback' : ''));
       setPill('pillUsb', data.usbLive ? 'ok' : (data.usbConnected ? 'warn' : 'bad'), data.usbStateLabel || 'USB');
-      setPill('pillSimHub', data.simHubLive ? 'ok' : (data.simHubReachable ? 'warn' : 'bad'), data.simHubStateLabel || 'SimHub');
+      setPill('pillSimHub', simTone, simText);
       setText('metricRpm', String(data.rpm ?? 0));
       setText('metricGear', data.gearText || 'N');
       setText('metricSpeed', String((data.speed ?? 0) + ' km/h'));
@@ -236,15 +257,23 @@
       setText('metricShift', data.shiftState || 'Ready');
       setText('metricPort', data.port || 'Kein ESP gefunden');
       setText('metricMode', data.modeSummary || 'Noch kein Status');
-      setText('statusSource', data.activeTelemetryLabel || '-');
+      setText('statusSource', (data.activeTelemetryLabel || '-') + ((data.telemetryFallback && transportMode === 'AUTO') ? ' Fallback' : ''));
       setText('statusUsb', data.usbStateLabel || '-');
-      setText('statusSimHub', data.simHubStateLabel || '-');
+      setText('statusSimHub', simText || '-');
       setText('statusWifi', data.wifiSummary || '-');
       setText('statusObd', data.obdSummary || '-');
       setText('diagPort', data.port || '-');
       setText('diagHost', data.usbHost || data.host || '-');
+      setText('diagEspIp', data.espWifiIp || '-');
       setText('diagError', data.lastError || '-');
       setText('diagAge', data.lastTelemetryAgeLabel || '-');
+      setText('diagEspAge', String(data.espUsbTelemetryAgeMs ?? 0) + ' ms');
+      setText('diagUsbGap', `${data.espUsbTelemetryLastGapMs ?? 0} / ${data.espUsbTelemetryMaxGapMs ?? 0} ms (${data.espUsbTelemetryGapEvents ?? 0})`);
+      setText('diagUsbSeq', `seq ${data.espUsbTelemetrySeq ?? 0} | gap ${data.espUsbTelemetrySeqGapEvents ?? 0}/${data.espUsbTelemetrySeqGapFrames ?? 0} | dup ${data.espUsbTelemetrySeqDuplicates ?? 0}`);
+      setText('diagLedFilter', `${data.espLedRawRpm ?? 0} -> ${data.espLedFilteredRpm ?? 0} rpm | adj ${data.espLedFilterAdjusts ?? 0}`);
+      setText('diagLedRender', `show ${data.espLedFrameShows ?? 0} | skip ${data.espLedFrameSkips ?? 0} | mode ${data.espLedRenderMode || '-'} | start ${data.espLedStartRpm ?? 0}`);
+      setText('diagBridgeGap', `${data.bridgeLastTelemetryGapMs ?? 0} / ${data.bridgeMaxTelemetryGapMs ?? 0} ms | tx ${data.bridgeTelemetryTxCount ?? 0} | rpc ${data.bridgeStatusRpcErrors ?? 0}`);
+      setText('diagNetErr', `ok ${data.espSimHubPollOk ?? 0} err ${data.espSimHubPollErr ?? 0} suppr ${data.espSimHubSuppressedWhileUsb ?? 0} ${data.espSimHubLastError ? '| ' + data.espSimHubLastError : ''}`);
       syncDirty();
     }
     async function loadStatus(){ const res = await fetch('/api/status', { cache:'no-store' }); applyStatus(await res.json()); }

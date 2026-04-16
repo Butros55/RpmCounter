@@ -3,8 +3,9 @@
 #include <Arduino.h>
 
 void initUsbSimBridge();
-void usbSimBridgeLoop();
+void usbSimBridgeLoop();          // kept for compatibility; now a no-op when the task is running
 void usbSimBridgeUpdateConfig();
+void startUsbSimBridgeTask();     // launches the dedicated reader task
 
 bool usbSimTransportEnabled();
 bool usbSimBridgeOnline();

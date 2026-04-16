@@ -184,10 +184,6 @@ namespace
                 }
 
                 telemetryOnObdSample(g_obdCurrentRpm, g_obdVehicleSpeedKmh, g_obdEstimatedGear, nowMs);
-                if (!g_testActive && !g_animationActive)
-                {
-                    updateRpmBar(g_currentRpm);
-                }
             }
         }
 

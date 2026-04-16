@@ -7,6 +7,7 @@
 #include "core/config.h"
 #include "core/state.h"
 #include "core/wifi.h"
+#include "telemetry/telemetry_manager.h"
 #include "telemetry/usb_sim_bridge.h"
 
 namespace
@@ -41,6 +42,42 @@ namespace
         case TelemetryPreference::Auto:
         default:
             return UiTelemetryPreference::Auto;
+        }
+    }
+
+    UiSimTransportMode toUiSimTransportMode(SimRuntimeTransportMode mode)
+    {
+        switch (mode)
+        {
+        case SimRuntimeTransportMode::UsbOnly:
+            return UiSimTransportMode::UsbOnly;
+        case SimRuntimeTransportMode::NetworkOnly:
+            return UiSimTransportMode::NetworkOnly;
+        case SimRuntimeTransportMode::Auto:
+            return UiSimTransportMode::Auto;
+        case SimRuntimeTransportMode::Disabled:
+        default:
+            return UiSimTransportMode::Disabled;
+        }
+    }
+
+    UiSimHubState toUiSimHubState(SimHubConnectionState state)
+    {
+        switch (state)
+        {
+        case SimHubConnectionState::WaitingForHost:
+            return UiSimHubState::WaitingForHost;
+        case SimHubConnectionState::WaitingForNetwork:
+            return UiSimHubState::WaitingForNetwork;
+        case SimHubConnectionState::WaitingForData:
+            return UiSimHubState::WaitingForData;
+        case SimHubConnectionState::Live:
+            return UiSimHubState::Live;
+        case SimHubConnectionState::Error:
+            return UiSimHubState::Error;
+        case SimHubConnectionState::Disabled:
+        default:
+            return UiSimHubState::Disabled;
         }
     }
 
@@ -110,6 +147,8 @@ UiRuntimeState makeEsp32UiState()
     state.bleConnected = g_connected;
     state.bleConnecting = g_bleConnectInProgress;
     state.bleSuppressed = usbSimShouldBlockObd();
+    state.simTransportMode = toUiSimTransportMode(resolveSimRuntimeTransportMode(cfg.telemetryPreference, cfg.simTransportPreference));
+    state.simHubState = toUiSimHubState(g_simHubConnectionState);
     const std::vector<BleDeviceInfo> &bleScanResults = getBleScanResults();
     state.bleScanResults.reserve(bleScanResults.size());
     for (const BleDeviceInfo &item : bleScanResults)
@@ -125,7 +164,15 @@ UiRuntimeState makeEsp32UiState()
     {
         state.telemetrySource = UiTelemetrySource::UsbBridge;
     }
-    else if (g_activeTelemetrySource == ActiveTelemetrySource::SimHubNetwork ||
+    else if (g_activeTelemetrySource == ActiveTelemetrySource::SimHubNetwork)
+    {
+        state.telemetrySource = UiTelemetrySource::SimHubNetwork;
+    }
+    else if (state.simTransportMode == UiSimTransportMode::UsbOnly)
+    {
+        state.telemetrySource = UiTelemetrySource::UsbBridge;
+    }
+    else if (state.simTransportMode == UiSimTransportMode::NetworkOnly ||
              (cfg.telemetryPreference != TelemetryPreference::Obd && cfg.simHubHost.length() > 0))
     {
         state.telemetrySource = UiTelemetrySource::SimHubNetwork;
@@ -135,11 +182,22 @@ UiRuntimeState makeEsp32UiState()
         state.telemetrySource = UiTelemetrySource::Esp32Obd;
     }
     state.telemetryStale = (g_activeTelemetrySource == ActiveTelemetrySource::None);
-    state.telemetryUsingFallback = false;
+    state.telemetryUsingFallback = telemetrySourceIsFallback(g_activeTelemetrySource, cfg.telemetryPreference, cfg.simTransportPreference);
     state.simHubConfigured = cfg.simHubHost.length() > 0;
     state.simHubReachable = g_simHubReachable;
     state.throttle = g_currentThrottle;
-    state.telemetryTimestampMs = (g_activeTelemetrySource == ActiveTelemetrySource::SimHubNetwork || g_activeTelemetrySource == ActiveTelemetrySource::UsbSim) ? g_lastSimHubTelemetryMs : g_lastObdTelemetryMs;
+    if (g_activeTelemetrySource == ActiveTelemetrySource::UsbSim)
+    {
+        state.telemetryTimestampMs = g_lastUsbTelemetryMs;
+    }
+    else if (g_activeTelemetrySource == ActiveTelemetrySource::SimHubNetwork)
+    {
+        state.telemetryTimestampMs = g_lastSimHubNetworkTelemetryMs;
+    }
+    else
+    {
+        state.telemetryTimestampMs = g_lastObdTelemetryMs;
+    }
     if (cfg.simHubHost.length() > 0)
     {
         state.simHubEndpoint = toStdString(cfg.simHubHost) + ":" + std::to_string(cfg.simHubPort);
