@@ -71,16 +71,21 @@ struct TelemetryDebugInfo
     TelemetryRenderSnapshot snapshot{};
     TelemetrySourceTransitionEvent lastSourceTransition{};
     SimSessionTransitionEvent lastSimSessionTransition{};
+    unsigned long lastSnapshotPublishMs = 0;
     uint32_t sourceTransitionCount = 0;
     uint32_t simSessionTransitionCount = 0;
     uint32_t simSessionSuppressedCount = 0;
+    uint32_t snapshotPublishCount = 0;
     uint8_t sourceHistoryCount = 0;
     uint8_t simHistoryCount = 0;
+    uint16_t taskIntervalMs = 0;
+    bool taskRunning = false;
     TelemetrySourceTransitionEvent sourceHistory[TELEMETRY_DEBUG_HISTORY_LEN]{};
     SimSessionTransitionEvent simHistory[TELEMETRY_DEBUG_HISTORY_LEN]{};
 };
 
 void initTelemetry();
+void startTelemetryTask(); // launches the fixed-cadence (~3 ms) telemetry publisher
 void telemetryLoop();
 void telemetryOnObdSample(int rpm, int speedKmh, int gear, unsigned long sampleMs);
 void telemetryOnObdDisconnected();

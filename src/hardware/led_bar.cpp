@@ -124,6 +124,18 @@ namespace
     constexpr uint8_t DISPLAY_MODE_LINEAR = 1;
     constexpr uint8_t DISPLAY_MODE_GT3 = 2;
 
+    uint32_t toStripColor(const RgbColor &c);
+
+    bool ledFastResponseForSource(ActiveTelemetrySource source)
+    {
+        return source != ActiveTelemetrySource::None;
+    }
+
+    uint32_t redZoneColor()
+    {
+        return toStripColor(effectiveRedColor());
+    }
+
     void invalidateLedFrameCacheInternal()
     {
         g_ledFrameCacheValid = false;
@@ -376,9 +388,9 @@ namespace
         g_ledMedianIndex = 0;
     }
 
-    int filterLedRpm(int rpm, bool bypass)
+    int filterLedRpm(int rpm, bool bypass, bool fastResponse)
     {
-        if (bypass)
+        if (bypass || fastResponse)
         {
             resetLedMedianFilter(rpm);
             return rpm;
@@ -469,7 +481,7 @@ namespace
         {
             return toStripColor(cfg.yellowColor);
         }
-        return toStripColor(cfg.redColor);
+        return redZoneColor();
     }
 
     struct LedZoneProfile
@@ -509,7 +521,33 @@ namespace
         return constrain(actualFraction / profile.redFillEnd, 0.0f, 1.0f);
     }
 
-    int computeStableDisplayedLevel(float displayFraction, int levelCount, uint8_t displayMode, bool bypass)
+    unsigned long blinkIntervalMsFromPct(int blinkSpeedPct)
+    {
+        const int clampedPct = clampInt(blinkSpeedPct, 0, 100);
+        if (clampedPct <= 0)
+        {
+            return 0;
+        }
+        if (clampedPct >= 100)
+        {
+            return 1;
+        }
+
+        const float normalized = clampedPct / 99.0f;
+        const float intervalMs = 480.0f - (normalized * 440.0f);
+        return static_cast<unsigned long>(lroundf(constrain(intervalMs, 40.0f, 480.0f)));
+    }
+
+    int directDisplayedLevel(float rawLevel, int levelCount)
+    {
+        if (rawLevel <= 0.0f)
+        {
+            return 0;
+        }
+        return clampInt(static_cast<int>(ceilf(rawLevel)), 0, levelCount);
+    }
+
+    int computeStableDisplayedLevel(float displayFraction, int levelCount, uint8_t displayMode, bool bypass, bool fastResponse)
     {
         if (levelCount <= 0)
         {
@@ -518,10 +556,11 @@ namespace
         }
 
         const float rawLevel = constrain(displayFraction, 0.0f, 1.0f) * static_cast<float>(levelCount);
-        const int desiredLevel = clampInt(static_cast<int>(lroundf(rawLevel)), 0, levelCount);
+        const int desiredLevel = fastResponse ? directDisplayedLevel(rawLevel, levelCount)
+                                              : clampInt(static_cast<int>(lroundf(rawLevel)), 0, levelCount);
         g_stableDisplayRawLevel = rawLevel;
 
-        if (bypass || g_stableDisplayMode != displayMode || g_stableDisplayLevelCount != levelCount)
+        if (bypass || fastResponse || g_stableDisplayMode != displayMode || g_stableDisplayLevelCount != levelCount)
         {
             g_stableDisplayLevel = desiredLevel;
             g_stableDisplayLevelCount = levelCount;
@@ -582,7 +621,7 @@ namespace
 
                 if (aggressiveFullBlink)
                 {
-                    color = blinkState ? strip.Color(255, 0, 0) : 0;
+                    color = blinkState ? redZoneColor() : 0;
                 }
                 else
                 {
@@ -596,12 +635,12 @@ namespace
                     }
                     else if (cfg.mode == LED_MODE_F1 && shiftBlink)
                     {
-                        color = blinkState ? toStripColor(cfg.redColor) : 0;
+                        color = blinkState ? redZoneColor() : 0;
                         displayBlink = blinkState;
                     }
                     else
                     {
-                        color = toStripColor(cfg.redColor);
+                        color = redZoneColor();
                     }
 
                     if (partiallyLit)
@@ -639,7 +678,7 @@ namespace
 
         if (finalBlink)
         {
-            const uint32_t blinkColor = blinkState ? toStripColor(cfg.redColor) : 0;
+            const uint32_t blinkColor = blinkState ? redZoneColor() : 0;
             for (int i = 0; i < ledCount; ++i)
             {
                 frame[i] = blinkColor;
@@ -1029,6 +1068,8 @@ void initLeds()
     g_ledRenderDebug.lastAppliedBrightness = g_appliedStripBrightness;
     g_ledRenderDebug.lastStartRpm = cfg.rpmStartRpm;
     g_ledRenderDebug.lastRenderMode = static_cast<uint8_t>(LedFrameMode::None);
+    g_ledRenderDebug.fastResponseActive = false;
+    g_ledRenderDebug.redFallbackActive = redColorFallbackActive();
     g_lastWriter = LedRenderWriter::None;
     g_testSweepMode = LedTestSweepMode::Expressive;
     g_effectState = LedEffectState{};
@@ -1316,10 +1357,13 @@ namespace
         ++g_ledRenderDebug.renderCalls;
 
         rpm = max(0, rpm);
+        const bool fastResponse = ledFastResponseForSource(snapshot.source) && !g_testActive;
         const bool bypassFilter = g_testActive;
-        const int filteredRpm = filterLedRpm(rpm, bypassFilter);
+        const int filteredRpm = filterLedRpm(rpm, bypassFilter, fastResponse);
         g_ledRenderDebug.lastRawRpm = rpm;
         g_ledRenderDebug.lastFilteredRpm = filteredRpm;
+        g_ledRenderDebug.fastResponseActive = fastResponse;
+        g_ledRenderDebug.redFallbackActive = redColorFallbackActive();
         if (filteredRpm != rpm)
         {
             ++g_ledRenderDebug.filterAdjustCount;
@@ -1355,18 +1399,34 @@ namespace
         static unsigned long lastBlink = 0;
         static bool blinkState = false;
         const unsigned long now = millis();
+        const int blinkSpeedPct = clampInt(cfg.blinkSpeedPct, 0, 100);
         const bool shiftBlink =
             ((cfg.mode == LED_MODE_F1 || cfg.mode == LED_MODE_AGGRESSIVE || cfg.mode == LED_MODE_GT3) &&
              fraction >= zoneProfile.blinkStart);
         g_ledRenderDebug.lastShiftBlink = shiftBlink;
-        if (shiftBlink && now - lastBlink > 100)
-        {
-            lastBlink = now;
-            blinkState = !blinkState;
-        }
-        else if (!shiftBlink)
+        if (!shiftBlink)
         {
             blinkState = false;
+            lastBlink = now;
+        }
+        else if (blinkSpeedPct >= 100)
+        {
+            blinkState = true;
+            lastBlink = now;
+        }
+        else if (blinkSpeedPct <= 0)
+        {
+            blinkState = false;
+            lastBlink = now;
+        }
+        else
+        {
+            const unsigned long blinkIntervalMs = blinkIntervalMsFromPct(blinkSpeedPct);
+            if (blinkIntervalMs > 0 && (now < lastBlink || (now - lastBlink) >= blinkIntervalMs))
+            {
+                lastBlink = now;
+                blinkState = !blinkState;
+            }
         }
 
         bool displayBlink = false;
@@ -1381,7 +1441,7 @@ namespace
         if (cfg.mode == LED_MODE_GT3)
         {
             const int pairCount = (ledCount + 1) / 2;
-            const int pairsOn = computeStableDisplayedLevel(displayFraction, pairCount, DISPLAY_MODE_GT3, bypassFilter);
+            const int pairsOn = computeStableDisplayedLevel(displayFraction, pairCount, DISPLAY_MODE_GT3, bypassFilter, fastResponse);
             g_ledRenderDebug.lastDisplayedLeds = min(ledCount, pairsOn * 2);
             renderGt3Pattern(frame,
                              pairsOn,
@@ -1398,7 +1458,8 @@ namespace
             int ledsOn = computeStableDisplayedLevel(displayFraction,
                                                      ledCount,
                                                      DISPLAY_MODE_LINEAR,
-                                                     bypassFilter);
+                                                     bypassFilter,
+                                                     fastResponse);
             if (cfg.mode == LED_MODE_AGGRESSIVE && shiftBlink)
             {
                 ledsOn = ledCount;
@@ -1429,6 +1490,7 @@ namespace
         ledBarRefreshBrightness();
         const unsigned long now = millis();
         startPendingEffectIfAny(now);
+        g_ledRenderDebug.redFallbackActive = redColorFallbackActive();
 
         TelemetryRenderSnapshot snapshot = telemetryCopyRenderSnapshot();
         if (snapshot.version == 0)
@@ -1439,6 +1501,7 @@ namespace
         if (g_effectState.type != LedEffectType::None)
         {
             ++g_ledRenderDebug.renderCalls;
+            g_ledRenderDebug.fastResponseActive = false;
             uint32_t frame[NUM_LEDS];
             LedRenderWriter writer = LedRenderWriter::None;
             LedFrameMode mode = LedFrameMode::None;
@@ -1455,6 +1518,7 @@ namespace
         if (g_ledDiagnosticMode != LedDiagnosticMode::Live)
         {
             ++g_ledRenderDebug.renderCalls;
+            g_ledRenderDebug.fastResponseActive = false;
             uint32_t frame[NUM_LEDS];
             renderDiagnosticPattern(frame);
             g_ledRenderDebug.lastShiftBlink = false;
@@ -1518,7 +1582,8 @@ void startLedBarTask()
     // Pinned to Core 1 so it shares a cache with the Arduino loop (config
     // reads etc.) but runs as its own task with a higher priority than
     // loop() (which is priority 1). Priority 3 keeps render jitter low
-    // while still leaving room for the USB reader and WiFi tasks.
+    // while the renderer ticks at ~200 Hz, still leaving room for the USB
+    // reader and WiFi tasks.
     xTaskCreatePinnedToCore(
         ledBarTaskBody,
         "ledBar",

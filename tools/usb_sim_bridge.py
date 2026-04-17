@@ -20,6 +20,27 @@ import serial
 from serial import SerialException
 from serial.tools import list_ports
 
+SERIAL_PING_INTERVAL_S = 0.20
+SERIAL_TX_INTERVAL_S = 0.006
+SERIAL_LOOP_SLEEP_S = 0.002
+SIMHUB_SIMPLE_POLL_INTERVAL_S = 0.006
+SIMHUB_META_REFRESH_INTERVAL_S = 0.15
+SIMHUB_OPTIONAL_REFRESH_INTERVAL_S = 0.05
+SIMHUB_HTTP_TIMEOUT_S = 0.18
+STATUS_RPC_INTERVAL_S = 0.50
+CONFIG_RPC_REFRESH_INTERVAL_S = 8.0
+ESP_RPC_TIMEOUT_S = 0.8
+ESP_CONFIG_RPC_TIMEOUT_S = 1.5
+SIMHUB_GAME_DATA_PATH = "/Api/GetGameData"
+SIMHUB_GAME_DATA_SIMPLE_PATH = "/Api/GetGameDataSimple"
+SIMHUB_THROTTLE_PATH = "/Api/GetProperty/DataCorePlugin.GameData.NewData.Throttle"
+SIMHUB_PIT_LIMITER_PATHS = (
+    "/Api/GetProperty/DataCorePlugin.GameData.NewData.PitLimiterOn",
+    "/Api/GetProperty/DataCorePlugin.GameData.NewData.PitLimiter",
+    "/Api/GetProperty/DataCorePlugin.GameData.PitLimiterOn",
+    "/Api/GetProperty/DataCorePlugin.GameData.PitLimiter",
+)
+
 
 @dataclass
 class SimHubState:
@@ -110,6 +131,19 @@ class UsbSimBridge:
         if value > 1.0:
             value /= 100.0
         return max(0.0, min(1.0, value))
+
+    @staticmethod
+    def _parse_boolish(value: Any) -> bool | None:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        text = str(value or "").strip().lower()
+        if text in {"1", "true", "yes", "on"}:
+            return True
+        if text in {"0", "false", "no", "off"}:
+            return False
+        return None
 
     @staticmethod
     def _friendly_serial_error(exc: Exception) -> str:
@@ -290,7 +324,7 @@ class UsbSimBridge:
         if not line.startswith("USBSIM "):
             self.log(f"log: {line}")
 
-    def _rpc(self, command: str, timeout: float = 0.8) -> dict[str, Any]:
+    def _rpc(self, command: str, timeout: float = ESP_RPC_TIMEOUT_S) -> dict[str, Any]:
         if not self.serial:
             raise RuntimeError("ESP not connected")
         with self.rpc_lock:
@@ -333,7 +367,7 @@ class UsbSimBridge:
                     ping = urllib.parse.urlencode({"host": self.web_public_host, "device": self.hostname, "web": 1})
                     self._send_line(f"USBSIM PING {ping}")
                     self.log(f"tx PING payload={ping}")
-                    next_ping = now + 0.2
+                    next_ping = now + SERIAL_PING_INTERVAL_S
                 if now >= next_tx:
                     simhub = self.get_simhub()
                     if simhub.live:
@@ -355,54 +389,87 @@ class UsbSimBridge:
                         self._send_line(f"USBSIM TELEMETRY {payload}")
                         self.telemetry_tx_count += 1
                         self.log(f"tx TELEMETRY payload={payload}")
-                    next_tx = now + 0.012
-                time.sleep(0.005)
+                    next_tx = now + SERIAL_TX_INTERVAL_S
+                time.sleep(SERIAL_LOOP_SLEEP_S)
             except (SerialException, OSError) as exc:
                 self.telemetry_tx_error_count += 1
                 self.log(f"serial error: {exc}")
                 self._close_serial(self._friendly_serial_error(exc))
                 time.sleep(0.5)
 
-    def _fetch_text(self, path: str, timeout: float = 0.35) -> str:
+    def _fetch_text(self, path: str, timeout: float = SIMHUB_HTTP_TIMEOUT_S) -> str:
         url = f"http://{self.simhub_host}:{self.simhub_port}{path}"
         with urllib.request.urlopen(url, timeout=timeout) as response:
             return response.read().decode("utf-8", errors="replace")
 
+    def _fetch_json(self, path: str, timeout: float = SIMHUB_HTTP_TIMEOUT_S) -> dict[str, Any]:
+        return json.loads(self._fetch_text(path, timeout=timeout))
+
+    def _fetch_optional_bool(self, paths: tuple[str, ...]) -> bool | None:
+        for path in paths:
+            try:
+                parsed = self._parse_boolish(self._fetch_text(path).strip())
+            except Exception:
+                continue
+            if parsed is not None:
+                return parsed
+        return None
+
     def _simhub_loop(self) -> None:
+        last_meta_refresh = 0.0
+        last_optional_refresh = 0.0
+        next_poll = 0.0
+        game_running = False
+        has_new_data = False
+        cached_throttle = 0.0
+        cached_pit_limiter = False
         while not self.stop_event.is_set():
+            now = time.monotonic()
+            if now < next_poll:
+                time.sleep(min(SERIAL_LOOP_SLEEP_S, next_poll - now))
+                continue
+            next_poll = now + SIMHUB_SIMPLE_POLL_INTERVAL_S
+
             next_state = SimHubState()
             try:
-                game_data = json.loads(self._fetch_text("/Api/GetGameData"))
+                if last_meta_refresh <= 0.0 or (now - last_meta_refresh) >= SIMHUB_META_REFRESH_INTERVAL_S:
+                    game_data = self._fetch_json(SIMHUB_GAME_DATA_PATH)
+                    last_meta_refresh = now
+                    game_running = bool(game_data.get("GameRunning"))
+                    has_new_data = game_data.get("NewData") not in (None, "null")
                 next_state.reachable = True
-                if bool(game_data.get("GameRunning")) and game_data.get("NewData") not in (None, "null"):
-                    simple = json.loads(self._fetch_text("/Api/GetGameDataSimple"))
+
+                if game_running and has_new_data:
+                    simple = self._fetch_json(SIMHUB_GAME_DATA_SIMPLE_PATH)
                     gear_raw = simple.get("gear", 0)
                     next_state.rpm = int(simple.get("rpms", simple.get("rpm", 0)) or 0)
                     next_state.speed = int(simple.get("speed", 0) or 0)
                     next_state.gear = 0 if str(gear_raw).upper() in {"N", "R"} else int(gear_raw or 0)
                     next_state.maxrpm = int(simple.get("maxRpm", next_state.rpm) or next_state.rpm)
-                    throttle = float(simple.get("throttle", simple.get("throttlePct", 0.0)) or 0.0)
-                    try:
-                        throttle = float(self._fetch_text("/Api/GetProperty/DataCorePlugin.GameData.NewData.Throttle"))
-                    except Exception:
-                        pass
-                    next_state.throttle = self._normalize_throttle(throttle)
-                    for path in (
-                        "/Api/GetProperty/DataCorePlugin.GameData.NewData.PitLimiterOn",
-                        "/Api/GetProperty/DataCorePlugin.GameData.NewData.PitLimiter",
-                        "/Api/GetProperty/DataCorePlugin.GameData.PitLimiterOn",
-                        "/Api/GetProperty/DataCorePlugin.GameData.PitLimiter",
-                    ):
+                    throttle_value = simple.get("throttle", simple.get("throttlePct", None))
+                    if throttle_value is not None:
+                        cached_throttle = self._normalize_throttle(float(throttle_value or 0.0))
+
+                    pit_simple = None
+                    for key in ("pitLimiter", "pitLimiterOn", "PitLimiter", "PitLimiterOn"):
+                        pit_simple = self._parse_boolish(simple.get(key))
+                        if pit_simple is not None:
+                            break
+                    if pit_simple is not None:
+                        cached_pit_limiter = pit_simple
+
+                    if last_optional_refresh <= 0.0 or (now - last_optional_refresh) >= SIMHUB_OPTIONAL_REFRESH_INTERVAL_S:
+                        last_optional_refresh = now
                         try:
-                            raw = self._fetch_text(path).strip().lower()
+                            cached_throttle = self._normalize_throttle(float(self._fetch_text(SIMHUB_THROTTLE_PATH).strip()))
                         except Exception:
-                            continue
-                        if raw in {"1", "true", "yes", "on"}:
-                            next_state.pit_limiter = True
-                            break
-                        if raw in {"0", "false", "no", "off"}:
-                            next_state.pit_limiter = False
-                            break
+                            pass
+                        pit_value = self._fetch_optional_bool(SIMHUB_PIT_LIMITER_PATHS)
+                        if pit_value is not None:
+                            cached_pit_limiter = pit_value
+
+                    next_state.throttle = cached_throttle
+                    next_state.pit_limiter = cached_pit_limiter
                     # Previously this gated "live" on rpm/speed/gear being > 0,
                     # which flipped false whenever the car was stationary in
                     # the pits (rpm=idle=maybe 0 for some games, speed=0,
@@ -424,7 +491,7 @@ class UsbSimBridge:
                     next_state.last_packet_ts = self.simhub.last_packet_ts
                 self.simhub = next_state
             self._log_simhub_state_change(previous, next_state)
-            time.sleep(0.012)
+            time.sleep(SERIAL_LOOP_SLEEP_S)
 
     def _status_loop(self) -> None:
         next_config = 0.0
@@ -438,7 +505,7 @@ class UsbSimBridge:
                     time.sleep(0.08)
                     continue
 
-                status = self._rpc("STATUS", timeout=0.9)
+                status = self._rpc("STATUS", timeout=ESP_RPC_TIMEOUT_S)
                 self.status_rpc_count += 1
                 with self.state_lock:
                     previous = EspState(**self.esp.__dict__)
@@ -474,10 +541,10 @@ class UsbSimBridge:
                     self._remember_esp_web_base_url(f"http://{wifi_ip}")
                 self._log_esp_status_change(previous, current)
                 if now >= next_config or not self.config_cache:
-                    config = self._rpc("CONFIG_GET", timeout=1.5)
+                    config = self._rpc("CONFIG_GET", timeout=ESP_CONFIG_RPC_TIMEOUT_S)
                     with self.state_lock:
                         self.config_cache = config
-                    next_config = now + 8.0
+                    next_config = now + CONFIG_RPC_REFRESH_INTERVAL_S
             except RuntimeError as exc:
                 self.status_rpc_error_count += 1
                 with self.state_lock:
@@ -489,7 +556,7 @@ class UsbSimBridge:
                     current = EspState(**self.esp.__dict__)
                 self.log(f"status loop error: {exc}")
                 self._log_esp_status_change(previous, current)
-            time.sleep(0.5)
+            time.sleep(STATUS_RPC_INTERVAL_S)
 
     def get_simhub(self) -> SimHubState:
         with self.state_lock:
@@ -664,6 +731,9 @@ class UsbSimBridge:
             "bridgeTelemetrySeq": self.telemetry_seq,
             "bridgeTelemetryTxCount": self.telemetry_tx_count,
             "bridgeTelemetryTxErrors": self.telemetry_tx_error_count,
+            "bridgeTelemetryTargetIntervalMs": round(SERIAL_TX_INTERVAL_S * 1000.0, 1),
+            "bridgeSimHubPollIntervalMs": round(SIMHUB_SIMPLE_POLL_INTERVAL_S * 1000.0, 1),
+            "bridgeSimHubMetaRefreshMs": round(SIMHUB_META_REFRESH_INTERVAL_S * 1000.0, 1),
             "bridgeLastTelemetryGapMs": round(self.last_telemetry_gap_ms, 1),
             "bridgeMaxTelemetryGapMs": round(self.max_telemetry_gap_ms, 1),
             "bridgeLastTelemetryTxAgeMs": round(max(0.0, (time.monotonic() - self.last_telemetry_tx_monotonic) * 1000.0), 1) if self.last_telemetry_tx_monotonic > 0.0 else 0.0,
@@ -675,6 +745,8 @@ class UsbSimBridge:
             "espUsbTelemetryGlitchRejects": int(esp.raw.get("usbTelemetryGlitchRejects", 0) or 0),
             "espUsbTelemetryGlitchRejectUps": int(esp.raw.get("usbTelemetryGlitchRejectUps", 0) or 0),
             "espUsbTelemetryGlitchRejectDowns": int(esp.raw.get("usbTelemetryGlitchRejectDowns", 0) or 0),
+            "espUsbTelemetryGlitchWindowMs": int(esp.raw.get("usbTelemetryGlitchWindowMs", 0) or 0),
+            "espUsbTelemetryGlitchDeltaRpm": int(esp.raw.get("usbTelemetryGlitchDeltaRpm", 0) or 0),
             "espUsbTelemetryGapEvents": int(esp.raw.get("usbTelemetryGapEvents", 0) or 0),
             "espUsbTelemetryLastGapMs": int(esp.raw.get("usbTelemetryLastGapMs", 0) or 0),
             "espUsbTelemetryMaxGapMs": int(esp.raw.get("usbTelemetryMaxGapMs", 0) or 0),
@@ -698,6 +770,8 @@ class UsbSimBridge:
             "espLedBrightnessUpdates": int(esp.raw.get("ledBrightnessUpdates", 0) or 0),
             "espLedShiftBlink": bool(esp.raw.get("ledShiftBlink", False)),
             "espLedPitLimiterOnly": bool(esp.raw.get("ledPitLimiterOnly", False)),
+            "espLedFastResponseActive": bool(esp.raw.get("ledFastResponseActive", False)),
+            "espRedColorFallbackActive": bool(esp.raw.get("redColorFallbackActive", False)),
             "espLedDiagnosticMode": str(esp.raw.get("ledDiagnosticMode", "") or ""),
             "espLedRenderMode": str(esp.raw.get("ledRenderMode", "") or ""),
             "espLedLastWriter": str(esp.raw.get("ledLastWriter", "") or ""),
@@ -714,8 +788,12 @@ class UsbSimBridge:
             "espLedSessionEffectSuppressions": int(esp.raw.get("ledSessionEffectSuppressions", 0) or 0),
             "espTelemetrySnapshotVersion": int(esp.raw.get("telemetrySnapshotVersion", 0) or 0),
             "espTelemetrySnapshotAgeMs": int(esp.raw.get("telemetrySnapshotAgeMs", 0) or 0),
+            "espTelemetrySnapshotPublishAgeMs": int(esp.raw.get("telemetrySnapshotPublishAgeMs", 0) or 0),
+            "espTelemetrySnapshotPublishCount": int(esp.raw.get("telemetrySnapshotPublishCount", 0) or 0),
             "espTelemetrySnapshotSource": str(esp.raw.get("telemetrySnapshotSource", "") or ""),
             "espTelemetrySnapshotFresh": bool(esp.raw.get("telemetrySnapshotFresh", False)),
+            "espTelemetryTaskRunning": bool(esp.raw.get("telemetryTaskRunning", False)),
+            "espTelemetryTaskIntervalMs": int(esp.raw.get("telemetryTaskIntervalMs", 0) or 0),
             "espSimSessionState": str(esp.raw.get("simSessionState", "") or ""),
             "espTelemetrySourceTransitionCount": int(esp.raw.get("telemetrySourceTransitionCount", 0) or 0),
             "espTelemetryLastSourceTransition": str(esp.raw.get("telemetryLastSourceTransition", "") or ""),
@@ -844,6 +922,36 @@ def create_app(bridge: UsbSimBridge) -> Flask:
     def bridge_template_response(status_code: int = 200):
         return Response(render_template_string(template), status=status_code, mimetype="text/html")
 
+    def esp_unavailable_response() -> Response:
+        body = """<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ShiftLight ESP UI nicht erreichbar</title>
+  <style>
+    :root{--bg:#070a0f;--panel:#11161e;--line:#243041;--text:#edf2f7;--muted:#9aa8ba;--accent:#56c8ea;--radius:18px}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px;background:linear-gradient(180deg,#06080c 0%,#0a1017 100%);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+    .panel{width:min(720px,100%);padding:24px;border-radius:var(--radius);background:rgba(17,22,30,.96);border:1px solid var(--line)}
+    h1{margin:0 0 10px;font-size:1.8rem}p{margin:0 0 12px;color:var(--muted);line-height:1.5}.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+    a{display:inline-flex;align-items:center;justify-content:center;min-height:46px;padding:0 16px;border-radius:14px;text-decoration:none}
+    .primary{background:var(--accent);color:#04111a}.secondary{border:1px solid var(--line);color:var(--text)}
+  </style>
+</head>
+<body>
+  <section class="panel">
+    <h1>ESP-Dashboard derzeit nicht erreichbar</h1>
+    <p>Diese URL bleibt jetzt fest fuer die ESP-Weboberflaeche reserviert und faellt nicht mehr automatisch auf die Bridge-Seite zurueck.</p>
+    <p>Die Bridge-Diagnose bleibt separat unter <strong>/bridge/</strong> verfuegbar. Sobald das Board im WLAN wieder erreichbar ist, funktioniert das Dashboard hier wieder normal.</p>
+    <div class="row">
+      <a class="primary" href="/bridge/">Bridge oeffnen</a>
+      <a class="secondary" href="/">Dashboard erneut pruefen</a>
+    </div>
+  </section>
+</body>
+</html>"""
+        return Response(body, status=503, mimetype="text/html")
+
     def rewrite_location(location: str, base_url: str) -> str:
         if not location:
             return location
@@ -910,7 +1018,7 @@ def create_app(bridge: UsbSimBridge) -> Flask:
 
     def fallback_compat_route(path: str):
         if request.method == "GET" and path in {"/", "/settings", "/settings/"}:
-            return bridge_template_response()
+            return esp_unavailable_response()
         if request.method == "GET" and path == "/status":
             return jsonify(bridge.build_status_compat())
         if request.method == "GET" and path == "/wifi/status":

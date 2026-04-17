@@ -5,10 +5,14 @@
 namespace
 {
     constexpr const char *PREF_NAMESPACE = "rpm_cfg";
+    constexpr RgbColor DEFAULT_GREEN_COLOR = {0, 255, 0};
+    constexpr RgbColor DEFAULT_YELLOW_COLOR = {255, 180, 0};
+    constexpr RgbColor DEFAULT_RED_COLOR = {255, 0, 0};
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
     constexpr int LEGACY_AMBIENT_SDA_PIN = 21;
     constexpr int LEGACY_AMBIENT_SCL_PIN = 22;
 #endif
+    bool g_redColorFallbackActive = false;
 
     WifiMode clampWifiMode(uint32_t raw)
     {
@@ -56,6 +60,48 @@ namespace
         return false;
 #endif
     }
+
+    bool colorLooksUnset(const RgbColor &color)
+    {
+        return color.r == 0 && color.g == 0 && color.b == 0;
+    }
+
+    String sanitizeLabelValue(const String &value, const char *fallback)
+    {
+        String sanitized = value;
+        sanitized.trim();
+        if (sanitized.isEmpty())
+        {
+            sanitized = fallback;
+        }
+        return sanitized;
+    }
+
+    void sanitizeLoadedConfig()
+    {
+        if (cfg.yellowEndPct < cfg.greenEndPct)
+        {
+            cfg.yellowEndPct = cfg.greenEndPct;
+        }
+        if (cfg.redEndPct < cfg.yellowEndPct)
+        {
+            cfg.redEndPct = cfg.yellowEndPct;
+        }
+        if (cfg.blinkStartPct < cfg.redEndPct)
+        {
+            cfg.blinkStartPct = cfg.redEndPct;
+        }
+
+        g_redColorFallbackActive = colorLooksUnset(cfg.redColor);
+        if (g_redColorFallbackActive)
+        {
+            cfg.redColor = DEFAULT_RED_COLOR;
+        }
+
+        cfg.greenLabel = sanitizeLabelValue(cfg.greenLabel, "Green");
+        cfg.yellowLabel = sanitizeLabelValue(cfg.yellowLabel, "Yellow");
+        cfg.redLabel = sanitizeLabelValue(cfg.redLabel, "Red");
+    }
 }
 
 AppConfig cfg;
@@ -78,6 +124,7 @@ void initConfig()
     cfg.yellowEndPct = 85;
     cfg.redEndPct = 90;
     cfg.blinkStartPct = 90;
+    cfg.blinkSpeedPct = 80;
     cfg.brightness = DEFAULT_BRIGHTNESS;
     cfg.autoBrightnessEnabled = false;
     cfg.ambientLightSdaPin = AMBIENT_LIGHT_DEFAULT_SDA;
@@ -104,9 +151,9 @@ void initConfig()
     cfg.simHubHost = "";
     cfg.simHubPort = 8888;
     cfg.simHubPollMs = 75;
-    cfg.greenColor = {0, 255, 0};
-    cfg.yellowColor = {255, 180, 0};
-    cfg.redColor = {255, 0, 0};
+    cfg.greenColor = DEFAULT_GREEN_COLOR;
+    cfg.yellowColor = DEFAULT_YELLOW_COLOR;
+    cfg.redColor = DEFAULT_RED_COLOR;
     cfg.greenLabel = "Green";
     cfg.yellowLabel = "Yellow";
     cfg.redLabel = "Red";
@@ -141,12 +188,9 @@ void loadConfig()
     cfg.activeLedCount = clampInt(prefs.getInt("ledCount", cfg.activeLedCount), 1, NUM_LEDS);
     cfg.greenEndPct = clampInt(prefs.getInt("greenEnd", cfg.greenEndPct), 0, 100);
     cfg.yellowEndPct = clampInt(prefs.getInt("yellowEnd", cfg.yellowEndPct), 0, 100);
-    cfg.redEndPct = clampInt(prefs.getInt("redEnd", cfg.blinkStartPct), 0, 100);
+    cfg.redEndPct = clampInt(prefs.getInt("redEnd", cfg.redEndPct), 0, 100);
     cfg.blinkStartPct = clampInt(prefs.getInt("blinkStart", cfg.blinkStartPct), 0, 100);
-    if (cfg.yellowEndPct < cfg.greenEndPct)
-        cfg.yellowEndPct = cfg.greenEndPct;
-    if (cfg.redEndPct < cfg.yellowEndPct)
-        cfg.redEndPct = cfg.yellowEndPct;
+    cfg.blinkSpeedPct = clampInt(prefs.getInt("blinkSpeed", cfg.blinkSpeedPct), 0, 100);
     cfg.brightness = clampInt(prefs.getInt("brightness", cfg.brightness), 0, 255);
     cfg.autoBrightnessEnabled = prefs.getBool("autoBright", cfg.autoBrightnessEnabled);
     cfg.ambientLightSdaPin = clampInt(prefs.getInt("ambSda", cfg.ambientLightSdaPin), 0, 48);
@@ -206,6 +250,7 @@ void loadConfig()
     cfg.apPassword = prefs.getString("apPass", cfg.apPassword);
 
     prefs.end();
+    sanitizeLoadedConfig();
 }
 
 void saveConfig()
@@ -224,6 +269,7 @@ void saveConfig()
     prefs.putInt("yellowEnd", cfg.yellowEndPct);
     prefs.putInt("redEnd", cfg.redEndPct);
     prefs.putInt("blinkStart", cfg.blinkStartPct);
+    prefs.putInt("blinkSpeed", cfg.blinkSpeedPct);
     prefs.putInt("brightness", cfg.brightness);
     prefs.putBool("autoBright", cfg.autoBrightnessEnabled);
     prefs.putInt("ambSda", cfg.ambientLightSdaPin);
@@ -275,4 +321,14 @@ void saveConfig()
     prefs.putString("apPass", cfg.apPassword);
 
     prefs.end();
+}
+
+RgbColor effectiveRedColor()
+{
+    return redColorFallbackActive() ? DEFAULT_RED_COLOR : cfg.redColor;
+}
+
+bool redColorFallbackActive()
+{
+    return g_redColorFallbackActive || colorLooksUnset(cfg.redColor);
 }

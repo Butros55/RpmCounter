@@ -5,7 +5,7 @@
 void initUsbSimBridge();
 void usbSimBridgeLoop();          // kept for compatibility; now a no-op when the task is running
 void usbSimBridgeUpdateConfig();
-void startUsbSimBridgeTask();     // launches the dedicated reader task
+void startUsbSimBridgeTask();     // launches the ~1 ms dedicated reader task
 
 bool usbSimTransportEnabled();
 bool usbSimBridgeOnline();

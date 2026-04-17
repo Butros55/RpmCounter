@@ -124,6 +124,158 @@ namespace
         return F("Unbekannt");
     }
 
+    constexpr unsigned long AMBIENT_UI_FRESH_MS = 2500UL;
+    constexpr unsigned long GESTURE_UI_FRESH_MS = 4000UL;
+
+    bool statusAgeFresh(unsigned long nowMs, unsigned long eventMs, unsigned long freshnessMs)
+    {
+        return eventMs > 0 && (nowMs < eventMs || (nowMs - eventMs) <= freshnessMs);
+    }
+
+    bool ambientUiFresh(const AmbientLightDebugInfo &info, unsigned long nowMs)
+    {
+        return info.readCount > 0 && statusAgeFresh(nowMs, info.lastReadMs, AMBIENT_UI_FRESH_MS);
+    }
+
+    bool ambientUiOnline(const AmbientLightDebugInfo &info, unsigned long nowMs)
+    {
+        return info.sensorDetected || info.deviceResponding || ambientUiFresh(info, nowMs);
+    }
+
+    String ambientUiSensorText(const AmbientLightDebugInfo &info, unsigned long nowMs)
+    {
+        if (ambientUiOnline(info, nowMs))
+        {
+            return F("VEML7700 online");
+        }
+        if (info.busInitialized)
+        {
+            return F("Kein Sensor an 0x10");
+        }
+        return F("Bus nicht bereit");
+    }
+
+    String ambientUiLuxText(const AmbientLightDebugInfo &info, unsigned long nowMs)
+    {
+        if (info.readCount > 0 || ambientUiOnline(info, nowMs))
+        {
+            return String(info.filteredLux, 1) + F(" lx");
+        }
+        return F("-");
+    }
+
+    String ambientUiStatusText(const AmbientLightDebugInfo &info, unsigned long nowMs)
+    {
+        if (ambientUiOnline(info, nowMs))
+        {
+            return ambientUiFresh(info, nowMs) ? String(F("Sensor liefert Daten."))
+                                               : String(F("Sensor erkannt, letzter Messwert bleibt sichtbar."));
+        }
+        if (!info.lastError.isEmpty())
+        {
+            return info.lastError;
+        }
+        return F("Noch keine Antwort vom Sensor.");
+    }
+
+    const char *ambientUiPillTone(const AmbientLightDebugInfo &info, bool autoEnabled, unsigned long nowMs)
+    {
+        if (autoEnabled && ambientUiFresh(info, nowMs))
+        {
+            return "ok";
+        }
+        if (ambientUiOnline(info, nowMs))
+        {
+            return autoEnabled ? "warn" : "neutral";
+        }
+        return autoEnabled ? "bad" : "neutral";
+    }
+
+    String ambientUiPillText(const AmbientLightDebugInfo &info, bool autoEnabled, unsigned long nowMs)
+    {
+        if (autoEnabled && ambientUiFresh(info, nowMs))
+        {
+            return F("Auto-Helligkeit live");
+        }
+        if (ambientUiOnline(info, nowMs))
+        {
+            return F("Sensor bereit");
+        }
+        return autoEnabled ? String(F("Sensor fehlt")) : String(F("Auto aus"));
+    }
+
+    bool gestureUiFresh(const GestureSensorDebugInfo &info, unsigned long nowMs)
+    {
+        return statusAgeFresh(nowMs, info.lastReadMs, GESTURE_UI_FRESH_MS) ||
+               statusAgeFresh(nowMs, info.lastProbeMs, GESTURE_UI_FRESH_MS);
+    }
+
+    bool gestureUiOnline(const GestureSensorDebugInfo &info, unsigned long nowMs)
+    {
+        return info.sensorDetected || info.deviceResponding || info.idReadOk ||
+               (info.initSuccessCount > 0 && gestureUiFresh(info, nowMs));
+    }
+
+    String upperHexByte(uint8_t value)
+    {
+        String hex = String(value, HEX);
+        hex.toUpperCase();
+        if (hex.length() < 2)
+        {
+            hex = String(F("0")) + hex;
+        }
+        return hex;
+    }
+
+    String gestureUiSensorText(const GestureSensorDebugInfo &info, bool enabled, unsigned long nowMs)
+    {
+        if (!enabled)
+        {
+            return F("Gesten aus");
+        }
+        if (gestureUiOnline(info, nowMs))
+        {
+            String text = F("APDS-9960 online");
+            if (info.deviceId > 0)
+            {
+                text += F(" (0x");
+                text += upperHexByte(info.deviceId);
+                text += ')';
+            }
+            return text;
+        }
+        if (info.ackResponding)
+        {
+            return F("ACK ok, Init fehlgeschlagen");
+        }
+        if (info.busInitialized)
+        {
+            return F("Kein ACK an 0x39");
+        }
+        return F("Bus nicht bereit");
+    }
+
+    String gestureUiStatusText(const GestureSensorDebugInfo &info, bool enabled, unsigned long nowMs)
+    {
+        if (!enabled)
+        {
+            return F("Gestensteuerung deaktiviert.");
+        }
+        if (gestureUiOnline(info, nowMs))
+        {
+            return F("Sensor bereit.");
+        }
+        if (info.ackResponding)
+        {
+            return F("ACK vorhanden, aber Init noch nicht sauber.");
+        }
+        if (!info.lastError.isEmpty())
+        {
+            return info.lastError;
+        }
+        return F("Noch keine Antwort vom Sensor.");
+    }
+
     String wifiModeLabel(WifiMode mode)
     {
         switch (mode)
@@ -226,7 +378,7 @@ function currentLedCount(){ const input = $('#activeLedCountSlider'); const raw 
 function syncLedPreviewCount(){ const preview = $('#ledPreview'); if(!preview){ return []; } const count = currentLedCount(); let dots = $$('.led-dot', preview); if(dots.length !== count){ preview.innerHTML = ''; for(let i=0;i<count;i += 1){ const dot = document.createElement('span'); dot.className = 'led-dot'; preview.appendChild(dot); } dots = $$('.led-dot', preview); } const value = $('#activeLedCountValue'); if(value){ value.textContent = String(count); } return dots; }
 function ledFractionAt(t){ if(t < 0.34){ return t / 0.34 * 0.72; } if(t < 0.72){ return 0.72 + ((t - 0.34) / 0.38) * 0.20; } return Math.min(1, 0.92 + ((t - 0.72) / 0.28) * 0.08); }
 function diagnosticFractionAt(t){ if(t < 0.45){ const tt = t / 0.45; return tt * tt * (3 - 2 * tt); } if(t < 0.65){ return 1; } const tt = (t - 0.65) / 0.35; return Math.max(0, 1 - (tt * tt * (3 - 2 * tt))); }
-function renderLedPreview(fraction, blinking){ const dots = syncLedPreviewCount(); if(!dots.length){ return; } const mode = parseInt($('#modeSelect')?.value || '0', 10); const greenEnd = parseInt($('#greenEndSlider')?.value || '0', 10) / 100; const yellowEnd = parseInt($('#yellowEndSlider')?.value || '0', 10) / 100; const redEnd = parseInt($('#redEndSlider')?.value || '0', 10) / 100; const blinkStart = parseInt($('#blinkStartSlider')?.value || '0', 10) / 100; const safeRedEnd = Math.max(0.01, redEnd); const blinkTrigger = Math.max(0, Math.min(1, blinkStart)); const fillEnd = Math.max(0.001, blinkTrigger * safeRedEnd); const zoneGreen = Math.max(0, Math.min(1, greenEnd / safeRedEnd)); const zoneYellow = Math.max(zoneGreen, Math.min(1, yellowEnd / safeRedEnd)); const startRpm = parseInt($('#rpmStartSlider')?.value || '0', 10); const previewMaxRpm = 8000; const startFraction = Math.min(0.95, Math.max(0, startRpm / previewMaxRpm)); const colors = { green: $('#greenColorInput')?.value || '#2DFF7A', yellow: $('#yellowColorInput')?.value || '#FFC34D', red: $('#redColorInput')?.value || '#FF5A72', pit: '#ff3fd2' }; const blinkOn = Math.floor(Date.now() / 160) % 2 === 0; const rawFrac = Math.max(0, Math.min(1, fraction)); const frac = rawFrac <= startFraction ? 0 : Math.max(0, Math.min(1, (rawFrac - startFraction) / Math.max(0.01, 1 - startFraction))); const displayFrac = frac <= 0 ? 0 : Math.max(0, Math.min(1, frac / fillEnd)); const dark = '#26384d'; if(mode === 3){ const pairCount = Math.ceil(dots.length / 2); const pairsOn = Math.round(displayFrac * pairCount); const finalBlink = blinking && frac >= blinkTrigger; dots.forEach((dot, index) => { let color = dark; if(finalBlink){ color = blinkOn ? colors.red : '#091019'; } else { const rank = Math.min(index, dots.length - 1 - index); if(rank < pairsOn){ const pos = pairCount <= 1 ? 1 : rank / (pairCount - 1); color = pos < zoneGreen ? colors.green : (pos < zoneYellow ? colors.yellow : colors.red); } } dot.style.backgroundColor = color; }); if(frac <= 0){ [0,1,dots.length-2,dots.length-1].forEach((idx) => { if(dots[idx]){ dots[idx].style.backgroundColor = dark; } }); } return; } const onCount = Math.round(displayFrac * dots.length); dots.forEach((dot, index) => { let color = dark; if(index < onCount){ const pos = dots.length <= 1 ? 1 : index / (dots.length - 1); if(mode === 2 && frac >= blinkTrigger){ color = blinkOn ? colors.red : '#091019'; } else if(pos < zoneGreen){ color = colors.green; } else if(pos < zoneYellow){ color = colors.yellow; } else if(blinking && mode === 1 && frac >= blinkTrigger){ color = blinkOn ? colors.red : '#091019'; } else { color = colors.red; } } dot.style.backgroundColor = color; }); }
+function renderLedPreview(fraction, blinking){ const dots = syncLedPreviewCount(); if(!dots.length){ return; } const mode = parseInt($('#modeSelect')?.value || '0', 10); const greenEnd = parseInt($('#greenEndSlider')?.value || '0', 10) / 100; const yellowEnd = parseInt($('#yellowEndSlider')?.value || '0', 10) / 100; const redEnd = parseInt($('#redEndSlider')?.value || '0', 10) / 100; const blinkStart = parseInt($('#blinkStartSlider')?.value || '0', 10) / 100; const safeRedEnd = Math.max(0.01, redEnd); const blinkTrigger = Math.max(0, Math.min(1, blinkStart)); const fillEnd = Math.max(0.001, blinkTrigger * safeRedEnd); const zoneGreen = Math.max(0, Math.min(1, greenEnd / safeRedEnd)); const zoneYellow = Math.max(zoneGreen, Math.min(1, yellowEnd / safeRedEnd)); const startRpm = parseInt($('#rpmStartSlider')?.value || '0', 10); const previewMaxRpm = 8000; const startFraction = Math.min(0.95, Math.max(0, startRpm / previewMaxRpm)); const colors = { green: $('#greenColorInput')?.value || '#2DFF7A', yellow: $('#yellowColorInput')?.value || '#FFC34D', red: $('#redColorInput')?.value || '#FF5A72', pit: '#ff3fd2' }; const blinkOn = blinkPreviewState(); const rawFrac = Math.max(0, Math.min(1, fraction)); const frac = rawFrac <= startFraction ? 0 : Math.max(0, Math.min(1, (rawFrac - startFraction) / Math.max(0.01, 1 - startFraction))); const displayFrac = frac <= 0 ? 0 : Math.max(0, Math.min(1, frac / fillEnd)); const dark = '#26384d'; if(mode === 3){ const pairCount = Math.ceil(dots.length / 2); const pairsOn = Math.round(displayFrac * pairCount); const finalBlink = blinking && frac >= blinkTrigger; dots.forEach((dot, index) => { let color = dark; if(finalBlink){ color = blinkOn ? colors.red : '#091019'; } else { const rank = Math.min(index, dots.length - 1 - index); if(rank < pairsOn){ const pos = pairCount <= 1 ? 1 : rank / (pairCount - 1); color = pos < zoneGreen ? colors.green : (pos < zoneYellow ? colors.yellow : colors.red); } } dot.style.backgroundColor = color; }); if(frac <= 0){ [0,1,dots.length-2,dots.length-1].forEach((idx) => { if(dots[idx]){ dots[idx].style.backgroundColor = dark; } }); } return; } const onCount = Math.round(displayFrac * dots.length); dots.forEach((dot, index) => { let color = dark; if(index < onCount){ const pos = dots.length <= 1 ? 1 : index / (dots.length - 1); if(mode === 2 && frac >= blinkTrigger){ color = blinkOn ? colors.red : '#091019'; } else if(pos < zoneGreen){ color = colors.green; } else if(pos < zoneYellow){ color = colors.yellow; } else if(blinking && mode === 1 && frac >= blinkTrigger){ color = blinkOn ? colors.red : '#091019'; } else { color = colors.red; } } dot.style.backgroundColor = color; }); }
 function updatePreviewLoop(){ if(dashboardState.testSweepActive){ const elapsed = Date.now() - dashboardState.testSweepStart; const t = Math.min(1, elapsed / TEST_SWEEP_DURATION); renderLedPreview(dashboardState.testSweepMode === 'diagnostic' ? diagnosticFractionAt(t) : ledFractionAt(t), true); if(t >= 1){ dashboardState.testSweepActive = false; } return; } if(dashboardState.blinkPreview){ renderLedPreview(1, true); if(Date.now() >= dashboardState.blinkPreviewUntil){ dashboardState.blinkPreview = false; } return; } renderLedPreview(1, false); }
 function ensurePreviewLoop(){ if(!dashboardState.previewTimer){ dashboardState.previewTimer = setInterval(updatePreviewLoop, 80); } }
 function triggerBlinkPreview(){ const mode = parseInt($('#modeSelect')?.value || '0', 10); if(mode === 0){ return; } dashboardState.blinkPreview = true; dashboardState.blinkPreviewUntil = Date.now() + 1800; ensurePreviewLoop(); }
@@ -239,6 +391,15 @@ function probeAmbientSensor(){ const done = beginRequest(); setButtonLoading('bt
 function probeGestureSensor(){ const done = beginRequest(); setButtonLoading('btnGestureProbe', true, 'Pruefe Sensor'); fetch('/dev/gesture-probe', { method:'POST' }).then((r) => r.json()).then(() => fetchStatus()).catch(() => {}).finally(() => { setButtonLoading('btnGestureProbe', false); done(); }); }
 function postSimple(url){ const done = beginRequest(); return fetch(url, { method:'POST' }).finally(done); }
 function telemetryTransportMode(data){ if(data?.simTransportMode){ return data.simTransportMode; } if(data?.simTransport === 'USB'){ return 'USB_ONLY'; } if(data?.simTransport === 'NETWORK'){ return 'NETWORK_ONLY'; } return 'AUTO'; }
+function blinkPreviewState(){ const speed = parseInt($('#blinkSpeedSlider')?.value || '80', 10); if(speed <= 0){ return false; } if(speed >= 100){ return true; } const intervalMs = Math.round(480 - ((speed / 99) * 440)); return Math.floor(Date.now() / Math.max(40, intervalMs)) % 2 === 0; }
+function freshAge(ageMs, limitMs){ const age = Number(ageMs ?? -1); return Number.isFinite(age) && age >= 0 && age <= limitMs; }
+function ambientSensorOnline(data){ return !!(data?.ambientLightDetected || data?.ambientDeviceResponding || ((Number(data?.ambientReadCount ?? 0) > 0) && freshAge(data?.ambientLastReadAgeMs, 2500))); }
+function ambientSensorFresh(data){ return Number(data?.ambientReadCount ?? 0) > 0 && freshAge(data?.ambientLastReadAgeMs, 2500); }
+function ambientSensorText(data){ if(ambientSensorOnline(data)){ return 'VEML7700 online'; } if(data?.ambientBusInitialized){ return 'Kein Sensor an 0x10'; } return 'Bus nicht bereit'; }
+function ambientStatusText(data){ if(ambientSensorOnline(data)){ return ambientSensorFresh(data) ? 'Sensor liefert Daten.' : 'Sensor erkannt, letzter Messwert bleibt sichtbar.'; } return data?.ambientLastError || 'Noch keine Antwort vom Sensor.'; }
+function gestureSensorOnline(data){ return !!(data?.gestureSensorDetected || data?.gestureDeviceResponding || data?.gestureIdReadOk || ((Number(data?.gestureInitSuccess ?? 0) > 0) && (freshAge(data?.gestureLastReadAgeMs, 4000) || freshAge(data?.gestureLastProbeAgeMs, 4000)))); }
+function gestureSensorText(data){ if(!data?.gestureControlEnabled){ return 'Gesten aus'; } if(gestureSensorOnline(data)){ const id = Number(data?.gestureDeviceId ?? 0); return 'APDS-9960 online' + (id > 0 ? ' (0x' + id.toString(16).toUpperCase().padStart(2, '0') + ')' : ''); } if(data?.gestureAckResponding){ return 'ACK ok, Init fehlgeschlagen'; } if(data?.gestureBusInitialized){ return 'Kein ACK an 0x39'; } return 'Bus nicht bereit'; }
+function gestureStatusText(data){ if(!data?.gestureControlEnabled){ return 'Gestensteuerung deaktiviert.'; } if(gestureSensorOnline(data)){ return 'Sensor bereit.'; } if(data?.gestureAckResponding){ return 'ACK vorhanden, aber Init noch nicht sauber.'; } return data?.gestureLastError || 'Noch keine Antwort vom Sensor.'; }
 function updateStatus(data){
   if(!data){ return; }
   updateText('heroRpm', data.rpm ?? 0);
@@ -255,32 +416,37 @@ function updateStatus(data){
   updateText('vehicleVinValue', data.vehicleVin || 'Noch keine VIN');
   updateText('vehicleDiagValue', data.vehicleDiag || 'Keine Diagnose');
   updateText('bleSummaryValue', data.usbBridgeConnected ? (data.usbHost || 'USB Bridge') : (data.bleText || 'Getrennt'));
+  const ambientOnline = ambientSensorOnline(data);
+  const ambientFresh = ambientSensorFresh(data);
+  const ambientBusReady = ambientOnline || !!data.ambientBusInitialized;
+  const gestureOnline = gestureSensorOnline(data);
+  const gestureBusReady = gestureOnline || !!data.gestureBusInitialized;
   updateText('ambientModeValue', data.autoBrightnessEnabled ? 'Automatisch' : 'Manuell');
-  updateText('ambientSensorValue', data.ambientDeviceResponding ? 'VEML7700 antwortet' : (data.ambientBusInitialized ? 'Kein Sensor an 0x10' : 'Bus nicht bereit'));
-  updateText('ambientLuxValue', data.ambientLightDetected ? (Number(data.ambientLux ?? 0).toFixed(1) + ' lx') : '-');
+  updateText('ambientSensorValue', ambientSensorText(data));
+  updateText('ambientLuxValue', (Number(data.ambientReadCount ?? 0) > 0 || ambientOnline) ? (Number(data.ambientLux ?? 0).toFixed(1) + ' lx') : '-');
   updateText('ambientBrightnessValue', (data.ledAppliedBrightness ?? 0) + ' / ' + (data.ledManualBrightness ?? 0));
   updateText('ambientTargetValue', data.autoBrightnessEnabled ? String(data.ambientTargetBrightness ?? data.ledManualBrightness ?? 0) : 'Manuell');
   updateText('ambientPinsValue', 'SDA ' + (data.ambientLightSdaPin ?? '-') + ' / SCL ' + (data.ambientLightSclPin ?? '-'));
-  updateText('ambientBusValue', data.ambientBusInitialized ? ((data.ambientUsingSharedBus ? 'Shared 47/48' : 'Privater I2C Bus') + (data.ambientDeviceResponding ? ' ok' : ' ohne ACK')) : 'Kein Bus');
-  updateText('ambientProbeValue', data.ambientDeviceResponding ? 'Ja, 0x10 antwortet' : 'Nein');
+  updateText('ambientBusValue', ambientBusReady ? ((data.ambientUsingSharedBus ? 'Shared 47/48' : 'Privater I2C Bus') + (ambientOnline ? ' ok' : ' ohne ACK')) : 'Kein Bus');
+  updateText('ambientProbeValue', ambientOnline ? 'Ja, 0x10 antwortet' : 'Nein');
   updateText('ambientRawValue', (data.ambientRawAls ?? 0) + ' / ' + (data.ambientRawWhite ?? 0));
   updateText('ambientConfigValue', '0x' + Number(data.ambientConfigReg ?? 0).toString(16).toUpperCase().padStart(4, '0'));
   updateText('ambientReadStatsValue', (data.ambientReadCount ?? 0) + ' ok / ' + (data.ambientReadErrors ?? 0) + ' err');
   updateText('ambientAgeValue', (data.ambientLastReadAgeMs ?? 0) + ' ms read / ' + (data.ambientLastInitAgeMs ?? 0) + ' ms init');
-  updateText('ambientStatusNote', 'Sensorstatus: ' + (data.ambientLastError || (data.ambientDeviceResponding ? 'Sensor liefert Daten.' : 'Noch keine Antwort vom Sensor.')));
-  setPill('ambientPill', data.ambientLightActive ? 'ok' : (data.ambientDeviceResponding ? 'warn' : (data.autoBrightnessEnabled ? 'bad' : 'neutral')), data.ambientLightActive ? 'Auto-Helligkeit live' : (data.ambientDeviceResponding ? 'Sensor bereit' : (data.autoBrightnessEnabled ? 'Sensor fehlt' : 'Auto aus')));
-  updateText('gestureStatusValue', data.gestureSensorDetected ? ('APDS-9960 online (0x' + Number(data.gestureDeviceId ?? 0).toString(16).toUpperCase().padStart(2, '0') + ')') : (data.gestureAckResponding ? 'ACK ok, Init fehlgeschlagen' : (data.gestureBusInitialized ? 'Kein ACK an 0x39' : (data.gestureControlEnabled ? 'Bus nicht bereit' : 'Gesten aus'))));
+  updateText('ambientStatusNote', 'Sensorstatus: ' + ambientStatusText(data));
+  setPill('ambientPill', data.autoBrightnessEnabled ? (ambientFresh ? 'ok' : (ambientOnline ? 'warn' : 'bad')) : 'neutral', data.autoBrightnessEnabled ? (ambientFresh ? 'Auto-Helligkeit live' : (ambientOnline ? 'Sensor bereit' : 'Sensor fehlt')) : (ambientOnline ? 'Sensor bereit' : 'Auto aus'));
+  updateText('gestureStatusValue', gestureSensorText(data));
   updateText('gestureLastValue', (data.gestureLastDirection || 'none') + ' / ' + (data.gestureLastGestureAgeMs ?? 0) + ' ms');
   updateText('gestureCountValue', (data.gestureCount ?? 0) + ' erkannt / ' + (data.gestureModeSwitchCount ?? 0) + ' gewechselt');
   updateText('gestureErrorValue', data.gestureLastError || 'Kein Fehler');
-  updateText('gestureBusValue', data.gestureBusInitialized ? ((data.gestureUsingSharedBus ? 'Shared 47/48' : 'Eigener Bus') + (data.gestureAckResponding ? ' ok' : ' ohne ACK')) : 'Kein Bus');
-  updateText('gestureProbeValue', data.gestureAckResponding ? 'Ja, 0x39 antwortet' : 'Nein');
+  updateText('gestureBusValue', gestureBusReady ? ((data.gestureUsingSharedBus ? 'Shared 47/48' : 'Eigener Bus') + ((gestureOnline || data.gestureAckResponding) ? ' ok' : ' ohne ACK')) : 'Kein Bus');
+  updateText('gestureProbeValue', (gestureOnline || data.gestureAckResponding) ? 'Ja, 0x39 antwortet' : 'Nein');
   updateText('gestureIdValue', data.gestureIdReadOk ? ('0x' + Number(data.gestureDeviceId ?? 0).toString(16).toUpperCase().padStart(2, '0') + (data.gestureConfigApplied ? ' konfiguriert' : ' gelesen')) : '-');
   updateText('gestureIntValue', 'GPIO ' + (data.gestureIntPin ?? '-') + ' / ' + (data.gestureIntConfigured ? (data.gestureIntLineLow ? 'LOW' : 'HIGH') : 'aus'));
   updateText('gestureRawValue', 'GSTATUS 0x' + Number(data.gestureLastStatusReg ?? 0).toString(16).toUpperCase().padStart(2, '0') + ' / FIFO ' + (data.gestureLastFifoLevel ?? 0));
   updateText('gestureStatsValue', (data.gestureInitSuccess ?? 0) + '/' + (data.gestureInitAttempts ?? 0) + ' init | ' + (data.gestureProbeCount ?? 0) + ' probe | ' + (data.gesturePollCount ?? 0) + ' poll | ' + (data.gestureReadErrors ?? 0) + ' err | ' + (data.gestureIntTriggerCount ?? 0) + ' irq');
   updateText('gestureAgeValue', (data.gestureLastProbeAgeMs ?? 0) + ' ms probe / ' + (data.gestureLastReadAgeMs ?? 0) + ' ms read / ' + (data.gestureLastIntAgeMs ?? 0) + ' ms irq');
-  updateText('gestureStatusNote', 'Gestenstatus: ' + (data.gestureLastError || (data.gestureSensorDetected ? 'Sensor bereit.' : (data.gestureAckResponding ? 'ACK vorhanden, aber Init noch nicht sauber.' : 'Noch keine Antwort vom Sensor.'))));
+  updateText('gestureStatusNote', 'Gestenstatus: ' + gestureStatusText(data));
   const transportMode = telemetryTransportMode(data);
   const usbOnly = transportMode === 'USB_ONLY';
   const networkOnly = transportMode === 'NETWORK_ONLY';
@@ -333,7 +499,7 @@ function saveForm(url){ const form = $('#mainForm'); if(!form){ return Promise.r
 function startSweep(mode='show'){ const form = $('#mainForm'); if(!form){ return; } const done = beginRequest(); const btnId = mode === 'diagnostic' ? 'btnTestDiagnostic' : 'btnTest'; const url = mode === 'diagnostic' ? '/test-diagnostic' : '/test'; setButtonLoading(btnId, true, mode === 'diagnostic' ? 'Diagnose laeuft' : 'Sweep laeuft'); fetch(url, { method:'POST', body:new FormData(form) }).finally(() => { setButtonLoading(btnId, false); done(); }); dashboardState.testSweepActive = true; dashboardState.testSweepMode = mode; dashboardState.testSweepStart = Date.now(); dashboardState.blinkPreview = false; ensurePreviewLoop(); }
 function setLedDiagnosticMode(mode){ const done = beginRequest(); fetch('/dev/led-mode', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'mode=' + encodeURIComponent(mode) }).then((r) => r.json()).then(() => fetchStatus()).catch(() => {}).finally(done); }
 function initLedPreview(){ syncLedPreviewCount(); renderLedPreview(1, false); ensurePreviewLoop(); }
-function initDashboard(){ captureInitialState(); recomputeDirty(); syncSavebarSpace('saveBar'); initLedPreview(); syncAutoscaleUi(); syncAmbientUi(); updatePreviewLoop(); $$('input,select,textarea', $('#mainForm')).forEach((el) => { if(el.type === 'range'){ updateSliderValue(el); el.addEventListener('input', () => { if(el.id === 'greenEndSlider' || el.id === 'yellowEndSlider' || el.id === 'redEndSlider' || el.id === 'blinkStartSlider'){ enforceOrder(el.id); if(el.id === 'redEndSlider' || el.id === 'blinkStartSlider'){ triggerBlinkPreview(); } updatePreviewLoop(); } else { updateSliderValue(el); if(el.id === 'autoBrightnessMinSlider' || el.id === 'brightnessSlider'){ syncAmbientUi(); } if(el.id === 'rpmStartSlider' || el.id === 'activeLedCountSlider'){ syncLedPreviewCount(); updatePreviewLoop(); } } markDirty(); syncSavebarSpace('saveBar'); }); el.addEventListener('change', () => { if(el.id === 'activeLedCountSlider'){ syncLedPreviewCount(); updatePreviewLoop(); } markDirty(); syncSavebarSpace('saveBar'); }); } else { el.addEventListener('input', () => { markDirty(); syncSavebarSpace('saveBar'); }); el.addEventListener('change', () => { markDirty(); syncSavebarSpace('saveBar'); }); } }); $('#autoscaleToggle')?.addEventListener('change', () => { syncAutoscaleUi(); markDirty(); syncSavebarSpace('saveBar'); }); $('#autoBrightnessToggle')?.addEventListener('change', () => { syncAmbientUi(); markDirty(); syncSavebarSpace('saveBar'); }); $('#modeSelect')?.addEventListener('change', () => { updatePreviewLoop(); markDirty(); syncSavebarSpace('saveBar'); }); $('#brightnessSlider')?.addEventListener('input', (ev) => { onBrightnessInput(ev.target.value); syncAmbientUi(); syncSavebarSpace('saveBar'); }); $('#brightnessSlider')?.addEventListener('change', (ev) => { onBrightnessInput(ev.target.value); syncAmbientUi(); syncSavebarSpace('saveBar'); }); ['greenColorInput','yellowColorInput','redColorInput'].forEach((id) => { document.getElementById(id)?.addEventListener('input', () => { updatePreviewLoop(); markDirty(); syncSavebarSpace('saveBar'); }); }); $('#btnSave')?.addEventListener('click', () => saveForm('/save').finally(() => syncSavebarSpace('saveBar'))); $('#btnReset')?.addEventListener('click', () => window.location.reload()); $('#btnTest')?.addEventListener('click', () => startSweep('show')); $('#btnTestDiagnostic')?.addEventListener('click', () => startSweep('diagnostic')); $('#btnConnect')?.addEventListener('click', () => postSimple('/connect').then(fetchStatus)); $('#btnDisconnect')?.addEventListener('click', () => postSimple('/disconnect').then(fetchStatus)); $('#btnLedDiagLive')?.addEventListener('click', () => setLedDiagnosticMode('live')); $('#btnLedDiagOff')?.addEventListener('click', () => setLedDiagnosticMode('off')); $('#btnLedDiagGreen')?.addEventListener('click', () => setLedDiagnosticMode('static-green')); $('#btnLedDiagWhite')?.addEventListener('click', () => setLedDiagnosticMode('static-white')); $('#btnLedDiagPit')?.addEventListener('click', () => setLedDiagnosticMode('pit-markers')); $('#btnAmbientProbe')?.addEventListener('click', probeAmbientSensor); $('#btnGestureProbe')?.addEventListener('click', probeGestureSensor); $('#btnDisplayStatus')?.addEventListener('click', refreshDisplayStatus); $('#btnDisplayBars')?.addEventListener('click', () => { const done = beginRequest(); fetch('/dev/display-pattern', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'pattern=bars' }).finally(() => { done(); refreshDisplayStatus(); }); }); $('#btnDisplayGrid')?.addEventListener('click', () => { const done = beginRequest(); fetch('/dev/display-pattern', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'pattern=grid' }).finally(() => { done(); refreshDisplayStatus(); }); }); $('#btnDisplayLogo')?.addEventListener('click', () => postSimple('/dev/display-logo').then(refreshDisplayStatus)); window.addEventListener('resize', () => syncSavebarSpace('saveBar')); fetchStatus(); setInterval(fetchStatus, 2200); if($('#displayStatusPill')){ refreshDisplayStatus(); } }
+function initDashboard(){ captureInitialState(); recomputeDirty(); syncSavebarSpace('saveBar'); initLedPreview(); syncAutoscaleUi(); syncAmbientUi(); updatePreviewLoop(); $$('input,select,textarea', $('#mainForm')).forEach((el) => { if(el.type === 'range'){ updateSliderValue(el); el.addEventListener('input', () => { if(el.id === 'greenEndSlider' || el.id === 'yellowEndSlider' || el.id === 'redEndSlider' || el.id === 'blinkStartSlider'){ enforceOrder(el.id); if(el.id === 'redEndSlider' || el.id === 'blinkStartSlider'){ triggerBlinkPreview(); } updatePreviewLoop(); } else { updateSliderValue(el); if(el.id === 'autoBrightnessMinSlider' || el.id === 'brightnessSlider'){ syncAmbientUi(); } if(el.id === 'rpmStartSlider' || el.id === 'activeLedCountSlider'){ syncLedPreviewCount(); updatePreviewLoop(); } if(el.id === 'blinkSpeedSlider'){ triggerBlinkPreview(); updatePreviewLoop(); } } markDirty(); syncSavebarSpace('saveBar'); }); el.addEventListener('change', () => { if(el.id === 'activeLedCountSlider'){ syncLedPreviewCount(); updatePreviewLoop(); } if(el.id === 'blinkSpeedSlider'){ triggerBlinkPreview(); updatePreviewLoop(); } markDirty(); syncSavebarSpace('saveBar'); }); } else { el.addEventListener('input', () => { markDirty(); syncSavebarSpace('saveBar'); }); el.addEventListener('change', () => { markDirty(); syncSavebarSpace('saveBar'); }); } }); $('#autoscaleToggle')?.addEventListener('change', () => { syncAutoscaleUi(); markDirty(); syncSavebarSpace('saveBar'); }); $('#autoBrightnessToggle')?.addEventListener('change', () => { syncAmbientUi(); markDirty(); syncSavebarSpace('saveBar'); }); $('#modeSelect')?.addEventListener('change', () => { updatePreviewLoop(); markDirty(); syncSavebarSpace('saveBar'); }); $('#brightnessSlider')?.addEventListener('input', (ev) => { onBrightnessInput(ev.target.value); syncAmbientUi(); syncSavebarSpace('saveBar'); }); $('#brightnessSlider')?.addEventListener('change', (ev) => { onBrightnessInput(ev.target.value); syncAmbientUi(); syncSavebarSpace('saveBar'); }); ['greenColorInput','yellowColorInput','redColorInput'].forEach((id) => { document.getElementById(id)?.addEventListener('input', () => { updatePreviewLoop(); markDirty(); syncSavebarSpace('saveBar'); }); }); $('#btnSave')?.addEventListener('click', () => saveForm('/save').finally(() => syncSavebarSpace('saveBar'))); $('#btnReset')?.addEventListener('click', () => window.location.reload()); $('#btnTest')?.addEventListener('click', () => startSweep('show')); $('#btnTestDiagnostic')?.addEventListener('click', () => startSweep('diagnostic')); $('#btnConnect')?.addEventListener('click', () => postSimple('/connect').then(fetchStatus)); $('#btnDisconnect')?.addEventListener('click', () => postSimple('/disconnect').then(fetchStatus)); $('#btnLedDiagLive')?.addEventListener('click', () => setLedDiagnosticMode('live')); $('#btnLedDiagOff')?.addEventListener('click', () => setLedDiagnosticMode('off')); $('#btnLedDiagGreen')?.addEventListener('click', () => setLedDiagnosticMode('static-green')); $('#btnLedDiagWhite')?.addEventListener('click', () => setLedDiagnosticMode('static-white')); $('#btnLedDiagPit')?.addEventListener('click', () => setLedDiagnosticMode('pit-markers')); $('#btnAmbientProbe')?.addEventListener('click', probeAmbientSensor); $('#btnGestureProbe')?.addEventListener('click', probeGestureSensor); $('#btnDisplayStatus')?.addEventListener('click', refreshDisplayStatus); $('#btnDisplayBars')?.addEventListener('click', () => { const done = beginRequest(); fetch('/dev/display-pattern', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'pattern=bars' }).finally(() => { done(); refreshDisplayStatus(); }); }); $('#btnDisplayGrid')?.addEventListener('click', () => { const done = beginRequest(); fetch('/dev/display-pattern', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'pattern=grid' }).finally(() => { done(); refreshDisplayStatus(); }); }); $('#btnDisplayLogo')?.addEventListener('click', () => postSimple('/dev/display-logo').then(refreshDisplayStatus)); window.addEventListener('resize', () => syncSavebarSpace('saveBar')); fetchStatus(); setInterval(fetchStatus, 2200); if($('#displayStatusPill')){ refreshDisplayStatus(); } }
 document.addEventListener('DOMContentLoaded', initDashboard);
 )JS");
         page += F("</script>");
@@ -346,6 +512,7 @@ String buildDashboardPage()
     const DisplayDebugInfo displayInfo = displayGetDebugInfo();
     const AmbientLightDebugInfo ambientInfo = ambientLightGetDebugInfo();
     const GestureSensorDebugInfo gestureInfo = gestureSensorGetDebugInfo();
+    const unsigned long now = millis();
     const String greenHex = colorToHex(cfg.greenColor);
     const String yellowHex = colorToHex(cfg.yellowColor);
     const String redHex = colorToHex(cfg.redColor);
@@ -357,6 +524,22 @@ String buildDashboardPage()
 #else
     const String ambientPinsHint = F("Standard-ESP32 Default: SDA 21 / SCL 22.");
 #endif
+    const bool ambientOnline = ambientUiOnline(ambientInfo, now);
+    const bool ambientBusReady = ambientInfo.busInitialized || ambientOnline;
+    const String ambientSensorText = ambientUiSensorText(ambientInfo, now);
+    const String ambientLuxText = ambientUiLuxText(ambientInfo, now);
+    const String ambientStatusText = ambientUiStatusText(ambientInfo, now);
+    const String ambientBusText = ambientBusReady ? String(ambientInfo.usingSharedBus ? "Shared 47/48" : "Privater I2C Bus") + (ambientOnline ? " ok" : " ohne ACK")
+                                                  : String(F("Kein Bus"));
+    const String ambientProbeText = ambientOnline ? String(F("Ja, 0x10 antwortet")) : String(F("Nein"));
+    const String ambientPillText = ambientUiPillText(ambientInfo, cfg.autoBrightnessEnabled, now);
+    const String gestureSensorText = gestureUiSensorText(gestureInfo, cfg.gestureControlEnabled, now);
+    const bool gestureOnline = gestureUiOnline(gestureInfo, now);
+    const bool gestureBusReady = gestureInfo.busInitialized || gestureOnline;
+    const String gestureStatusText = gestureUiStatusText(gestureInfo, cfg.gestureControlEnabled, now);
+    const String gestureBusText = gestureBusReady ? String(gestureInfo.usingSharedBus ? "Shared 47/48" : "Eigener Bus") + ((gestureOnline || gestureInfo.ackResponding) ? " ok" : " ohne ACK")
+                                                  : String(F("Kein Bus"));
+    const String gestureProbeText = (gestureOnline || gestureInfo.ackResponding) ? String(F("Ja, 0x39 antwortet")) : String(F("Nein"));
 
     String page;
     page.reserve(26000);
@@ -394,7 +577,9 @@ String buildDashboardPage()
     page += "<div class='range-wrap'><div class='range-head'><div class='range-title'>" + htmlEscape(greenLabel) + "</div><div class='range-value' id='greenEndValue'>" + String(cfg.greenEndPct) + "%</div></div><input type='range' name='greenEndPct' id='greenEndSlider' min='0' max='100' value='" + String(cfg.greenEndPct) + "' data-value-target='greenEndValue' data-suffix='%'><div class='seg-note'>Ende des ruhigen Bereichs.</div></div>";
     page += "<div class='range-wrap'><div class='range-head'><div class='range-title'>" + htmlEscape(yellowLabel) + "</div><div class='range-value' id='yellowEndValue'>" + String(cfg.yellowEndPct) + "%</div></div><input type='range' name='yellowEndPct' id='yellowEndSlider' min='0' max='100' value='" + String(cfg.yellowEndPct) + "' data-value-target='yellowEndValue' data-suffix='%'><div class='seg-note'>Uebergang in die Warnzone.</div></div>";
     page += "<div class='range-wrap'><div class='range-head'><div class='range-title'>" + htmlEscape(redLabel) + "</div><div class='range-value' id='redEndValue'>" + String(cfg.redEndPct) + "%</div></div><input type='range' name='redEndPct' id='redEndSlider' min='0' max='100' value='" + String(cfg.redEndPct) + "' data-value-target='redEndValue' data-suffix='%'><div class='seg-note'>Wie weit die feste dritte Farbe innerhalb des Vor-Blink-Bereichs aufspannt.</div></div>";
-    page += "<div class='range-wrap'><div class='range-head'><div class='range-title'>Blink Start</div><div class='range-value' id='blinkStartValue'>" + String(cfg.blinkStartPct) + "%</div></div><input type='range' name='blinkStartPct' id='blinkStartSlider' min='0' max='100' value='" + String(cfg.blinkStartPct) + "' data-value-target='blinkStartValue' data-suffix='%'><div class='seg-note'>Diese Grenze ist die komplette Vor-Blink-Skala. Gruen, Gelb und Rot werden anteilig in diesen Bereich eingepasst; darueber blinkt die Bar.</div></div><div><div class='field-label'>LED Vorschau</div><div id='ledPreview' class='led-preview'></div></div><div class='info-list'><div class='info-row'><div class='info-label'>Aktueller Startpunkt</div><div class='info-value mono' id='rpmStartLiveValue'>" + String(cfg.rpmStartRpm) + " rpm</div></div><div class='info-row'><div class='info-label'>LED Diagnosemodus</div><div class='info-value mono' id='ledDiagModeValue'>live</div></div><div class='info-row'><div class='info-label'>LED Render Debug</div><div class='info-value mono' id='ledDebugValue'>show 0 | skip 0 | mode -</div></div></div><div class='range-wrap'><div class='range-head'><div class='range-title'>Aktive LEDs</div><div class='range-value' id='activeLedCountValue'>" + String(cfg.activeLedCount) + "</div></div><input type='range' name='activeLedCount' id='activeLedCountSlider' min='1' max='" + String(NUM_LEDS) + "' value='" + String(cfg.activeLedCount) + "' data-value-target='activeLedCountValue'><div class='seg-note'>Nur fuer Tests. LEDs oberhalb dieser Anzahl bleiben komplett aus.</div></div><div class='button-row'><button type='button' class='btn btn-ghost' id='btnLedDiagLive'>Live</button><button type='button' class='btn btn-ghost' id='btnLedDiagOff'>Aus</button><button type='button' class='btn btn-ghost' id='btnLedDiagGreen'>Gruen statisch</button><button type='button' class='btn btn-ghost' id='btnLedDiagWhite'>Weiss statisch</button><button type='button' class='btn btn-ghost' id='btnLedDiagPit'>Pit Marker</button></div><div class='field-note'>Wenn selbst in einem statischen Diagnosemodus sichtbares Flackern bleibt, liegt das Problem sehr wahrscheinlich an Hardware, Versorgung oder Strip-Signal und nicht an wechselnden Telemetriedaten.</div></section>";
+    page += "<div class='range-wrap'><div class='range-head'><div class='range-title'>Blink Start</div><div class='range-value' id='blinkStartValue'>" + String(cfg.blinkStartPct) + "%</div></div><input type='range' name='blinkStartPct' id='blinkStartSlider' min='0' max='100' value='" + String(cfg.blinkStartPct) + "' data-value-target='blinkStartValue' data-suffix='%'><div class='seg-note'>Diese Grenze ist die komplette Vor-Blink-Skala. Gruen, Gelb und Rot werden anteilig in diesen Bereich eingepasst; darueber blinkt die Bar.</div></div>";
+    page += "<div class='range-wrap'><div class='range-head'><div class='range-title'>Blink Tempo</div><div class='range-value' id='blinkSpeedValue'>" + String(cfg.blinkSpeedPct) + "%</div></div><input type='range' name='blinkSpeedPct' id='blinkSpeedSlider' min='0' max='100' value='" + String(cfg.blinkSpeedPct) + "' data-value-target='blinkSpeedValue' data-suffix='%'><div class='seg-note'>0 = Blinkphase aus, 100 = quasi dauerhaft an. Dazwischen wird das rote Endblinken immer schneller.</div></div>";
+    page += "<div><div class='field-label'>LED Vorschau</div><div id='ledPreview' class='led-preview'></div></div><div class='info-list'><div class='info-row'><div class='info-label'>Aktueller Startpunkt</div><div class='info-value mono' id='rpmStartLiveValue'>" + String(cfg.rpmStartRpm) + " rpm</div></div><div class='info-row'><div class='info-label'>LED Diagnosemodus</div><div class='info-value mono' id='ledDiagModeValue'>live</div></div><div class='info-row'><div class='info-label'>LED Render Debug</div><div class='info-value mono' id='ledDebugValue'>show 0 | skip 0 | mode -</div></div></div><div class='range-wrap'><div class='range-head'><div class='range-title'>Aktive LEDs</div><div class='range-value' id='activeLedCountValue'>" + String(cfg.activeLedCount) + "</div></div><input type='range' name='activeLedCount' id='activeLedCountSlider' min='1' max='" + String(NUM_LEDS) + "' value='" + String(cfg.activeLedCount) + "' data-value-target='activeLedCountValue'><div class='seg-note'>Nur fuer Tests. LEDs oberhalb dieser Anzahl bleiben komplett aus.</div></div><div class='button-row'><button type='button' class='btn btn-ghost' id='btnLedDiagLive'>Live</button><button type='button' class='btn btn-ghost' id='btnLedDiagOff'>Aus</button><button type='button' class='btn btn-ghost' id='btnLedDiagGreen'>Gruen statisch</button><button type='button' class='btn btn-ghost' id='btnLedDiagWhite'>Weiss statisch</button><button type='button' class='btn btn-ghost' id='btnLedDiagPit'>Pit Marker</button></div><div class='field-note'>Wenn selbst in einem statischen Diagnosemodus sichtbares Flackern bleibt, liegt das Problem sehr wahrscheinlich an Hardware, Versorgung oder Strip-Signal und nicht an wechselnden Telemetriedaten.</div></section>";
     page += F("<section class='panel stack'><div class='panel-head'><div><h2 class='panel-title'>Farbzonen</h2><div class='panel-copy'>Direkt, klar und ohne ueberfluessige UI-Last.</div></div></div><div class='color-grid'>");
     page += "<div class='color-card'><label for='greenColorInput'>" + htmlEscape(greenLabel) + "</label><input type='color' id='greenColorInput' name='greenColor' value='" + greenHex + "'><div class='seg-note'>Low RPM Bereich</div><input type='hidden' name='greenLabel' value='" + htmlEscape(greenLabel) + "'></div>";
     page += "<div class='color-card'><label for='yellowColorInput'>" + htmlEscape(yellowLabel) + "</label><input type='color' id='yellowColorInput' name='yellowColor' value='" + yellowHex + "'><div class='seg-note'>Mid RPM Bereich</div><input type='hidden' name='yellowLabel' value='" + htmlEscape(yellowLabel) + "'></div>";
@@ -408,20 +593,20 @@ String buildDashboardPage()
     page += "<div class='info-row'><div class='info-label'>Fehler</div><div class='info-value' id='displayErrorValue'>" + htmlEscape(displayInfo.lastError.isEmpty() ? String(F("Kein Fehler")) : displayInfo.lastError) + "</div></div>";
     page += "<div class='info-row'><div class='info-label'>Letzter TX</div><div class='info-value mono' id='debugLastTx'>" + htmlEscape(g_lastTxInfo.isEmpty() ? String(F("Noch kein TX")) : g_lastTxInfo) + "</div></div>";
     page += "<div class='info-row'><div class='info-label'>Letzte OBD Zeile</div><div class='info-value mono' id='debugLastObd'>" + htmlEscape(g_lastObdInfo.isEmpty() ? String(F("Noch keine Antwort")) : g_lastObdInfo) + "</div></div>";
-    page += "<div class='info-row'><div class='info-label'>Gestensensor</div><div class='info-value' id='gestureStatusValue'>" + String(gestureInfo.sensorDetected ? "APDS-9960 online" : (gestureInfo.ackResponding ? "ACK ok, Init fehlgeschlagen" : (gestureInfo.busInitialized ? "Kein ACK an 0x39" : (cfg.gestureControlEnabled ? "Bus nicht bereit" : "Gesten aus")))) + "</div></div>";
+    page += "<div class='info-row'><div class='info-label'>Gestensensor</div><div class='info-value' id='gestureStatusValue'>" + gestureSensorText + "</div></div>";
     page += "<div class='info-row'><div class='info-label'>Letzte Geste</div><div class='info-value mono' id='gestureLastValue'>" + String(gestureSensorDirectionName(gestureInfo.lastGesture)) + " / " + String(gestureInfo.lastGestureMs > 0 ? (millis() - gestureInfo.lastGestureMs) : 0) + " ms</div></div>";
     page += "<div class='info-row'><div class='info-label'>Gesten-Zaehler</div><div class='info-value' id='gestureCountValue'>" + String(gestureInfo.gestureCount) + " erkannt / " + String(gestureInfo.modeSwitchCount) + " gewechselt</div></div>";
     page += "<div class='info-row'><div class='info-label'>Gestenfehler</div><div class='info-value mono' id='gestureErrorValue'>" + htmlEscape(gestureInfo.lastError.isEmpty() ? String(F("Kein Fehler")) : gestureInfo.lastError) + "</div></div>";
-    page += "<div class='info-row'><div class='info-label'>Gesten-Bus</div><div class='info-value' id='gestureBusValue'>" + String(gestureInfo.busInitialized ? (gestureInfo.usingSharedBus ? "Shared 47/48" : "Eigener Bus") : "Kein Bus") + "</div></div>";
-    page += "<div class='info-row'><div class='info-label'>0x39 Antwort</div><div class='info-value' id='gestureProbeValue'>" + String(gestureInfo.ackResponding ? "Ja" : "Nein") + "</div></div>";
+    page += "<div class='info-row'><div class='info-label'>Gesten-Bus</div><div class='info-value' id='gestureBusValue'>" + gestureBusText + "</div></div>";
+    page += "<div class='info-row'><div class='info-label'>0x39 Antwort</div><div class='info-value' id='gestureProbeValue'>" + gestureProbeText + "</div></div>";
     page += "<div class='info-row'><div class='info-label'>ID / Init</div><div class='info-value mono' id='gestureIdValue'>" + String(gestureInfo.idReadOk ? (String("0x") + String(gestureInfo.deviceId, HEX) + (gestureInfo.configApplied ? " konfiguriert" : " gelesen")) : "-") + "</div></div>";
     page += "<div class='info-row'><div class='info-label'>INT</div><div class='info-value mono' id='gestureIntValue'>GPIO " + String(gestureInfo.intPin) + " / " + String(gestureInfo.intConfigured ? (gestureInfo.intLineLow ? "LOW" : "HIGH") : "aus") + "</div></div>";
     page += "<div class='info-row'><div class='info-label'>GSTATUS / FIFO</div><div class='info-value mono' id='gestureRawValue'>GSTATUS 0x" + String(gestureInfo.lastStatusReg, HEX) + " / FIFO " + String(gestureInfo.lastFifoLevel) + "</div></div>";
     page += "<div class='info-row'><div class='info-label'>Reads</div><div class='info-value' id='gestureStatsValue'>" + String(gestureInfo.initSuccessCount) + "/" + String(gestureInfo.initAttempts) + " init / " + String(gestureInfo.probeCount) + " probe / " + String(gestureInfo.pollCount) + " poll / " + String(gestureInfo.readErrorCount) + " err / " + String(gestureInfo.intTriggerCount) + " irq</div></div>";
     page += "<div class='info-row'><div class='info-label'>Alter</div><div class='info-value' id='gestureAgeValue'>" + String(gestureInfo.lastProbeMs > 0 ? (millis() - gestureInfo.lastProbeMs) : 0) + " ms probe / " + String(gestureInfo.lastReadMs > 0 ? (millis() - gestureInfo.lastReadMs) : 0) + " ms read / " + String(gestureInfo.lastIntMs > 0 ? (millis() - gestureInfo.lastIntMs) : 0) + " ms irq</div></div>";
     page += F("</div><div class='button-row'><button type='button' class='btn btn-secondary' id='btnGestureProbe'>Gestensensor pruefen</button><button type='button' class='btn btn-secondary' id='btnDisplayStatus'>Status aktualisieren</button><button type='button' class='btn btn-secondary' id='btnDisplayBars'>Farb-Balken</button><button type='button' class='btn btn-secondary' id='btnDisplayGrid'>Raster</button><button type='button' class='btn btn-secondary' id='btnDisplayLogo'>Logo anzeigen</button></div>");
-    page += "<div class='field-note' id='gestureStatusNote'>Gestenstatus: " + htmlEscape(gestureInfo.lastError.isEmpty() ? (gestureInfo.sensorDetected ? String(F("Sensor bereit.")) : (gestureInfo.ackResponding ? String(F("ACK vorhanden, aber Init noch nicht sauber.")) : String(F("Noch keine Antwort vom Sensor.")))) : gestureInfo.lastError) + "</div></div></details></div><div class='dashboard-col'>";
-    page += F("<section class='panel stack'><div class='panel-head'><div><h2 class='panel-title'>Auto-Helligkeit</h2><div class='panel-copy'>VEML7700 passt die LED-Helligkeit weich an. Die manuelle Helligkeit bleibt immer die Obergrenze.</div></div><span class='pill neutral' id='ambientPill'>Bereit</span></div>");
+    page += "<div class='field-note' id='gestureStatusNote'>Gestenstatus: " + htmlEscape(gestureStatusText) + "</div></div></details></div><div class='dashboard-col'>";
+    page += "<section class='panel stack'><div class='panel-head'><div><h2 class='panel-title'>Auto-Helligkeit</h2><div class='panel-copy'>VEML7700 passt die LED-Helligkeit weich an. Die manuelle Helligkeit bleibt immer die Obergrenze.</div></div><span class='pill " + String(ambientUiPillTone(ambientInfo, cfg.autoBrightnessEnabled, now)) + "' id='ambientPill'>" + ambientPillText + "</span></div>";
     page += F("<div class='field-inline'><div><strong>Automatische Helligkeit</strong><span>OEM-artige Anpassung ueber das Umgebungslicht.</span></div><label class='switch'><input type='checkbox' id='autoBrightnessToggle' name='autoBrightnessEnabled'");
     page += checkedAttr(cfg.autoBrightnessEnabled);
     page += F("><span class='slider'></span></label></div>");
@@ -435,26 +620,19 @@ String buildDashboardPage()
     page += "<div class='field'><label for='ambientLightSclPin'>VEML7700 SCL Pin</label><input type='number' id='ambientLightSclPin' name='ambientLightSclPin' min='0' max='48' value='" + String(cfg.ambientLightSclPin) + "'></div></div><div class='field-note'>" + htmlEscape(ambientPinsHint) + "</div></div>";
     page += F("<div class='info-list compact'>");
     page += "<div class='info-row'><div class='info-label'>Modus</div><div class='info-value' id='ambientModeValue'>" + String(cfg.autoBrightnessEnabled ? "Automatisch" : "Manuell") + "</div></div>";
-    page += "<div class='info-row'><div class='info-label'>Sensor</div><div class='info-value' id='ambientSensorValue'>" + String(ambientInfo.sensorDetected ? "VEML7700 online" : "Nicht erkannt") + "</div></div>";
-    page += "<div class='info-row'><div class='info-label'>Lux</div><div class='info-value' id='ambientLuxValue'>" + String(ambientInfo.sensorDetected ? String(ambientInfo.filteredLux, 1) + " lx" : "-") + "</div></div>";
+    page += "<div class='info-row'><div class='info-label'>Sensor</div><div class='info-value' id='ambientSensorValue'>" + ambientSensorText + "</div></div>";
+    page += "<div class='info-row'><div class='info-label'>Lux</div><div class='info-value' id='ambientLuxValue'>" + ambientLuxText + "</div></div>";
     page += "<div class='info-row'><div class='info-label'>LED aktuell / Max</div><div class='info-value' id='ambientBrightnessValue'>" + String(ambientInfo.appliedBrightness) + " / " + String(cfg.brightness) + "</div></div>";
     page += "<div class='info-row'><div class='info-label'>Auto Ziel</div><div class='info-value' id='ambientTargetValue'>" + String(cfg.autoBrightnessEnabled ? ambientInfo.targetBrightness : cfg.brightness) + "</div></div>";
     page += "<div class='info-row'><div class='info-label'>Pins</div><div class='info-value mono' id='ambientPinsValue'>SDA " + String(cfg.ambientLightSdaPin) + " / SCL " + String(cfg.ambientLightSclPin) + "</div></div>";
-    page += "<div class='info-row'><div class='info-label'>Bus</div><div class='info-value' id='ambientBusValue'>" + String(ambientInfo.busInitialized ? (ambientInfo.usingSharedBus ? "Shared 47/48" : "Privater I2C Bus") : "Kein Bus") + "</div></div>";
-    page += "<div class='info-row'><div class='info-label'>0x10 Antwort</div><div class='info-value' id='ambientProbeValue'>" + String(ambientInfo.deviceResponding ? "Ja" : "Nein") + "</div></div>";
+    page += "<div class='info-row'><div class='info-label'>Bus</div><div class='info-value' id='ambientBusValue'>" + ambientBusText + "</div></div>";
+    page += "<div class='info-row'><div class='info-label'>0x10 Antwort</div><div class='info-value' id='ambientProbeValue'>" + ambientProbeText + "</div></div>";
     page += "<div class='info-row'><div class='info-label'>ALS / White</div><div class='info-value mono' id='ambientRawValue'>" + String(ambientInfo.rawAls) + " / " + String(ambientInfo.rawWhite) + "</div></div>";
     page += "<div class='info-row'><div class='info-label'>Config</div><div class='info-value mono' id='ambientConfigValue'>0x" + String(ambientInfo.configReg, HEX) + "</div></div>";
     page += "<div class='info-row'><div class='info-label'>Reads</div><div class='info-value' id='ambientReadStatsValue'>" + String(ambientInfo.readCount) + " ok / " + String(ambientInfo.readErrorCount) + " err</div></div>";
     page += "<div class='info-row'><div class='info-label'>Alter</div><div class='info-value' id='ambientAgeValue'>" + String(ambientInfo.lastReadMs > 0 ? (millis() - ambientInfo.lastReadMs) : 0) + " ms read / " + String(ambientInfo.lastInitMs > 0 ? (millis() - ambientInfo.lastInitMs) : 0) + " ms init</div></div>";
     page += F("</div><div class='button-row'><button type='button' class='btn btn-secondary' id='btnAmbientProbe'>Sensor neu pruefen</button></div>");
-    if (!ambientInfo.lastError.isEmpty())
-    {
-        page += "<div class='field-note' id='ambientStatusNote'>Sensorstatus: " + htmlEscape(ambientInfo.lastError) + "</div>";
-    }
-    else
-    {
-        page += "<div class='field-note' id='ambientStatusNote'>Sensorstatus: " + String(ambientInfo.deviceResponding ? "Sensor liefert Daten." : "Noch keine Antwort vom Sensor.") + "</div>";
-    }
+    page += "<div class='field-note' id='ambientStatusNote'>Sensorstatus: " + htmlEscape(ambientStatusText) + "</div>";
     page += F("</div></section>");
     page += F("<section class='panel stack'><div class='panel-head'><div><h2 class='panel-title'>Animationen</h2><div class='panel-copy'>Seltene Features sind gebuendelt, aber nicht versteckt.</div></div></div><div class='field-inline'><div><strong>Logo bei Zuendung an</strong><span>Zeigt das M-Logo beim Einschalten.</span></div><label class='switch'><input type='checkbox' name='logoIgnOn'");
     page += checkedAttr(cfg.logoOnIgnitionOn);

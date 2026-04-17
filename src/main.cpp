@@ -73,12 +73,15 @@ void setup()
 
     // --- Spawn dedicated worker tasks --------------------------------------
     // The USB serial bridge runs on Core 0 at priority 3 so incoming sim data
-    // is drained every ~2 ms regardless of what the main loop is doing. The
-    // LED renderer runs on Core 1 at priority 2 and ticks at 100 Hz so shift
-    // lights react to new RPM values within one frame, independent of BLE,
-    // HTTP or display work.
+    // is drained roughly every 1 ms regardless of what the main loop is
+    // doing. Telemetry source selection and snapshot publishing run on Core 1
+    // at a fixed ~3 ms cadence, and the LED renderer follows at ~200 Hz, so
+    // USB/SimHub RPM changes propagate without waiting for the Arduino loop.
     Serial.println("[BOOT] Starting USB bridge task...");
     startUsbSimBridgeTask();
+
+    Serial.println("[BOOT] Starting telemetry task...");
+    startTelemetryTask();
 
     Serial.println("[BOOT] Starting LED bar task...");
     startLedBarTask();

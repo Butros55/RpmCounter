@@ -44,8 +44,9 @@ namespace
     constexpr uint32_t USB_TASK_POLL_INTERVAL_MS = 1;
     constexpr uint32_t USB_STATE_REFRESH_INTERVAL_MS = 10;
     constexpr unsigned long USB_TELEMETRY_DIAG_GAP_MS = 60;
-    constexpr unsigned long USB_TELEMETRY_GLITCH_SHORT_GAP_MS = 40;
-    constexpr int USB_TELEMETRY_GLITCH_RPM_DELTA = 1200;
+    constexpr unsigned long USB_TELEMETRY_GLITCH_REJECT_WINDOW_MS = 8;
+    constexpr int USB_TELEMETRY_GLITCH_ZERO_ANCHORED_DELTA = 3000;
+    constexpr int USB_TELEMETRY_GLITCH_EXTREME_DELTA = 7000;
 
     String g_usbRxLine;
     unsigned long g_lastHelloTxMs = 0;
@@ -573,12 +574,15 @@ namespace
         if (previousFrameMs > 0 && contiguousSeq)
         {
             const unsigned long frameGapMs = nowMs - previousFrameMs;
+            const bool zeroAnchoredJump = previousAcceptedRpm == 0 || frame.rpm == 0;
+            const int glitchDeltaLimit =
+                zeroAnchoredJump ? USB_TELEMETRY_GLITCH_ZERO_ANCHORED_DELTA : USB_TELEMETRY_GLITCH_EXTREME_DELTA;
             if (frame.rpm > previousAcceptedRpm &&
                 isShortGapSpike(previousAcceptedRpm,
                                 frame.rpm,
                                 frameGapMs,
-                                USB_TELEMETRY_GLITCH_RPM_DELTA,
-                                USB_TELEMETRY_GLITCH_SHORT_GAP_MS))
+                                glitchDeltaLimit,
+                                USB_TELEMETRY_GLITCH_REJECT_WINDOW_MS))
             {
                 ++g_usbTelemetryDebug.glitchRejects;
                 ++g_usbTelemetryDebug.glitchRejectUpCount;
@@ -590,8 +594,8 @@ namespace
             if (isShortGapDip(previousAcceptedRpm,
                               frame.rpm,
                               frameGapMs,
-                              USB_TELEMETRY_GLITCH_RPM_DELTA,
-                              USB_TELEMETRY_GLITCH_SHORT_GAP_MS))
+                              glitchDeltaLimit,
+                              USB_TELEMETRY_GLITCH_REJECT_WINDOW_MS))
             {
                 ++g_usbTelemetryDebug.glitchRejects;
                 ++g_usbTelemetryDebug.glitchRejectDownCount;
@@ -721,8 +725,8 @@ namespace
 
 namespace
 {
-    // Body of the dedicated reader task: drains the CDC RX buffer every few
-    // milliseconds, parses complete lines, and advances the state machine.
+    // Body of the dedicated reader task: drains the CDC RX buffer roughly
+    // every 1 ms, parses complete lines, and refreshes USB state every 10 ms.
     // Running this outside of loop() means serial data is serviced even if
     // another module (HTTP, BLE, LED render) takes a long time.
     void usbSimBridgeTaskBody(void *)
@@ -786,6 +790,8 @@ void initUsbSimBridge()
     {
         g_usbWriteMutex = xSemaphoreCreateMutex();
     }
+    g_usbTelemetryDebug.glitchWindowMs = USB_TELEMETRY_GLITCH_REJECT_WINDOW_MS;
+    g_usbTelemetryDebug.glitchDeltaRpm = USB_TELEMETRY_GLITCH_EXTREME_DELTA;
     refreshUsbFlags(millis());
 }
 
@@ -943,8 +949,12 @@ String usbSimBuildStatusJson()
     json += ",\"telemetryFallback\":" + String(telemetrySourceIsFallback(g_activeTelemetrySource, cfg.telemetryPreference, cfg.simTransportPreference) ? "true" : "false");
     json += ",\"telemetrySnapshotVersion\":" + String(telemetrySnapshot.version);
     json += ",\"telemetrySnapshotAgeMs\":" + String(telemetrySnapshot.sampleTimestampMs > 0 ? (nowMs - telemetrySnapshot.sampleTimestampMs) : 0);
+    json += ",\"telemetrySnapshotPublishAgeMs\":" + String(telemetryInfo.lastSnapshotPublishMs > 0 ? (nowMs - telemetryInfo.lastSnapshotPublishMs) : 0);
+    json += ",\"telemetrySnapshotPublishCount\":" + String(telemetryInfo.snapshotPublishCount);
     json += ",\"telemetrySnapshotSource\":\"" + jsonEscape(String(telemetrySourceName(telemetrySnapshot.source))) + "\"";
     json += ",\"telemetrySnapshotFresh\":" + String(telemetrySnapshot.telemetryFresh ? "true" : "false");
+    json += ",\"telemetryTaskRunning\":" + String(telemetryInfo.taskRunning ? "true" : "false");
+    json += ",\"telemetryTaskIntervalMs\":" + String(telemetryInfo.taskIntervalMs);
     json += ",\"simSessionState\":\"" + jsonEscape(String(simSessionStateName(telemetrySnapshot.simSessionState))) + "\"";
     json += ",\"telemetrySourceTransitionCount\":" + String(telemetryInfo.sourceTransitionCount);
     json += ",\"telemetryLastSourceTransition\":\"" + jsonEscape(String(telemetrySourceName(telemetryInfo.lastSourceTransition.fromSource)) + " -> " + telemetrySourceName(telemetryInfo.lastSourceTransition.toSource)) + "\"";
@@ -975,6 +985,8 @@ String usbSimBuildStatusJson()
     json += ",\"usbTelemetryGlitchRejects\":" + String(g_usbTelemetryDebug.glitchRejects);
     json += ",\"usbTelemetryGlitchRejectUps\":" + String(g_usbTelemetryDebug.glitchRejectUpCount);
     json += ",\"usbTelemetryGlitchRejectDowns\":" + String(g_usbTelemetryDebug.glitchRejectDownCount);
+    json += ",\"usbTelemetryGlitchWindowMs\":" + String(g_usbTelemetryDebug.glitchWindowMs);
+    json += ",\"usbTelemetryGlitchDeltaRpm\":" + String(g_usbTelemetryDebug.glitchDeltaRpm);
     json += ",\"usbTelemetryGapEvents\":" + String(g_usbTelemetryDebug.gapEvents);
     json += ",\"usbTelemetryLastGapMs\":" + String(g_usbTelemetryDebug.lastGapMs);
     json += ",\"usbTelemetryMaxGapMs\":" + String(g_usbTelemetryDebug.maxGapMs);
@@ -1006,6 +1018,8 @@ String usbSimBuildStatusJson()
     json += ",\"ledBrightnessUpdates\":" + String(g_ledRenderDebug.brightnessUpdateCount);
     json += ",\"ledShiftBlink\":" + String(g_ledRenderDebug.lastShiftBlink ? "true" : "false");
     json += ",\"ledPitLimiterOnly\":" + String(g_ledRenderDebug.pitLimiterOnly ? "true" : "false");
+    json += ",\"ledFastResponseActive\":" + String(g_ledRenderDebug.fastResponseActive ? "true" : "false");
+    json += ",\"redColorFallbackActive\":" + String(g_ledRenderDebug.redFallbackActive ? "true" : "false");
     json += ",\"ledDiagnosticMode\":\"" + jsonEscape(String(ledBarGetDiagnosticModeName())) + "\"";
     json += ",\"ledRenderMode\":\"" + jsonEscape(String(ledBarGetLastRenderModeName())) + "\"";
     json += ",\"ledLastWriter\":\"" + jsonEscape(String(ledBarGetLastWriterName())) + "\"";

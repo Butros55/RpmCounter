@@ -77,6 +77,7 @@ struct AppConfig
     int yellowEndPct;
     int redEndPct;
     int blinkStartPct;
+    int blinkSpeedPct;
     int brightness;
     bool autoBrightnessEnabled;
     int ambientLightSdaPin;
@@ -136,5 +137,7 @@ extern const char *AP_PASS;
 void initConfig();
 void loadConfig();
 void saveConfig();
+RgbColor effectiveRedColor();
+bool redColorFallbackActive();
 
 #endif // CONFIG_H

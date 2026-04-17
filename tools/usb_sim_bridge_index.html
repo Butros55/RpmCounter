@@ -147,12 +147,12 @@
         </div>
         <div class="panel">
           <div class="panel-head">
-            <div><div class="section-title">Schnellstart</div><div class="panel-copy">Unter <span class="mono">/</span> landet jetzt wieder die echte ESP-Weboberflaeche, solange das Board im WLAN haengt. Diese Seite bleibt unter <span class="mono">/bridge/</span> fuer Diagnose und USB-Checks.</div></div>
+            <div><div class="section-title">Schnellstart</div><div class="panel-copy">Dashboard und Bridge sind jetzt sauber getrennt: das ESP-Dashboard liegt unter <span class="mono">/</span>, diese Bridge-Seite bleibt fest unter <span class="mono">/bridge/</span>.</div></div>
           </div>
           <div class="info-list">
             <div class="info-row"><div class="info-label">1</div><div class="info-value">ESP per USB anschliessen und die neue Firmware flashen</div></div>
             <div class="info-row"><div class="info-label">2</div><div class="info-value">SimHub starten und ACC in eine laufende Session bringen</div></div>
-            <div class="info-row"><div class="info-label">3</div><div class="info-value">ESP-Setup unter <a href="/" style="color:var(--accent)">/</a> oeffnen, Bridge-Diagnose bei Bedarf unter <a href="/bridge/" style="color:var(--accent)">/bridge/</a></div></div>
+            <div class="info-row"><div class="info-label">3</div><div class="info-value">ESP-Dashboard unter <a href="/" style="color:var(--accent)">/</a> oeffnen, Bridge-Diagnose separat unter <a href="/bridge/" style="color:var(--accent)">/bridge/</a>. Falls der ESP gerade nicht erreichbar ist, bleibt <a href="/bridge/" style="color:var(--accent)">/bridge/</a> trotzdem stabil.</div></div>
           </div>
         </div>
       </div>
@@ -272,12 +272,12 @@
       setText('diagEspAge', String(data.espUsbTelemetryAgeMs ?? 0) + ' ms');
       setText('diagUsbGap', `${data.espUsbTelemetryLastGapMs ?? 0} / ${data.espUsbTelemetryMaxGapMs ?? 0} ms (${data.espUsbTelemetryGapEvents ?? 0})`);
       setText('diagUsbSeq', `seq ${data.espUsbTelemetrySeq ?? 0} | gap ${data.espUsbTelemetrySeqGapEvents ?? 0}/${data.espUsbTelemetrySeqGapFrames ?? 0} | dup ${data.espUsbTelemetrySeqDuplicates ?? 0}`);
-      setText('diagLedFilter', `${data.espLedRawRpm ?? 0} -> ${data.espLedFilteredRpm ?? 0} rpm | lvl ${data.espLedDisplayedLevel ?? 0}/${data.espLedDesiredLevel ?? 0} of ${data.espLedLevelCount ?? 0} | adj ${data.espLedFilterAdjusts ?? 0}`);
+      setText('diagLedFilter', `${data.espLedRawRpm ?? 0} -> ${data.espLedFilteredRpm ?? 0} rpm | lvl ${data.espLedDisplayedLevel ?? 0}/${data.espLedDesiredLevel ?? 0} of ${data.espLedLevelCount ?? 0} | fast ${data.espLedFastResponseActive ? 'on' : 'off'} | adj ${data.espLedFilterAdjusts ?? 0}`);
       setText('diagLedRender', `show ${data.espLedFrameShows ?? 0} | skip ${data.espLedFrameSkips ?? 0} | fx ${data.espLedActiveEffect || '-'} / ${data.espLedQueuedEffect || '-'} | writer ${data.espLedLastWriter || '-'} | race ${data.espLedSnapshotChangedDuringRender ?? 0} | ext ${data.espLedExternalWriteAttempts ?? 0}`);
-      setText('diagSnapshot', `v${data.espTelemetrySnapshotVersion ?? 0} | ${data.espTelemetrySnapshotSource || '-'} | age ${data.espTelemetrySnapshotAgeMs ?? 0} ms | ${data.espTelemetrySnapshotFresh ? 'fresh' : 'stale'}`);
+      setText('diagSnapshot', `v${data.espTelemetrySnapshotVersion ?? 0} | ${data.espTelemetrySnapshotSource || '-'} | sample ${data.espTelemetrySnapshotAgeMs ?? 0} ms | pub ${data.espTelemetrySnapshotPublishAgeMs ?? 0} ms / ${data.espTelemetrySnapshotPublishCount ?? 0} | task ${data.espTelemetryTaskRunning ? 'on' : 'off'} @ ${data.espTelemetryTaskIntervalMs ?? 0} ms | ${data.espTelemetrySnapshotFresh ? 'fresh' : 'stale'}`);
       setText('diagSimSession', `${data.espSimSessionState || '-'} | ${data.espSimSessionLastTransition || '-'} | suppr ${data.espSimSessionSuppressedCount ?? 0} | src ${data.espTelemetryLastSourceTransition || '-'}`);
-      setText('diagBridgeGap', `${data.bridgeLastTelemetryGapMs ?? 0} / ${data.bridgeMaxTelemetryGapMs ?? 0} ms | tx ${data.bridgeTelemetryTxCount ?? 0} | rpc ${data.bridgeStatusRpcErrors ?? 0}`);
-      setText('diagNetErr', `ok ${data.espSimHubPollOk ?? 0} err ${data.espSimHubPollErr ?? 0} usb-suppr ${data.espSimHubSuppressedWhileUsb ?? 0} glitch u/d ${data.espUsbTelemetryGlitchRejectUps ?? 0}/${data.espUsbTelemetryGlitchRejectDowns ?? 0} ${data.espSimHubLastError ? '| ' + data.espSimHubLastError : ''}`);
+      setText('diagBridgeGap', `${data.bridgeLastTelemetryGapMs ?? 0} / ${data.bridgeMaxTelemetryGapMs ?? 0} ms | tx ${data.bridgeTelemetryTxCount ?? 0} @ ${data.bridgeTelemetryTargetIntervalMs ?? 0} ms | poll ${data.bridgeSimHubPollIntervalMs ?? 0} ms | rpc ${data.bridgeStatusRpcErrors ?? 0}`);
+      setText('diagNetErr', `ok ${data.espSimHubPollOk ?? 0} err ${data.espSimHubPollErr ?? 0} usb-suppr ${data.espSimHubSuppressedWhileUsb ?? 0} glitch u/d ${data.espUsbTelemetryGlitchRejectUps ?? 0}/${data.espUsbTelemetryGlitchRejectDowns ?? 0} @ ${data.espUsbTelemetryGlitchWindowMs ?? 0} ms / ${data.espUsbTelemetryGlitchDeltaRpm ?? 0} rpm | red ${data.espRedColorFallbackActive ? 'fallback' : 'cfg'}${data.espSimHubLastError ? ' | ' + data.espSimHubLastError : ''}`);
       syncDirty();
     }
     async function loadStatus(){ const res = await fetch('/api/status', { cache:'no-store' }); applyStatus(await res.json()); }

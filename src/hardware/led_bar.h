@@ -53,7 +53,7 @@ struct LedRenderHistoryInfo
 
 void initLeds();
 void ledBarLoop();           // kept for compatibility; no-op once the task is running
-void startLedBarTask();      // spawns the 100 Hz renderer task
+void startLedBarTask();      // spawns the ~200 Hz renderer task
 void setStatusLED(bool on);
 void rememberPreviewPixels();
 void ledBarRefreshBrightness();

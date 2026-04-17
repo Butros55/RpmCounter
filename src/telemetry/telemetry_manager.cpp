@@ -1,6 +1,8 @@
 #include "telemetry_manager.h"
 
 #include <Arduino.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include "core/config.h"
 #include "core/logging.h"
@@ -14,6 +16,8 @@ namespace
 {
     constexpr unsigned long OBD_FRESH_TIMEOUT_MS = 1200;
     constexpr unsigned long SIMHUB_FRESH_TIMEOUT_MS = 2000;
+    constexpr uint32_t TELEMETRY_TASK_INTERVAL_MS = 3;
+    constexpr uint32_t TELEMETRY_CONFIG_REFRESH_INTERVAL_MS = 20;
     // When Auto-mode loses its active source, stick with it briefly so a short
     // lull does not rip the LEDs dark. Shortened from 8000 ms — at the old
     // value the stale values could linger for many seconds after the game
@@ -27,9 +31,13 @@ namespace
     constexpr unsigned long SIM_SESSION_WAITING_DEBOUNCE_MS = 1200;
     constexpr unsigned long SIM_SESSION_ERROR_DEBOUNCE_MS = 1500;
     constexpr unsigned long SIM_SESSION_INACTIVE_DEBOUNCE_MS = 1500;
+    TaskHandle_t g_telemetryTaskHandle = nullptr;
+    volatile bool g_telemetryTaskRunning = false;
     unsigned long g_lastDecayMs = 0;
     portMUX_TYPE g_telemetrySnapshotMux = portMUX_INITIALIZER_UNLOCKED;
     TelemetryRenderSnapshot g_renderSnapshot{};
+    unsigned long g_lastSnapshotPublishMs = 0;
+    uint32_t g_snapshotPublishCount = 0;
     TelemetrySourceTransitionEvent g_sourceHistory[TELEMETRY_DEBUG_HISTORY_LEN]{};
     SimSessionTransitionEvent g_simHistory[TELEMETRY_DEBUG_HISTORY_LEN]{};
     uint8_t g_sourceHistoryCount = 0;
@@ -368,10 +376,19 @@ namespace
         return g_lastSimSessionState;
     }
 
-    void publishRenderSnapshot(const TelemetryRenderSnapshot &snapshot)
+    void refreshTelemetryConfig()
+    {
+        usbSimBridgeUpdateConfig();
+        simHubClientUpdateConfig();
+    }
+
+    void publishRenderSnapshot(TelemetryRenderSnapshot snapshot, unsigned long nowMs)
     {
         portENTER_CRITICAL(&g_telemetrySnapshotMux);
+        snapshot.version = g_snapshotPublishCount + 1U;
         g_renderSnapshot = snapshot;
+        g_lastSnapshotPublishMs = nowMs;
+        ++g_snapshotPublishCount;
         portEXIT_CRITICAL(&g_telemetrySnapshotMux);
     }
 
@@ -396,6 +413,75 @@ namespace
         portENTER_CRITICAL(&g_telemetrySnapshotMux);
         pushSourceTransition(event);
         portEXIT_CRITICAL(&g_telemetrySnapshotMux);
+    }
+
+    void telemetryPublishTick(bool refreshConfigSnapshot)
+    {
+        if (refreshConfigSnapshot)
+        {
+            refreshTelemetryConfig();
+        }
+
+        const unsigned long nowMs = millis();
+        const bool usbFresh = usbSimTelemetryFresh(nowMs);
+        const bool simHubFresh = isSimHubFresh(nowMs);
+        const bool obdFresh = isObdFresh(nowMs);
+        const SimRuntimeTransportMode mode = resolveSimRuntimeTransportMode(cfg.telemetryPreference, cfg.simTransportPreference);
+        ActiveTelemetrySource nextSource =
+            selectTelemetryRuntimeSource(cfg.telemetryPreference, cfg.simTransportPreference, usbFresh, simHubFresh, obdFresh);
+        bool holdApplied = false;
+
+        // The hold window is only for Auto transport so short gaps do not flap between USB and network.
+        if (telemetrySupportsTransportFallback(cfg.telemetryPreference, cfg.simTransportPreference) &&
+            nextSource == ActiveTelemetrySource::None &&
+            g_activeTelemetrySource != ActiveTelemetrySource::None)
+        {
+            const unsigned long lastSampleMs = lastSampleForSource(g_activeTelemetrySource);
+            if (lastSampleMs > 0 && (nowMs - lastSampleMs) <= TELEMETRY_SOURCE_HOLD_MS)
+            {
+                nextSource = g_activeTelemetrySource;
+                holdApplied = true;
+            }
+        }
+
+        if (nextSource != g_activeTelemetrySource)
+        {
+            LOG_INFO("TELEMETRY", "SOURCE_SWITCH",
+                     String("from=") + telemetrySourceName(g_activeTelemetrySource) +
+                         " to=" + telemetrySourceName(nextSource) +
+                         " mode=" + simRuntimeTransportModeName(mode) +
+                         " usbFresh=" + (usbFresh ? "1" : "0") +
+                         " netFresh=" + (simHubFresh ? "1" : "0") +
+                         " obdFresh=" + (obdFresh ? "1" : "0"));
+            recordSourceTransition(nowMs,
+                                   g_activeTelemetrySource,
+                                   nextSource,
+                                   usbFresh,
+                                   simHubFresh,
+                                   obdFresh,
+                                   holdApplied,
+                                   telemetrySourceIsFallback(nextSource, cfg.telemetryPreference, cfg.simTransportPreference));
+            g_activeTelemetrySource = nextSource;
+        }
+
+        applyActiveTelemetry(nextSource, nowMs);
+
+        const ActiveTelemetrySource simSessionSource = chooseSimSessionSource(nextSource, mode);
+        const SimSessionState simSessionState = trackSimSessionTransition(nowMs, simSessionSource, deriveSimSessionState(simSessionSource));
+
+        TelemetryRenderSnapshot snapshot{};
+        snapshot.source = nextSource;
+        snapshot.rpm = g_currentRpm;
+        snapshot.maxSeenRpm = g_maxSeenRpm;
+        snapshot.speedKmh = g_vehicleSpeedKmh;
+        snapshot.gear = g_estimatedGear;
+        snapshot.throttle = g_currentThrottle;
+        snapshot.pitLimiter = g_pitLimiterActive;
+        snapshot.sampleTimestampMs = lastSampleForSource(nextSource);
+        snapshot.telemetryFresh = sourceFreshForSnapshot(nextSource, usbFresh, simHubFresh, obdFresh);
+        snapshot.fallbackActive = telemetrySourceIsFallback(nextSource, cfg.telemetryPreference, cfg.simTransportPreference);
+        snapshot.simSessionState = simSessionState;
+        publishRenderSnapshot(snapshot, nowMs);
     }
 
 }
@@ -583,76 +669,61 @@ void initTelemetry()
 {
     initUsbSimBridge();
     initSimHubClient();
-    usbSimBridgeUpdateConfig();
-    simHubClientUpdateConfig();
+    refreshTelemetryConfig();
+}
+
+namespace
+{
+    void telemetryTaskBody(void *)
+    {
+        TickType_t lastWake = xTaskGetTickCount();
+        unsigned long lastConfigRefreshMs = 0;
+        for (;;)
+        {
+            const unsigned long nowMs = millis();
+            const bool refreshConfigSnapshot =
+                lastConfigRefreshMs == 0 || nowMs < lastConfigRefreshMs ||
+                (nowMs - lastConfigRefreshMs) >= TELEMETRY_CONFIG_REFRESH_INTERVAL_MS;
+            telemetryPublishTick(refreshConfigSnapshot);
+            if (refreshConfigSnapshot)
+            {
+                lastConfigRefreshMs = nowMs;
+            }
+            vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(TELEMETRY_TASK_INTERVAL_MS));
+        }
+    }
+}
+
+void startTelemetryTask()
+{
+    if (g_telemetryTaskRunning)
+    {
+        return;
+    }
+
+    telemetryPublishTick(true);
+    const BaseType_t created = xTaskCreatePinnedToCore(
+        telemetryTaskBody,
+        "telemetry",
+        4096,
+        nullptr,
+        2,
+        &g_telemetryTaskHandle,
+        1);
+    g_telemetryTaskRunning = (created == pdPASS);
 }
 
 void telemetryLoop()
 {
-    usbSimBridgeUpdateConfig();
-    simHubClientUpdateConfig();
-
-    const unsigned long nowMs = millis();
-    const bool usbFresh = usbSimTelemetryFresh(nowMs);
-    const bool simHubFresh = isSimHubFresh(nowMs);
-    const bool obdFresh = isObdFresh(nowMs);
-    const SimRuntimeTransportMode mode = resolveSimRuntimeTransportMode(cfg.telemetryPreference, cfg.simTransportPreference);
-    ActiveTelemetrySource nextSource =
-        selectTelemetryRuntimeSource(cfg.telemetryPreference, cfg.simTransportPreference, usbFresh, simHubFresh, obdFresh);
-    bool holdApplied = false;
-
-    // The hold window is only for Auto transport so short gaps do not flap between USB and network.
-    if (telemetrySupportsTransportFallback(cfg.telemetryPreference, cfg.simTransportPreference) &&
-        nextSource == ActiveTelemetrySource::None &&
-        g_activeTelemetrySource != ActiveTelemetrySource::None)
+    // Legacy entry point kept for any callers that still pump telemetry from
+    // loop(). Once the fixed-cadence task is running, snapshot publishing is
+    // owned by that task and loop() must stay out of the hot path.
+    if (g_telemetryTaskRunning)
     {
-        const unsigned long lastSampleMs = lastSampleForSource(g_activeTelemetrySource);
-        if (lastSampleMs > 0 && (nowMs - lastSampleMs) <= TELEMETRY_SOURCE_HOLD_MS)
-        {
-            nextSource = g_activeTelemetrySource;
-            holdApplied = true;
-        }
+        return;
     }
 
-    if (nextSource != g_activeTelemetrySource)
-    {
-        LOG_INFO("TELEMETRY", "SOURCE_SWITCH",
-                 String("from=") + telemetrySourceName(g_activeTelemetrySource) +
-                     " to=" + telemetrySourceName(nextSource) +
-                     " mode=" + simRuntimeTransportModeName(mode) +
-                     " usbFresh=" + (usbFresh ? "1" : "0") +
-                     " netFresh=" + (simHubFresh ? "1" : "0") +
-                     " obdFresh=" + (obdFresh ? "1" : "0"));
-        recordSourceTransition(nowMs,
-                               g_activeTelemetrySource,
-                               nextSource,
-                               usbFresh,
-                               simHubFresh,
-                               obdFresh,
-                               holdApplied,
-                               telemetrySourceIsFallback(nextSource, cfg.telemetryPreference, cfg.simTransportPreference));
-        g_activeTelemetrySource = nextSource;
-    }
-
-    applyActiveTelemetry(nextSource, nowMs);
-
-    const ActiveTelemetrySource simSessionSource = chooseSimSessionSource(nextSource, mode);
-    const SimSessionState simSessionState = trackSimSessionTransition(nowMs, simSessionSource, deriveSimSessionState(simSessionSource));
-
-    TelemetryRenderSnapshot snapshot{};
-    snapshot.version = telemetryGetRenderSnapshotVersion() + 1U;
-    snapshot.source = nextSource;
-    snapshot.rpm = g_currentRpm;
-    snapshot.maxSeenRpm = g_maxSeenRpm;
-    snapshot.speedKmh = g_vehicleSpeedKmh;
-    snapshot.gear = g_estimatedGear;
-    snapshot.throttle = g_currentThrottle;
-    snapshot.pitLimiter = g_pitLimiterActive;
-    snapshot.sampleTimestampMs = lastSampleForSource(nextSource);
-    snapshot.telemetryFresh = sourceFreshForSnapshot(nextSource, usbFresh, simHubFresh, obdFresh);
-    snapshot.fallbackActive = telemetrySourceIsFallback(nextSource, cfg.telemetryPreference, cfg.simTransportPreference);
-    snapshot.simSessionState = simSessionState;
-    publishRenderSnapshot(snapshot);
+    telemetryPublishTick(true);
 }
 
 void telemetryOnObdSample(int rpm, int speedKmh, int gear, unsigned long sampleMs)
@@ -701,11 +772,15 @@ TelemetryDebugInfo telemetryGetDebugInfo()
     info.snapshot = g_renderSnapshot;
     info.lastSourceTransition = g_lastSourceTransition;
     info.lastSimSessionTransition = g_lastSimSessionTransition;
+    info.lastSnapshotPublishMs = g_lastSnapshotPublishMs;
     info.sourceTransitionCount = g_sourceTransitionCount;
     info.simSessionTransitionCount = g_simSessionTransitionCount;
     info.simSessionSuppressedCount = g_simSessionSuppressedCount;
+    info.snapshotPublishCount = g_snapshotPublishCount;
     info.sourceHistoryCount = g_sourceHistoryCount;
     info.simHistoryCount = g_simHistoryCount;
+    info.taskIntervalMs = TELEMETRY_TASK_INTERVAL_MS;
+    info.taskRunning = g_telemetryTaskRunning;
     for (uint8_t i = 0; i < g_sourceHistoryCount; ++i)
     {
         const uint8_t index = static_cast<uint8_t>((g_sourceHistoryHead + TELEMETRY_DEBUG_HISTORY_LEN - g_sourceHistoryCount + i) % TELEMETRY_DEBUG_HISTORY_LEN);

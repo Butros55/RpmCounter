@@ -2340,6 +2340,7 @@ namespace
         int yPct = cfg.yellowEndPct;
         int rPct = cfg.redEndPct;
         int bPct = cfg.blinkStartPct;
+        int blinkSpeedPct = cfg.blinkSpeedPct;
         if (server.hasArg("greenEndPct"))
             gPct = server.arg("greenEndPct").toInt();
         if (server.hasArg("yellowEndPct"))
@@ -2348,11 +2349,14 @@ namespace
             rPct = server.arg("redEndPct").toInt();
         if (server.hasArg("blinkStartPct"))
             bPct = server.arg("blinkStartPct").toInt();
+        if (server.hasArg("blinkSpeedPct"))
+            blinkSpeedPct = clampInt(server.arg("blinkSpeedPct").toInt(), 0, 100);
         enforceOrder(gPct, yPct, rPct, bPct);
         cfg.greenEndPct = gPct;
         cfg.yellowEndPct = yPct;
         cfg.redEndPct = rPct;
         cfg.blinkStartPct = bPct;
+        cfg.blinkSpeedPct = blinkSpeedPct;
 
         if (server.hasArg("greenColor"))
             cfg.greenColor = parseHexColor(server.arg("greenColor"), cfg.greenColor);
@@ -2565,8 +2569,12 @@ namespace
         json += ",\"activeTelemetry\":\"" + activeTelemetrySourceLabel(g_activeTelemetrySource) + "\"";
         json += ",\"telemetrySnapshotVersion\":" + String(telemetrySnapshot.version);
         json += ",\"telemetrySnapshotAgeMs\":" + String(telemetrySnapshot.sampleTimestampMs > 0 ? (now - telemetrySnapshot.sampleTimestampMs) : 0);
+        json += ",\"telemetrySnapshotPublishAgeMs\":" + String(telemetryInfo.lastSnapshotPublishMs > 0 ? (now - telemetryInfo.lastSnapshotPublishMs) : 0);
+        json += ",\"telemetrySnapshotPublishCount\":" + String(telemetryInfo.snapshotPublishCount);
         json += ",\"telemetrySnapshotSource\":\"" + jsonEscape(String(telemetrySourceName(telemetrySnapshot.source))) + "\"";
         json += ",\"telemetrySnapshotFresh\":" + String(telemetrySnapshot.telemetryFresh ? "true" : "false");
+        json += ",\"telemetryTaskRunning\":" + String(telemetryInfo.taskRunning ? "true" : "false");
+        json += ",\"telemetryTaskIntervalMs\":" + String(telemetryInfo.taskIntervalMs);
         json += ",\"simSessionState\":\"" + jsonEscape(String(simSessionStateName(telemetrySnapshot.simSessionState))) + "\"";
         json += ",\"telemetrySourceTransitionCount\":" + String(telemetryInfo.sourceTransitionCount);
         json += ",\"telemetryLastSourceTransition\":\"" + jsonEscape(String(telemetrySourceName(telemetryInfo.lastSourceTransition.fromSource)) + " -> " + telemetrySourceName(telemetryInfo.lastSourceTransition.toSource)) + "\"";
@@ -2593,6 +2601,8 @@ namespace
         json += ",\"usbTelemetryGlitchRejects\":" + String(g_usbTelemetryDebug.glitchRejects);
         json += ",\"usbTelemetryGlitchRejectUps\":" + String(g_usbTelemetryDebug.glitchRejectUpCount);
         json += ",\"usbTelemetryGlitchRejectDowns\":" + String(g_usbTelemetryDebug.glitchRejectDownCount);
+        json += ",\"usbTelemetryGlitchWindowMs\":" + String(g_usbTelemetryDebug.glitchWindowMs);
+        json += ",\"usbTelemetryGlitchDeltaRpm\":" + String(g_usbTelemetryDebug.glitchDeltaRpm);
         json += ",\"usbTelemetryGapEvents\":" + String(g_usbTelemetryDebug.gapEvents);
         json += ",\"usbTelemetryLastGapMs\":" + String(g_usbTelemetryDebug.lastGapMs);
         json += ",\"usbTelemetryMaxGapMs\":" + String(g_usbTelemetryDebug.maxGapMs);
@@ -2624,6 +2634,8 @@ namespace
         json += ",\"ledBrightnessUpdates\":" + String(g_ledRenderDebug.brightnessUpdateCount);
         json += ",\"ledShiftBlink\":" + String(g_ledRenderDebug.lastShiftBlink ? "true" : "false");
         json += ",\"ledPitLimiterOnly\":" + String(g_ledRenderDebug.pitLimiterOnly ? "true" : "false");
+        json += ",\"ledFastResponseActive\":" + String(g_ledRenderDebug.fastResponseActive ? "true" : "false");
+        json += ",\"redColorFallbackActive\":" + String(g_ledRenderDebug.redFallbackActive ? "true" : "false");
         json += ",\"ledDiagnosticMode\":\"" + jsonEscape(String(ledBarGetDiagnosticModeName())) + "\"";
         json += ",\"ledRenderMode\":\"" + jsonEscape(String(ledBarGetLastRenderModeName())) + "\"";
         json += ",\"ledLastWriter\":\"" + jsonEscape(String(ledBarGetLastWriterName())) + "\"";

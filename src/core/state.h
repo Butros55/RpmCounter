@@ -44,6 +44,8 @@ struct UsbTelemetryDebugStats
     int lastRawRpm = 0;
     int lastAcceptedRpm = 0;
     int lastRejectedRpm = 0;
+    unsigned long glitchWindowMs = 0;
+    int glitchDeltaRpm = 0;
 };
 
 struct SimHubDebugStats
@@ -75,6 +77,8 @@ struct LedRenderDebugStats
     uint8_t lastRenderMode = 0;
     uint32_t filterAdjustCount = 0;
     unsigned long lastShowMs = 0;
+    bool fastResponseActive = false;
+    bool redFallbackActive = false;
 };
 
 enum class ActiveTelemetrySource : uint8_t
