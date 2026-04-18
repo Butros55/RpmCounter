@@ -65,15 +65,47 @@ inline const char *simulator_led_mode_label(SimulatorLedMode mode)
 struct SimulatorLedBarConfig
 {
     SimulatorLedMode mode = SimulatorLedMode::F1;
+    bool autoScaleMaxRpm = true;
+    int fixedMaxRpm = 7000;
+    int effectiveMaxRpm = 7000;
     int activeLedCount = 30;
     int brightness = 80;
     int startRpm = 1000;
-    int maxRpm = 7000;
     int greenEndPct = 60;
     int yellowEndPct = 85;
     int redEndPct = 90;
     int blinkStartPct = 90;
     int blinkSpeedPct = 80;
+    uint32_t greenColor = 0x00FF00u;
+    uint32_t yellowColor = 0xFFB400u;
+    uint32_t redColor = 0xFF0000u;
+    std::string greenLabel = "Green";
+    std::string yellowLabel = "Yellow";
+    std::string redLabel = "Red";
+};
+
+struct SimulatorDeviceConfig
+{
+    bool autoBrightnessEnabled = false;
+    int ambientLightSdaPin = 47;
+    int ambientLightSclPin = 48;
+    int autoBrightnessStrengthPct = 100;
+    int autoBrightnessMin = 18;
+    int autoBrightnessResponsePct = 35;
+    int autoBrightnessLuxMin = 2;
+    int autoBrightnessLuxMax = 5000;
+    bool logoOnIgnitionOn = true;
+    bool logoOnEngineStart = true;
+    bool logoOnIgnitionOff = true;
+    bool simSessionLedEffectsEnabled = false;
+    bool gestureControlEnabled = true;
+    bool useMph = false;
+    bool autoReconnect = true;
+    UiWifiMode wifiModePreference = UiWifiMode::StaWithApFallback;
+    std::string staSsid = "Simulator LAN";
+    std::string staPassword;
+    std::string apSsid = "ShiftLight";
+    std::string apPassword = "shift1234";
 };
 
 struct SimulatorStatusSnapshot
@@ -82,6 +114,7 @@ struct SimulatorStatusSnapshot
     UiDebugSnapshot ui{};
     TelemetryServiceConfig telemetry{};
     SimulatorLedBarConfig ledBar{};
+    SimulatorDeviceConfig device{};
     uint16_t webPort = 8765;
     std::string webBaseUrl = "http://127.0.0.1:8765";
 };

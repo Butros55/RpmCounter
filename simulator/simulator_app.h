@@ -33,6 +33,7 @@ public:
     void saveSettings(const UiSettings &settings);
     void setWebServerPort(uint16_t port);
     void applyLedBarConfig(const SimulatorLedBarConfig &config);
+    void applyDeviceConfig(const SimulatorDeviceConfig &config);
     void updateUiDebugSnapshot(const UiDebugSnapshot &snapshot);
     void queueUiAction(UiDebugAction action);
     std::vector<UiDebugAction> takePendingUiActions();
@@ -42,6 +43,7 @@ public:
     UiRuntimeState stateSnapshot() const;
     TelemetryServiceConfig telemetryConfigSnapshot() const;
     SimulatorLedBarConfig ledBarConfigSnapshot() const;
+    SimulatorDeviceConfig deviceConfigSnapshot() const;
     SimulatorStatusSnapshot statusSnapshot() const;
 
 private:
@@ -65,17 +67,20 @@ private:
     void applyTelemetryFrameLocked();
     void refreshWebStateLocked();
     void populateStaticLists();
+    void updateEffectiveLedMaxRpmLocked();
 
     UiRuntimeState state_{};
     TelemetryService telemetryService_{};
-    TelemetryServiceConfig telemetryConfig_{};
+    TelemetryServiceConfig telemetryConfig_{};    
     SimulatorLedBarConfig ledBarConfig_{};
+    SimulatorDeviceConfig deviceConfig_{};
     UiDebugSnapshot uiDebugSnapshot_{};
     bool shiftOverrideEnabled_ = false;
     bool shiftOverrideValue_ = false;
     BleMode bleMode_ = BleMode::Connected;
     WifiModePreset wifiMode_ = WifiModePreset::Connected;
     uint16_t webServerPort_ = 8765;
+    int maxObservedRpm_ = 0;
     std::vector<UiDebugAction> pendingUiActions_{};
     mutable std::mutex mutex_{};
 };

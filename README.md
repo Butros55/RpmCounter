@@ -285,6 +285,7 @@ The local dashboard can:
 - show live RPM / speed / gear / source state
 - expose dashboard and `/settings` style navigation
 - switch the LED-bar behavior between `Casual`, `F1-Style`, `Aggressiv`, and `GT3 / Endurance`
+- mirror the broader setup surface from the device web UI, including Auto-Max-RPM, thresholds, colors, labels, auto-brightness, display focus, WiFi names, and effect toggles
 - change the virtual LED-bar count and thresholds
 - adjust display brightness
 - switch between internal simulator telemetry and SimHub

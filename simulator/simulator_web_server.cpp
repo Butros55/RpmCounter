@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <map>
 #include <sstream>
@@ -179,6 +180,52 @@ namespace
         return normalized == "1" || normalized == "true" || normalized == "on" || normalized == "yes";
     }
 
+    std::string parse_string_or(const std::map<std::string, std::string> &values, const char *key, const std::string &fallback)
+    {
+        const auto it = values.find(key);
+        if (it == values.end())
+        {
+            return fallback;
+        }
+        return trim_copy(it->second);
+    }
+
+    std::string html_color_hex(uint32_t color)
+    {
+        char buffer[8];
+        std::snprintf(buffer,
+                      sizeof(buffer),
+                      "#%02X%02X%02X",
+                      static_cast<unsigned int>((color >> 16) & 0xFFu),
+                      static_cast<unsigned int>((color >> 8) & 0xFFu),
+                      static_cast<unsigned int>(color & 0xFFu));
+        return std::string(buffer);
+    }
+
+    uint32_t parse_hex_color(const std::map<std::string, std::string> &values, const char *key, uint32_t fallback)
+    {
+        const auto it = values.find(key);
+        if (it == values.end())
+        {
+            return fallback;
+        }
+
+        const std::string value = trim_copy(it->second);
+        if (value.size() != 7 || value.front() != '#')
+        {
+            return fallback;
+        }
+
+        try
+        {
+            return static_cast<uint32_t>(std::stoul(value.substr(1), nullptr, 16));
+        }
+        catch (...)
+        {
+            return fallback;
+        }
+    }
+
     std::string telemetry_mode_name(const TelemetryServiceConfig &config)
     {
         if (config.mode == TelemetryInputMode::SimHub && config.allowSimulatorFallback)
@@ -205,6 +252,74 @@ namespace
     std::string transport_label(SimHubTransport transport)
     {
         return transport == SimHubTransport::JsonUdp ? "UDP JSON" : "HTTP API";
+    }
+
+    std::string display_focus_label(UiDisplayFocusMetric focus)
+    {
+        switch (focus)
+        {
+        case UiDisplayFocusMetric::Gear:
+            return "Gang";
+        case UiDisplayFocusMetric::Speed:
+            return "Speed";
+        case UiDisplayFocusMetric::Rpm:
+        default:
+            return "RPM";
+        }
+    }
+
+    UiDisplayFocusMetric parse_display_focus_value(const std::string &value, UiDisplayFocusMetric fallback)
+    {
+        std::string normalized = trim_copy(value);
+        std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char ch)
+                       { return static_cast<char>(std::tolower(ch)); });
+        if (normalized == "gear" || normalized == "1")
+        {
+            return UiDisplayFocusMetric::Gear;
+        }
+        if (normalized == "speed" || normalized == "2")
+        {
+            return UiDisplayFocusMetric::Speed;
+        }
+        if (normalized == "rpm" || normalized == "0")
+        {
+            return UiDisplayFocusMetric::Rpm;
+        }
+        return fallback;
+    }
+
+    UiWifiMode parse_wifi_mode_value(const std::string &value, UiWifiMode fallback)
+    {
+        std::string normalized = trim_copy(value);
+        std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char ch)
+                       { return static_cast<char>(std::tolower(ch)); });
+        if (normalized == "ap" || normalized == "aponly" || normalized == "0")
+        {
+            return UiWifiMode::ApOnly;
+        }
+        if (normalized == "sta" || normalized == "staonly" || normalized == "1")
+        {
+            return UiWifiMode::StaOnly;
+        }
+        if (normalized == "fallback" || normalized == "stawithapfallback" || normalized == "2")
+        {
+            return UiWifiMode::StaWithApFallback;
+        }
+        return fallback;
+    }
+
+    std::string wifi_mode_name(UiWifiMode mode)
+    {
+        switch (mode)
+        {
+        case UiWifiMode::ApOnly:
+            return "ap";
+        case UiWifiMode::StaOnly:
+            return "sta";
+        case UiWifiMode::StaWithApFallback:
+        default:
+            return "fallback";
+        }
     }
 
     std::string ui_screen_name(UiScreenId screen)
@@ -392,13 +507,25 @@ namespace
         json += ",\"webBaseUrl\":\"" + json_escape(snapshot.webBaseUrl) + "\"";
         json += ",\"uiScreen\":\"" + json_escape(ui_screen_name(snapshot.ui.activeScreen)) + "\"";
         json += ",\"displayBrightness\":" + std::to_string(snapshot.runtime.settings.displayBrightness);
+        json += ",\"nightMode\":" + std::string(snapshot.runtime.settings.nightMode ? "true" : "false");
+        json += ",\"displayFocus\":\"" + json_escape(display_focus_label(snapshot.runtime.settings.displayFocus)) + "\"";
+        json += ",\"useMph\":" + std::string(snapshot.device.useMph ? "true" : "false");
         json += ",\"ledBar\":{";
         json += "\"mode\":\"" + json_escape(simulator_led_mode_name(snapshot.ledBar.mode)) + "\"";
         json += ",\"modeLabel\":\"" + json_escape(simulator_led_mode_label(snapshot.ledBar.mode)) + "\"";
+        json += ",\"autoScaleMaxRpm\":" + std::string(snapshot.ledBar.autoScaleMaxRpm ? "true" : "false");
+        json += ",\"fixedMaxRpm\":" + std::to_string(snapshot.ledBar.fixedMaxRpm);
+        json += ",\"effectiveMaxRpm\":" + std::to_string(snapshot.ledBar.effectiveMaxRpm);
         json += ",\"count\":" + std::to_string(snapshot.ledBar.activeLedCount);
         json += ",\"brightness\":" + std::to_string(snapshot.ledBar.brightness);
         json += ",\"litCount\":" + std::to_string(ledFrame.litCount);
         json += ",\"blinkActive\":" + std::string(ledFrame.blinkActive ? "true" : "false");
+        json += ",\"greenColor\":\"" + json_escape(html_color_hex(snapshot.ledBar.greenColor)) + "\"";
+        json += ",\"yellowColor\":\"" + json_escape(html_color_hex(snapshot.ledBar.yellowColor)) + "\"";
+        json += ",\"redColor\":\"" + json_escape(html_color_hex(snapshot.ledBar.redColor)) + "\"";
+        json += ",\"greenLabel\":\"" + json_escape(snapshot.ledBar.greenLabel) + "\"";
+        json += ",\"yellowLabel\":\"" + json_escape(snapshot.ledBar.yellowLabel) + "\"";
+        json += ",\"redLabel\":\"" + json_escape(snapshot.ledBar.redLabel) + "\"";
         json += ",\"colors\":[";
         for (size_t i = 0; i < ledFrame.leds.size(); ++i)
         {
@@ -409,6 +536,25 @@ namespace
             json += "\"" + virtual_led_color_hex(ledFrame.leds[i]) + "\"";
         }
         json += "]";
+        json += "}";
+        json += ",\"device\":{";
+        json += "\"autoBrightnessEnabled\":" + std::string(snapshot.device.autoBrightnessEnabled ? "true" : "false");
+        json += ",\"ambientLightSdaPin\":" + std::to_string(snapshot.device.ambientLightSdaPin);
+        json += ",\"ambientLightSclPin\":" + std::to_string(snapshot.device.ambientLightSclPin);
+        json += ",\"autoBrightnessStrengthPct\":" + std::to_string(snapshot.device.autoBrightnessStrengthPct);
+        json += ",\"autoBrightnessMin\":" + std::to_string(snapshot.device.autoBrightnessMin);
+        json += ",\"autoBrightnessResponsePct\":" + std::to_string(snapshot.device.autoBrightnessResponsePct);
+        json += ",\"autoBrightnessLuxMin\":" + std::to_string(snapshot.device.autoBrightnessLuxMin);
+        json += ",\"autoBrightnessLuxMax\":" + std::to_string(snapshot.device.autoBrightnessLuxMax);
+        json += ",\"logoOnIgnitionOn\":" + std::string(snapshot.device.logoOnIgnitionOn ? "true" : "false");
+        json += ",\"logoOnEngineStart\":" + std::string(snapshot.device.logoOnEngineStart ? "true" : "false");
+        json += ",\"logoOnIgnitionOff\":" + std::string(snapshot.device.logoOnIgnitionOff ? "true" : "false");
+        json += ",\"simSessionLedEffectsEnabled\":" + std::string(snapshot.device.simSessionLedEffectsEnabled ? "true" : "false");
+        json += ",\"gestureControlEnabled\":" + std::string(snapshot.device.gestureControlEnabled ? "true" : "false");
+        json += ",\"autoReconnect\":" + std::string(snapshot.device.autoReconnect ? "true" : "false");
+        json += ",\"wifiModePreference\":\"" + json_escape(wifi_mode_name(snapshot.device.wifiModePreference)) + "\"";
+        json += ",\"staSsid\":\"" + json_escape(snapshot.device.staSsid) + "\"";
+        json += ",\"apSsid\":\"" + json_escape(snapshot.device.apSsid) + "\"";
         json += "}}";
         return json;
     }
@@ -570,35 +716,77 @@ refreshDashboard();
     std::string build_settings_page(const SimulatorStatusSnapshot &snapshot, bool savedNotice)
     {
         std::string page;
-        page.reserve(17000);
+        page.reserve(28000);
         append_shell_head(page, "ShiftLight Verbindung", true);
 
         page += "<section class='hero'><div class='hero-card hero-card--accent'><div class='hero-head'><div><div class='hero-kicker'>Verbindung & Telemetrie</div><div class='hero-title'>SimHub, LED-Bar und Desktop-Simulator gemeinsam konfigurieren</div><div class='hero-sub'>Diese Seite ersetzt die separate Simulator-Website. Alles Wichtige bleibt im bekannten Dashboard-/Verbindungsfluss.</div></div><div class='pill-list'><span class='pill neutral'>" + html_escape(telemetry_mode_label(snapshot.telemetry)) + "</span><span class='pill " + std::string(snapshot.runtime.telemetryStale ? "warn" : "ok") + "'>" + html_escape(transport_label(snapshot.telemetry.simHubTransport)) + "</span><span class='pill " + std::string(snapshot.runtime.staConnected ? "ok" : "warn") + "'>" + html_escape(snapshot.runtime.currentSsid) + "</span></div></div><div class='callout'>Root-Dashboard: <strong class='mono'>" + html_escape(snapshot.webBaseUrl) + "</strong> | API: <strong class='mono'>/status</strong>, <strong class='mono'>/wifi/status</strong>, <strong class='mono'>/ble/status</strong></div></div>";
         page += "<div class='hero-card'><div class='hero-head'><div><div class='hero-kicker'>Aktueller Zustand</div><div class='hero-title'>Live-Werte aus dem laufenden Simulator</div><div class='hero-sub'>Beim Speichern werden LED-Bar, Display und Telemetrie sofort im laufenden Simulator uebernommen.</div></div></div><div class='metric-grid'><div class='metric'><div class='metric-label'>RPM</div><div class='metric-value'>" + std::to_string(snapshot.runtime.rpm) + "</div></div><div class='metric'><div class='metric-label'>Gear</div><div class='metric-value'>" + std::to_string(snapshot.runtime.gear) + "</div></div><div class='metric'><div class='metric-label'>Speed</div><div class='metric-value'>" + std::to_string(snapshot.runtime.speedKmh) + "</div></div><div class='metric'><div class='metric-label'>UI</div><div class='metric-value'>" + html_escape(ui_screen_name(snapshot.ui.activeScreen)) + "</div></div></div></div></section>";
 
-        page += "<form method='POST' action='/settings'><div class='layout'><section class='panel'><div class='panel-head'><div><h2 class='panel-title'>LED-Bar & Anzeige</h2><div class='panel-copy'>Die virtuelle externe LED-Bar und die Display-Helligkeit laufen hier gemeinsam.</div></div></div><div class='field-grid three'>";
+        page += "<form method='POST' action='/settings'>";
+        page += "<div class='layout'><section class='panel'><div class='panel-head'><div><h2 class='panel-title'>LED-Bar & Anzeige</h2><div class='panel-copy'>Hier liegen jetzt auch Auto-RPM, Farben, Labels und Anzeigeoptionen wie im normalen Setup.</div></div></div><div class='field-grid three'>";
         page += "<div class='field'><label for='ledMode'>LED Modus</label><select id='ledMode' name='ledMode'><option value='casual'" + std::string(snapshot.ledBar.mode == SimulatorLedMode::Casual ? " selected" : "") + ">Casual</option><option value='f1'" + std::string(snapshot.ledBar.mode == SimulatorLedMode::F1 ? " selected" : "") + ">F1-Style</option><option value='aggressive'" + std::string(snapshot.ledBar.mode == SimulatorLedMode::Aggressive ? " selected" : "") + ">Aggressiv</option><option value='gt3'" + std::string(snapshot.ledBar.mode == SimulatorLedMode::Gt3 ? " selected" : "") + ">GT3 / Endurance</option></select></div>";
         page += "<div class='field'><label for='ledCount'>LED Anzahl</label><input id='ledCount' name='ledCount' type='number' min='1' max='60' value='" + std::to_string(snapshot.ledBar.activeLedCount) + "'></div>";
         page += "<div class='field'><label for='ledBrightness'>LED Brightness</label><input id='ledBrightness' name='ledBrightness' type='number' min='0' max='255' value='" + std::to_string(snapshot.ledBar.brightness) + "'></div>";
-        page += "<div class='field'><label for='displayBrightness'>Display Brightness</label><input id='displayBrightness' name='displayBrightness' type='number' min='10' max='255' value='" + std::to_string(snapshot.runtime.settings.displayBrightness) + "'></div>";
+        page += "<div class='field'><label for='autoScaleMaxRpm'>Auto Max RPM</label><select id='autoScaleMaxRpm' name='autoScaleMaxRpm'><option value='1'" + std::string(snapshot.ledBar.autoScaleMaxRpm ? " selected" : "") + ">An</option><option value='0'" + std::string(snapshot.ledBar.autoScaleMaxRpm ? "" : " selected") + ">Aus</option></select></div>";
+        page += "<div class='field'><label for='fixedMaxRpm'>Fixed Max RPM</label><input id='fixedMaxRpm' name='fixedMaxRpm' type='number' min='1000' max='14000' value='" + std::to_string(snapshot.ledBar.fixedMaxRpm) + "'></div>";
         page += "<div class='field'><label for='startRpm'>Start RPM</label><input id='startRpm' name='startRpm' type='number' min='0' max='12000' value='" + std::to_string(snapshot.ledBar.startRpm) + "'></div>";
-        page += "<div class='field'><label for='maxRpm'>Max RPM</label><input id='maxRpm' name='maxRpm' type='number' min='1000' max='14000' value='" + std::to_string(snapshot.ledBar.maxRpm) + "'></div>";
-        page += "<div class='field'><label for='blinkSpeedPct'>Blink Speed %</label><input id='blinkSpeedPct' name='blinkSpeedPct' type='number' min='0' max='100' value='" + std::to_string(snapshot.ledBar.blinkSpeedPct) + "'></div>";
+        page += "<div class='field'><label for='displayBrightness'>Display Brightness</label><input id='displayBrightness' name='displayBrightness' type='number' min='10' max='255' value='" + std::to_string(snapshot.runtime.settings.displayBrightness) + "'></div>";
+        page += "<div class='field'><label for='nightMode'>Night Mode</label><select id='nightMode' name='nightMode'><option value='1'" + std::string(snapshot.runtime.settings.nightMode ? " selected" : "") + ">An</option><option value='0'" + std::string(snapshot.runtime.settings.nightMode ? "" : " selected") + ">Aus</option></select></div>";
+        page += "<div class='field'><label for='displayFocus'>Display Fokus</label><select id='displayFocus' name='displayFocus'><option value='rpm'" + std::string(snapshot.runtime.settings.displayFocus == UiDisplayFocusMetric::Rpm ? " selected" : "") + ">RPM</option><option value='gear'" + std::string(snapshot.runtime.settings.displayFocus == UiDisplayFocusMetric::Gear ? " selected" : "") + ">Gang</option><option value='speed'" + std::string(snapshot.runtime.settings.displayFocus == UiDisplayFocusMetric::Speed ? " selected" : "") + ">Speed</option></select></div>";
+        page += "<div class='field'><label for='useMph'>Einheit</label><select id='useMph' name='useMph'><option value='0'" + std::string(snapshot.device.useMph ? "" : " selected") + ">km/h</option><option value='1'" + std::string(snapshot.device.useMph ? " selected" : "") + ">mph</option></select></div>";
         page += "<div class='field'><label for='greenEndPct'>Gruen Ende %</label><input id='greenEndPct' name='greenEndPct' type='number' min='0' max='100' value='" + std::to_string(snapshot.ledBar.greenEndPct) + "'></div>";
         page += "<div class='field'><label for='yellowEndPct'>Gelb Ende %</label><input id='yellowEndPct' name='yellowEndPct' type='number' min='0' max='100' value='" + std::to_string(snapshot.ledBar.yellowEndPct) + "'></div>";
         page += "<div class='field'><label for='redEndPct'>Rot Ende %</label><input id='redEndPct' name='redEndPct' type='number' min='0' max='100' value='" + std::to_string(snapshot.ledBar.redEndPct) + "'></div>";
         page += "<div class='field'><label for='blinkStartPct'>Blink Start %</label><input id='blinkStartPct' name='blinkStartPct' type='number' min='0' max='100' value='" + std::to_string(snapshot.ledBar.blinkStartPct) + "'></div>";
+        page += "<div class='field'><label for='blinkSpeedPct'>Blink Speed %</label><input id='blinkSpeedPct' name='blinkSpeedPct' type='number' min='0' max='100' value='" + std::to_string(snapshot.ledBar.blinkSpeedPct) + "'></div>";
+        page += "<div class='field'><label for='effectiveMaxRpmView'>Aktive Max RPM</label><input id='effectiveMaxRpmView' type='number' value='" + std::to_string(snapshot.ledBar.effectiveMaxRpm) + "' readonly></div>";
+        page += "<div class='field'><label for='greenColor'>Gruen Farbe</label><input id='greenColor' name='greenColor' type='color' value='" + html_color_hex(snapshot.ledBar.greenColor) + "'></div>";
+        page += "<div class='field'><label for='yellowColor'>Gelb Farbe</label><input id='yellowColor' name='yellowColor' type='color' value='" + html_color_hex(snapshot.ledBar.yellowColor) + "'></div>";
+        page += "<div class='field'><label for='redColor'>Rot Farbe</label><input id='redColor' name='redColor' type='color' value='" + html_color_hex(snapshot.ledBar.redColor) + "'></div>";
+        page += "<div class='field'><label for='greenLabel'>Gruen Label</label><input id='greenLabel' name='greenLabel' type='text' value='" + html_escape(snapshot.ledBar.greenLabel) + "'></div>";
+        page += "<div class='field'><label for='yellowLabel'>Gelb Label</label><input id='yellowLabel' name='yellowLabel' type='text' value='" + html_escape(snapshot.ledBar.yellowLabel) + "'></div>";
+        page += "<div class='field'><label for='redLabel'>Rot Label</label><input id='redLabel' name='redLabel' type='text' value='" + html_escape(snapshot.ledBar.redLabel) + "'></div>";
         page += "</div></section>";
 
-        page += "<section class='panel'><div class='panel-head'><div><h2 class='panel-title'>Telemetrie & Transport</h2><div class='panel-copy'>Standard ist jetzt Auto: erst SimHub probieren und bis dahin intern weiterlaufen.</div></div></div><div class='field-grid'>";
+        page += "<section class='panel'><div class='panel-head'><div><h2 class='panel-title'>Auto-Brightness, Effekte & Netzwerk</h2><div class='panel-copy'>Das sind die restlichen Setup-Felder aus dem normalen Bereich, damit du im Simulator nicht dauernd zwischen Oberflaechen springen musst.</div></div></div><div class='field-grid three'>";
+        page += "<div class='field'><label for='autoBrightnessEnabled'>Auto Brightness</label><select id='autoBrightnessEnabled' name='autoBrightnessEnabled'><option value='1'" + std::string(snapshot.device.autoBrightnessEnabled ? " selected" : "") + ">An</option><option value='0'" + std::string(snapshot.device.autoBrightnessEnabled ? "" : " selected") + ">Aus</option></select></div>";
+        page += "<div class='field'><label for='ambientLightSdaPin'>Ambient SDA</label><input id='ambientLightSdaPin' name='ambientLightSdaPin' type='number' min='0' max='48' value='" + std::to_string(snapshot.device.ambientLightSdaPin) + "'></div>";
+        page += "<div class='field'><label for='ambientLightSclPin'>Ambient SCL</label><input id='ambientLightSclPin' name='ambientLightSclPin' type='number' min='0' max='48' value='" + std::to_string(snapshot.device.ambientLightSclPin) + "'></div>";
+        page += "<div class='field'><label for='autoBrightnessStrengthPct'>Auto Brightness %</label><input id='autoBrightnessStrengthPct' name='autoBrightnessStrengthPct' type='number' min='25' max='200' value='" + std::to_string(snapshot.device.autoBrightnessStrengthPct) + "'></div>";
+        page += "<div class='field'><label for='autoBrightnessMin'>Auto Brightness Min</label><input id='autoBrightnessMin' name='autoBrightnessMin' type='number' min='0' max='255' value='" + std::to_string(snapshot.device.autoBrightnessMin) + "'></div>";
+        page += "<div class='field'><label for='autoBrightnessResponsePct'>Auto Response %</label><input id='autoBrightnessResponsePct' name='autoBrightnessResponsePct' type='number' min='1' max='100' value='" + std::to_string(snapshot.device.autoBrightnessResponsePct) + "'></div>";
+        page += "<div class='field'><label for='autoBrightnessLuxMin'>Auto Lux Min</label><input id='autoBrightnessLuxMin' name='autoBrightnessLuxMin' type='number' min='0' max='120000' value='" + std::to_string(snapshot.device.autoBrightnessLuxMin) + "'></div>";
+        page += "<div class='field'><label for='autoBrightnessLuxMax'>Auto Lux Max</label><input id='autoBrightnessLuxMax' name='autoBrightnessLuxMax' type='number' min='1' max='120000' value='" + std::to_string(snapshot.device.autoBrightnessLuxMax) + "'></div>";
+        page += "<div class='field'><label for='logoIgnOn'>Logo bei Zuendung an</label><select id='logoIgnOn' name='logoIgnOn'><option value='1'" + std::string(snapshot.device.logoOnIgnitionOn ? " selected" : "") + ">An</option><option value='0'" + std::string(snapshot.device.logoOnIgnitionOn ? "" : " selected") + ">Aus</option></select></div>";
+        page += "<div class='field'><label for='logoEngStart'>Logo bei Motorstart</label><select id='logoEngStart' name='logoEngStart'><option value='1'" + std::string(snapshot.device.logoOnEngineStart ? " selected" : "") + ">An</option><option value='0'" + std::string(snapshot.device.logoOnEngineStart ? "" : " selected") + ">Aus</option></select></div>";
+        page += "<div class='field'><label for='logoIgnOff'>Logo bei Zuendung aus</label><select id='logoIgnOff' name='logoIgnOff'><option value='1'" + std::string(snapshot.device.logoOnIgnitionOff ? " selected" : "") + ">An</option><option value='0'" + std::string(snapshot.device.logoOnIgnitionOff ? "" : " selected") + ">Aus</option></select></div>";
+        page += "<div class='field'><label for='simFxLed'>Sim Session LED Effekte</label><select id='simFxLed' name='simFxLed'><option value='1'" + std::string(snapshot.device.simSessionLedEffectsEnabled ? " selected" : "") + ">An</option><option value='0'" + std::string(snapshot.device.simSessionLedEffectsEnabled ? "" : " selected") + ">Aus</option></select></div>";
+        page += "<div class='field'><label for='gestureControlEnabled'>Gestensteuerung</label><select id='gestureControlEnabled' name='gestureControlEnabled'><option value='1'" + std::string(snapshot.device.gestureControlEnabled ? " selected" : "") + ">An</option><option value='0'" + std::string(snapshot.device.gestureControlEnabled ? "" : " selected") + ">Aus</option></select></div>";
+        page += "<div class='field'><label for='autoReconnect'>Auto Reconnect</label><select id='autoReconnect' name='autoReconnect'><option value='1'" + std::string(snapshot.device.autoReconnect ? " selected" : "") + ">An</option><option value='0'" + std::string(snapshot.device.autoReconnect ? "" : " selected") + ">Aus</option></select></div>";
+        page += "<div class='field'><label for='wifiModePreference'>WiFi Modus</label><select id='wifiModePreference' name='wifiModePreference'><option value='fallback'" + std::string(snapshot.device.wifiModePreference == UiWifiMode::StaWithApFallback ? " selected" : "") + ">WLAN + AP Fallback</option><option value='sta'" + std::string(snapshot.device.wifiModePreference == UiWifiMode::StaOnly ? " selected" : "") + ">Nur STA</option><option value='ap'" + std::string(snapshot.device.wifiModePreference == UiWifiMode::ApOnly ? " selected" : "") + ">Nur AP</option></select></div>";
+        page += "<div class='field'><label for='staSsid'>STA SSID</label><input id='staSsid' name='staSsid' type='text' value='" + html_escape(snapshot.device.staSsid) + "'></div>";
+        page += "<div class='field'><label for='staPassword'>STA Passwort</label><input id='staPassword' name='staPassword' type='text' value='" + html_escape(snapshot.device.staPassword) + "'></div>";
+        page += "<div class='field'><label for='apSsid'>AP SSID</label><input id='apSsid' name='apSsid' type='text' value='" + html_escape(snapshot.device.apSsid) + "'></div>";
+        page += "<div class='field'><label for='apPassword'>AP Passwort</label><input id='apPassword' name='apPassword' type='text' value='" + html_escape(snapshot.device.apPassword) + "'></div>";
+        page += "</div></section></div>";
+
+        page += "<div class='layout' style='margin-top:16px'><section class='panel'><div class='panel-head'><div><h2 class='panel-title'>Telemetrie & Transport</h2><div class='panel-copy'>Standard ist Auto. Dazu kommen die restlichen SimHub-/Transport-Felder im selben Flow.</div></div></div><div class='field-grid three'>";
         page += "<div class='field'><label for='telemetryMode'>Telemetry Mode</label><select id='telemetryMode' name='telemetryMode'><option value='auto'" + std::string(snapshot.telemetry.mode == TelemetryInputMode::SimHub && snapshot.telemetry.allowSimulatorFallback ? " selected" : "") + ">Auto (SimHub bevorzugt)</option><option value='simhub'" + std::string(snapshot.telemetry.mode == TelemetryInputMode::SimHub && !snapshot.telemetry.allowSimulatorFallback ? " selected" : "") + ">Nur SimHub</option><option value='simulator'" + std::string(snapshot.telemetry.mode == TelemetryInputMode::Simulator ? " selected" : "") + ">Nur Simulator</option></select></div>";
         page += "<div class='field'><label for='simhubTransport'>SimHub Transport</label><select id='simhubTransport' name='simhubTransport'><option value='http'" + std::string(snapshot.telemetry.simHubTransport == SimHubTransport::HttpApi ? " selected" : "") + ">HTTP API</option><option value='udp'" + std::string(snapshot.telemetry.simHubTransport == SimHubTransport::JsonUdp ? " selected" : "") + ">UDP JSON</option></select></div>";
         page += "<div class='field'><label for='simhubPort'>SimHub Port</label><input id='simhubPort' name='simhubPort' type='number' min='1' max='65535' value='" + std::to_string(snapshot.telemetry.simHubTransport == SimHubTransport::HttpApi ? snapshot.telemetry.httpPort : snapshot.telemetry.udpPort) + "'></div>";
         page += "<div class='field'><label for='simhubPollMs'>Poll / Refresh ms</label><input id='simhubPollMs' name='simhubPollMs' type='number' min='15' max='1000' value='" + std::to_string(snapshot.telemetry.pollIntervalMs) + "'></div>";
-        page += "</div><div class='button-row' style='margin-top:18px'><button class='btn btn-primary' type='submit'>Einstellungen speichern</button><a class='btn btn-secondary' href='/'>Zurueck zum Dashboard</a></div>";
+        page += "</div></section>";
+        page += "<section class='panel'><div class='panel-head'><div><h2 class='panel-title'>Kurzuebersicht</h2><div class='panel-copy'>Damit du beim Einstellen sofort siehst, welche Schluesselwerte gerade aktiv sind.</div></div></div><div class='metric-grid'>";
+        page += "<div class='metric'><div class='metric-label'>LED Modus</div><div class='metric-value'>" + html_escape(simulator_led_mode_label(snapshot.ledBar.mode)) + "</div></div>";
+        page += "<div class='metric'><div class='metric-label'>Max RPM</div><div class='metric-value'>" + std::to_string(snapshot.ledBar.effectiveMaxRpm) + "</div></div>";
+        page += "<div class='metric'><div class='metric-label'>Focus</div><div class='metric-value'>" + html_escape(display_focus_label(snapshot.runtime.settings.displayFocus)) + "</div></div>";
+        page += "<div class='metric'><div class='metric-label'>WiFi</div><div class='metric-value'>" + html_escape(snapshot.device.staSsid) + "</div></div>";
+        page += "</div><div class='callout' style='margin-top:16px'>Der Simulator nutzt diese Seite jetzt als vollstaendige Konfigurationsoberflaeche. Was hardwaregebunden ist, wird hier fuer den Desktop zumindest gespeichert und sichtbar gehalten; was simulatorrelevant ist, wirkt sofort live.</div></section></div>";
+
+        page += "<div class='button-row' style='margin-top:18px'><button class='btn btn-primary' type='submit'>Einstellungen speichern</button><a class='btn btn-secondary' href='/'>Zurueck zum Dashboard</a></div>";
         page += savedNotice ? "<div class='toast'>Einstellungen wurden uebernommen und direkt auf den laufenden Simulator angewendet.</div>"
                             : "";
-        page += "</section></div></form>";
+        page += "</form>";
 
         append_shell_footer(page);
         return page;
@@ -612,20 +800,90 @@ refreshDashboard();
         {
             ledConfig.mode = parse_led_mode_value(ledModeIt->second, ledConfig.mode);
         }
+        if (values.find("autoScaleMaxRpm") != values.end())
+        {
+            ledConfig.autoScaleMaxRpm = parse_flag(values, "autoScaleMaxRpm", ledConfig.autoScaleMaxRpm);
+        }
+        ledConfig.fixedMaxRpm = clamp_int(parse_int_or(values, "fixedMaxRpm", ledConfig.fixedMaxRpm), 1000, 14000);
         ledConfig.activeLedCount = clamp_int(parse_int_or(values, "ledCount", ledConfig.activeLedCount), 1, 60);
         ledConfig.brightness = clamp_int(parse_int_or(values, "ledBrightness", ledConfig.brightness), 0, 255);
         ledConfig.startRpm = clamp_int(parse_int_or(values, "startRpm", ledConfig.startRpm), 0, 12000);
-        ledConfig.maxRpm = clamp_int(parse_int_or(values, "maxRpm", ledConfig.maxRpm), ledConfig.startRpm + 1, 14000);
         ledConfig.greenEndPct = clamp_int(parse_int_or(values, "greenEndPct", ledConfig.greenEndPct), 0, 100);
         ledConfig.yellowEndPct = clamp_int(parse_int_or(values, "yellowEndPct", ledConfig.yellowEndPct), ledConfig.greenEndPct, 100);
         ledConfig.redEndPct = clamp_int(parse_int_or(values, "redEndPct", ledConfig.redEndPct), ledConfig.yellowEndPct, 100);
         ledConfig.blinkStartPct = clamp_int(parse_int_or(values, "blinkStartPct", ledConfig.blinkStartPct), ledConfig.redEndPct, 100);
         ledConfig.blinkSpeedPct = clamp_int(parse_int_or(values, "blinkSpeedPct", ledConfig.blinkSpeedPct), 0, 100);
+        ledConfig.greenColor = parse_hex_color(values, "greenColor", ledConfig.greenColor);
+        ledConfig.yellowColor = parse_hex_color(values, "yellowColor", ledConfig.yellowColor);
+        ledConfig.redColor = parse_hex_color(values, "redColor", ledConfig.redColor);
+        ledConfig.greenLabel = parse_string_or(values, "greenLabel", ledConfig.greenLabel);
+        ledConfig.yellowLabel = parse_string_or(values, "yellowLabel", ledConfig.yellowLabel);
+        ledConfig.redLabel = parse_string_or(values, "redLabel", ledConfig.redLabel);
         app.applyLedBarConfig(ledConfig);
 
         UiSettings settings = app.stateSnapshot().settings;
         settings.displayBrightness = clamp_int(parse_int_or(values, "displayBrightness", settings.displayBrightness), 10, 255);
+        if (values.find("nightMode") != values.end())
+        {
+            settings.nightMode = parse_flag(values, "nightMode", settings.nightMode);
+        }
+        const auto displayFocusIt = values.find("displayFocus");
+        if (displayFocusIt != values.end())
+        {
+            settings.displayFocus = parse_display_focus_value(displayFocusIt->second, settings.displayFocus);
+        }
         app.saveSettings(settings);
+
+        SimulatorDeviceConfig device = app.deviceConfigSnapshot();
+        if (values.find("autoBrightnessEnabled") != values.end())
+        {
+            device.autoBrightnessEnabled = parse_flag(values, "autoBrightnessEnabled", device.autoBrightnessEnabled);
+        }
+        device.ambientLightSdaPin = clamp_int(parse_int_or(values, "ambientLightSdaPin", device.ambientLightSdaPin), 0, 48);
+        device.ambientLightSclPin = clamp_int(parse_int_or(values, "ambientLightSclPin", device.ambientLightSclPin), 0, 48);
+        device.autoBrightnessStrengthPct = clamp_int(parse_int_or(values, "autoBrightnessStrengthPct", device.autoBrightnessStrengthPct), 25, 200);
+        device.autoBrightnessMin = clamp_int(parse_int_or(values, "autoBrightnessMin", device.autoBrightnessMin), 0, 255);
+        device.autoBrightnessResponsePct = clamp_int(parse_int_or(values, "autoBrightnessResponsePct", device.autoBrightnessResponsePct), 1, 100);
+        device.autoBrightnessLuxMin = clamp_int(parse_int_or(values, "autoBrightnessLuxMin", device.autoBrightnessLuxMin), 0, 120000);
+        device.autoBrightnessLuxMax = clamp_int(parse_int_or(values, "autoBrightnessLuxMax", device.autoBrightnessLuxMax), device.autoBrightnessLuxMin + 1, 120000);
+        if (values.find("logoIgnOn") != values.end())
+        {
+            device.logoOnIgnitionOn = parse_flag(values, "logoIgnOn", device.logoOnIgnitionOn);
+        }
+        if (values.find("logoEngStart") != values.end())
+        {
+            device.logoOnEngineStart = parse_flag(values, "logoEngStart", device.logoOnEngineStart);
+        }
+        if (values.find("logoIgnOff") != values.end())
+        {
+            device.logoOnIgnitionOff = parse_flag(values, "logoIgnOff", device.logoOnIgnitionOff);
+        }
+        if (values.find("simFxLed") != values.end())
+        {
+            device.simSessionLedEffectsEnabled = parse_flag(values, "simFxLed", device.simSessionLedEffectsEnabled);
+        }
+        if (values.find("gestureControlEnabled") != values.end())
+        {
+            device.gestureControlEnabled = parse_flag(values, "gestureControlEnabled", device.gestureControlEnabled);
+        }
+        if (values.find("useMph") != values.end())
+        {
+            device.useMph = parse_flag(values, "useMph", device.useMph);
+        }
+        if (values.find("autoReconnect") != values.end())
+        {
+            device.autoReconnect = parse_flag(values, "autoReconnect", device.autoReconnect);
+        }
+        const auto wifiModeIt = values.find("wifiModePreference");
+        if (wifiModeIt != values.end())
+        {
+            device.wifiModePreference = parse_wifi_mode_value(wifiModeIt->second, device.wifiModePreference);
+        }
+        device.staSsid = parse_string_or(values, "staSsid", device.staSsid);
+        device.staPassword = parse_string_or(values, "staPassword", device.staPassword);
+        device.apSsid = parse_string_or(values, "apSsid", device.apSsid);
+        device.apPassword = parse_string_or(values, "apPassword", device.apPassword);
+        app.applyDeviceConfig(device);
 
         TelemetryServiceConfig telemetry = app.telemetryConfigSnapshot();
         const auto telemetryModeIt = values.find("telemetryMode");

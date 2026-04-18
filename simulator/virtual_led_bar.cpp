@@ -28,14 +28,14 @@ namespace
                                 const SimulatorLedBarConfig &config,
                                 float brightnessScale)
     {
-        uint32_t base = rgb(74, 240, 123);
+        uint32_t base = config.greenColor;
         if (positionPct >= static_cast<float>(config.redEndPct))
         {
-            base = rgb(255, 90, 72);
+            base = config.redColor;
         }
         else if (positionPct >= static_cast<float>(config.yellowEndPct))
         {
-            base = rgb(255, 215, 74);
+            base = config.yellowColor;
         }
 
         return scale_color(base, brightnessScale);
@@ -166,7 +166,7 @@ VirtualLedBarFrame build_virtual_led_bar_frame(const UiRuntimeState &state,
 
     const float brightnessScale = std::clamp(static_cast<float>(config.brightness) / 255.0f, 0.08f, 1.0f);
     const int startRpm = std::clamp(config.startRpm, 0, 12000);
-    const int maxRpm = std::clamp(config.maxRpm, startRpm + 1, 14000);
+    const int maxRpm = std::clamp(config.effectiveMaxRpm, startRpm + 1, 14000);
     const float rpmRatio = std::clamp((static_cast<float>(state.rpm) - static_cast<float>(startRpm)) /
                                           static_cast<float>(std::max(1, maxRpm - startRpm)),
                                       0.0f,

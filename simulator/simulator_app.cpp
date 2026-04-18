@@ -29,6 +29,11 @@ namespace
     {
         return SimulatorLedBarConfig{};
     }
+
+    SimulatorDeviceConfig default_device_config()
+    {
+        return SimulatorDeviceConfig{};
+    }
 }
 
 SimulatorApp::SimulatorApp()
@@ -42,6 +47,7 @@ SimulatorApp::SimulatorApp()
     telemetryConfig_.debugLogging = false;
     telemetryConfig_.allowSimulatorFallback = false;
     ledBarConfig_ = default_led_bar_config();
+    deviceConfig_ = default_device_config();
     reset();
 }
 
@@ -73,9 +79,12 @@ void SimulatorApp::reset()
     state_ = UiRuntimeState{};
     state_.settings = preservedSettings;
     state_.settings.telemetryPreference = default_telemetry_preference(telemetryConfig_.mode);
+    state_.settings.nightMode = preservedSettings.nightMode;
+    state_.settings.displayFocus = preservedSettings.displayFocus;
     state_.wifiMode = UiWifiMode::StaWithApFallback;
     state_.simTransportMode = telemetryConfig_.mode == TelemetryInputMode::SimHub ? UiSimTransportMode::NetworkOnly : UiSimTransportMode::Auto;
     state_.usbState = UiUsbState::Disabled;
+    maxObservedRpm_ = std::max(ledBarConfig_.startRpm + 1, ledBarConfig_.fixedMaxRpm);
 
     shiftOverrideEnabled_ = false;
     shiftOverrideValue_ = false;
@@ -90,6 +99,7 @@ void SimulatorApp::reset()
     telemetryService_.configure(telemetryConfig_);
     telemetryService_.tick(0);
     applyTelemetryFrameLocked();
+    updateEffectiveLedMaxRpmLocked();
 }
 
 void SimulatorApp::populateStaticLists()
@@ -133,6 +143,8 @@ void SimulatorApp::refreshWebStateLocked()
 void SimulatorApp::applyWifiModeLocked()
 {
     state_.staLastError.clear();
+    const std::string staSsid = deviceConfig_.staSsid.empty() ? "Simulator LAN" : deviceConfig_.staSsid;
+    const std::string apSsid = deviceConfig_.apSsid.empty() ? "ShiftLight" : deviceConfig_.apSsid;
 
     switch (wifiMode_)
     {
@@ -154,7 +166,7 @@ void SimulatorApp::applyWifiModeLocked()
         state_.apIp.clear();
         state_.staConnected = false;
         state_.staConnecting = false;
-        state_.currentSsid = "Simulator AP";
+        state_.currentSsid = apSsid;
         state_.staIp.clear();
         break;
     case WifiModePreset::Connecting:
@@ -164,7 +176,7 @@ void SimulatorApp::applyWifiModeLocked()
         state_.apIp.clear();
         state_.staConnected = false;
         state_.staConnecting = true;
-        state_.currentSsid = "Simulator LAN";
+        state_.currentSsid = staSsid;
         state_.staIp.clear();
         break;
     case WifiModePreset::Connected:
@@ -175,7 +187,7 @@ void SimulatorApp::applyWifiModeLocked()
         state_.apIp.clear();
         state_.staConnected = true;
         state_.staConnecting = false;
-        state_.currentSsid = "Simulator LAN";
+        state_.currentSsid = staSsid;
         state_.staIp.clear();
         break;
     }
@@ -209,6 +221,8 @@ void SimulatorApp::applyTelemetryFrameLocked()
     {
         state_.shift = shiftOverrideValue_;
     }
+
+    updateEffectiveLedMaxRpmLocked();
 
     if (telemetryConfig_.mode == TelemetryInputMode::SimHub)
     {
@@ -344,15 +358,41 @@ void SimulatorApp::applyLedBarConfig(const SimulatorLedBarConfig &config)
     std::lock_guard<std::mutex> lock(mutex_);
     ledBarConfig_ = config;
     ledBarConfig_.mode = simulator_led_mode_from_int(static_cast<int>(ledBarConfig_.mode));
+    ledBarConfig_.autoScaleMaxRpm = config.autoScaleMaxRpm;
+    ledBarConfig_.fixedMaxRpm = std::clamp(config.fixedMaxRpm, ledBarConfig_.startRpm + 1, 14000);
     ledBarConfig_.activeLedCount = std::clamp(ledBarConfig_.activeLedCount, 1, 60);
     ledBarConfig_.brightness = std::clamp(ledBarConfig_.brightness, 0, 255);
     ledBarConfig_.startRpm = std::clamp(ledBarConfig_.startRpm, 0, 12000);
-    ledBarConfig_.maxRpm = std::clamp(ledBarConfig_.maxRpm, ledBarConfig_.startRpm + 1, 14000);
+    ledBarConfig_.fixedMaxRpm = std::clamp(ledBarConfig_.fixedMaxRpm, ledBarConfig_.startRpm + 1, 14000);
     ledBarConfig_.greenEndPct = std::clamp(ledBarConfig_.greenEndPct, 0, 100);
     ledBarConfig_.yellowEndPct = std::clamp(ledBarConfig_.yellowEndPct, ledBarConfig_.greenEndPct, 100);
     ledBarConfig_.redEndPct = std::clamp(ledBarConfig_.redEndPct, ledBarConfig_.yellowEndPct, 100);
     ledBarConfig_.blinkStartPct = std::clamp(ledBarConfig_.blinkStartPct, ledBarConfig_.redEndPct, 100);
     ledBarConfig_.blinkSpeedPct = std::clamp(ledBarConfig_.blinkSpeedPct, 0, 100);
+    updateEffectiveLedMaxRpmLocked();
+}
+
+void SimulatorApp::applyDeviceConfig(const SimulatorDeviceConfig &config)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    deviceConfig_ = config;
+    deviceConfig_.ambientLightSdaPin = std::clamp(deviceConfig_.ambientLightSdaPin, 0, 48);
+    deviceConfig_.ambientLightSclPin = std::clamp(deviceConfig_.ambientLightSclPin, 0, 48);
+    deviceConfig_.autoBrightnessStrengthPct = std::clamp(deviceConfig_.autoBrightnessStrengthPct, 25, 200);
+    deviceConfig_.autoBrightnessMin = std::clamp(deviceConfig_.autoBrightnessMin, 0, 255);
+    deviceConfig_.autoBrightnessResponsePct = std::clamp(deviceConfig_.autoBrightnessResponsePct, 1, 100);
+    deviceConfig_.autoBrightnessLuxMin = std::clamp(deviceConfig_.autoBrightnessLuxMin, 0, 120000);
+    deviceConfig_.autoBrightnessLuxMax = std::clamp(deviceConfig_.autoBrightnessLuxMax, deviceConfig_.autoBrightnessLuxMin + 1, 120000);
+    if (deviceConfig_.apSsid.empty())
+    {
+        deviceConfig_.apSsid = "ShiftLight";
+    }
+    if (deviceConfig_.staSsid.empty())
+    {
+        deviceConfig_.staSsid = "Simulator LAN";
+    }
+
+    applyWifiModeLocked();
 }
 
 void SimulatorApp::updateUiDebugSnapshot(const UiDebugSnapshot &snapshot)
@@ -403,6 +443,12 @@ SimulatorLedBarConfig SimulatorApp::ledBarConfigSnapshot() const
     return ledBarConfig_;
 }
 
+SimulatorDeviceConfig SimulatorApp::deviceConfigSnapshot() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return deviceConfig_;
+}
+
 SimulatorStatusSnapshot SimulatorApp::statusSnapshot() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -411,7 +457,23 @@ SimulatorStatusSnapshot SimulatorApp::statusSnapshot() const
     snapshot.ui = uiDebugSnapshot_;
     snapshot.telemetry = telemetryConfig_;
     snapshot.ledBar = ledBarConfig_;
+    snapshot.device = deviceConfig_;
     snapshot.webPort = webServerPort_;
     snapshot.webBaseUrl = "http://" + local_web_host(webServerPort_);
     return snapshot;
+}
+
+void SimulatorApp::updateEffectiveLedMaxRpmLocked()
+{
+    const int baselineMaxRpm = std::clamp(std::max(2000, ledBarConfig_.startRpm + 1), ledBarConfig_.startRpm + 1, 14000);
+    if (ledBarConfig_.autoScaleMaxRpm)
+    {
+        maxObservedRpm_ = std::max(maxObservedRpm_, std::max(state_.rpm, baselineMaxRpm));
+        ledBarConfig_.effectiveMaxRpm = std::clamp(maxObservedRpm_, baselineMaxRpm, 14000);
+    }
+    else
+    {
+        ledBarConfig_.effectiveMaxRpm = std::clamp(ledBarConfig_.fixedMaxRpm, baselineMaxRpm, 14000);
+        maxObservedRpm_ = ledBarConfig_.effectiveMaxRpm;
+    }
 }
