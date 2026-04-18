@@ -5,14 +5,17 @@
 #include <filesystem>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include <SDL.h>
 #include <lvgl.h>
 
 #include "simulator_app.h"
+#include "simulator_web_server.h"
 #include "sdl_lvgl_window.h"
 #include "telemetry/telemetry_types.h"
 #include "ui/ui_s3_main.h"
+#include "virtual_led_bar.h"
 
 namespace
 {
@@ -46,6 +49,29 @@ namespace
             if (parsed > 0 && parsed <= 65535)
             {
                 return static_cast<uint16_t>(parsed);
+            }
+        }
+        catch (...)
+        {
+        }
+
+        return defaultValue;
+    }
+
+    int env_int_value(const char *name, int defaultValue, int minValue, int maxValue)
+    {
+        const char *value = std::getenv(name);
+        if (!value)
+        {
+            return defaultValue;
+        }
+
+        try
+        {
+            const int parsed = std::stoi(value);
+            if (parsed >= minValue && parsed <= maxValue)
+            {
+                return parsed;
             }
         }
         catch (...)
@@ -91,7 +117,8 @@ namespace
     {
         if (config.mode == TelemetryInputMode::SimHub)
         {
-            return state.telemetrySource == UiTelemetrySource::SimHubNetwork && !state.telemetryStale;
+            return state.telemetryUsingFallback ||
+                   (state.telemetrySource == UiTelemetrySource::SimHubNetwork && !state.telemetryStale);
         }
 
         return true;
@@ -204,142 +231,204 @@ namespace
 
 int main()
 {
-    const TelemetryServiceConfig telemetryConfig = load_telemetry_config();
-    const std::string captureFramePath = env_string_value("SIM_CAPTURE_FRAME_PATH");
-    const std::string startupActions = env_string_value("SIM_UI_ACTIONS");
-    const bool exitOnCapture = env_flag_enabled("SIM_EXIT_ON_CAPTURE", false);
-    lv_init();
-
-    SdlLvglWindow window;
-    if (!window.init({}))
+    try
     {
-        std::cerr << "Failed to initialize SDL/LVGL window: " << SDL_GetError() << '\n';
-        return 1;
-    }
+        const TelemetryServiceConfig telemetryConfig = load_telemetry_config();
+        const std::string captureFramePath = env_string_value("SIM_CAPTURE_FRAME_PATH");
+        const std::string startupActions = env_string_value("SIM_UI_ACTIONS");
+        const bool exitOnCapture = env_flag_enabled("SIM_EXIT_ON_CAPTURE", false);
+        const bool webEnabled = env_flag_enabled("SIM_WEB_ENABLED", true);
+        const uint16_t webPort = env_port_value("SIM_WEB_PORT", 8765);
+        const bool showLedBarPreview = env_flag_enabled("SIM_SHOW_LED_BAR", true);
+        const int ledBarPreviewHeight = env_int_value("SIM_LED_BAR_HEIGHT", 92, 56, 220);
+        const int windowWidth = env_int_value("SIM_WINDOW_WIDTH", 800, 320, 3840);
+        const int windowHeight = env_int_value("SIM_WINDOW_HEIGHT", 400, 240, 2160);
+        const int windowScale = env_int_value("SIM_WINDOW_SCALE", 1, 1, 4);
+        lv_init();
 
-    SimulatorApp app;
-    app.configureTelemetry(telemetryConfig);
-    UiDisplayHooks hooks{};
-    hooks.userData = &app;
-    hooks.setBrightness = [](uint8_t value, void *userData)
-    {
-        static_cast<SimulatorApp *>(userData)->setBrightness(value);
-    };
-    hooks.saveSettings = [](const UiSettings &settings, void *userData)
-    {
-        static_cast<SimulatorApp *>(userData)->saveSettings(settings);
-    };
-
-    ui_s3_init(window.display(), hooks, app.state());
-    apply_startup_actions(startupActions);
-
-    std::cout << "Telemetry mode: "
-              << (telemetryConfig.mode == TelemetryInputMode::Simulator ? "internal simulator" : "SimHub")
-              << '\n';
-    if (telemetryConfig.mode == TelemetryInputMode::SimHub)
-    {
-        std::cout << "SimHub transport: "
-                  << (telemetryConfig.simHubTransport == SimHubTransport::HttpApi ? "HTTP API" : "JSON UDP")
-                  << '\n';
-        if (telemetryConfig.simHubTransport == SimHubTransport::HttpApi)
+        SdlLvglWindow window;
+        SdlLvglWindowConfig windowConfig{};
+        windowConfig.width = windowWidth;
+        windowConfig.height = windowHeight;
+        windowConfig.scale = windowScale;
+        windowConfig.showLedBarPreview = showLedBarPreview;
+        windowConfig.ledBarPreviewHeight = ledBarPreviewHeight;
+        if (!window.init(windowConfig))
         {
-            std::cout << "SimHub API port: " << telemetryConfig.httpPort << '\n';
+            std::cerr << "Failed to initialize SDL/LVGL window: " << SDL_GetError() << '\n';
+            return 1;
+        }
+
+        SimulatorApp app;
+        app.configureTelemetry(telemetryConfig);
+        app.setWebServerPort(webPort);
+        UiDisplayHooks hooks{};
+        hooks.userData = &app;
+        hooks.setBrightness = [](uint8_t value, void *userData)
+        {
+            static_cast<SimulatorApp *>(userData)->setBrightness(value);
+        };
+        hooks.saveSettings = [](const UiSettings &settings, void *userData)
+        {
+            static_cast<SimulatorApp *>(userData)->saveSettings(settings);
+        };
+
+        SimulatorWebServer webServer(app);
+        if (webEnabled && !webServer.start(webPort))
+        {
+            std::cerr << "Failed to start simulator web server on http://127.0.0.1:" << webPort << '\n';
+        }
+
+        ui_s3_init(window.display(), hooks, app.stateSnapshot());
+        apply_startup_actions(startupActions);
+
+        std::cout << "Telemetry mode: ";
+        if (telemetryConfig.mode == TelemetryInputMode::Simulator)
+        {
+            std::cout << "internal simulator";
+        }
+        else if (telemetryConfig.allowSimulatorFallback)
+        {
+            std::cout << "auto (SimHub preferred, simulator fallback until live data arrives)";
         }
         else
         {
-            std::cout << "SimHub UDP port: " << telemetryConfig.udpPort << '\n';
+            std::cout << "SimHub only";
         }
-    }
-    if (!captureFramePath.empty())
-    {
-        std::cout << "Frame capture path: " << captureFramePath << '\n';
-    }
-    if (!startupActions.empty())
-    {
-        std::cout << "Startup UI actions: " << startupActions << '\n';
-    }
-    std::cout << "ShiftLight simulator controls:\n";
-    std::cout << "  Mouse drag/click: navigate LVGL UI\n";
-    std::cout << "  Left/Right: switch cards\n";
-    std::cout << "  Enter: open selected card, Esc: home, L: logo\n";
-    std::cout << "  B: BLE state, W: WiFi state, Up/Down: RPM, S: shift, Space: pause RPM, R: reset\n";
-
-    bool running = true;
-    bool capturedFrame = false;
-    uint32_t captureEligibleSinceMs = 0;
-    while (running)
-    {
-        SDL_Event event{};
-        while (SDL_PollEvent(&event))
+        std::cout << '\n';
+        std::cout << "Display: " << windowWidth << "x" << windowHeight << " scale " << windowScale << '\n';
+        std::cout << "Window: " << window.windowWidth() << "x" << window.windowHeight() << '\n';
+        if (showLedBarPreview)
         {
-            if (event.type == SDL_KEYDOWN && event.key.repeat == 0)
+            std::cout << "Virtual LED bar preview: enabled (" << ledBarPreviewHeight << " px)\n";
+        }
+        if (webEnabled)
+        {
+            std::cout << "Simulator web UI: http://127.0.0.1:" << webPort << '\n';
+        }
+        if (telemetryConfig.mode == TelemetryInputMode::SimHub)
+        {
+            std::cout << "SimHub transport: "
+                      << (telemetryConfig.simHubTransport == SimHubTransport::HttpApi ? "HTTP API" : "JSON UDP")
+                      << '\n';
+            if (telemetryConfig.simHubTransport == SimHubTransport::HttpApi)
             {
-                if (!handle_ui_hotkey(event.key.keysym.sym))
-                {
-                    handle_simulator_hotkey(event.key.keysym.sym, app);
-                }
+                std::cout << "SimHub API port: " << telemetryConfig.httpPort << '\n';
             }
-
-            if (!window.processEvent(event))
+            else
             {
-                running = false;
+                std::cout << "SimHub UDP port: " << telemetryConfig.udpPort << '\n';
             }
         }
-
-        window.pumpTime();
-        const uint32_t nowMs = SDL_GetTicks();
-        app.tick(nowMs);
-        ui_s3_loop(app.state());
-        lv_timer_handler();
-        window.render();
-
-        const bool captureReady = !captureFramePath.empty() && should_capture_frame(telemetryConfig, app.state());
-        if (captureReady)
+        if (!captureFramePath.empty())
         {
-            if (captureEligibleSinceMs == 0)
-            {
-                captureEligibleSinceMs = nowMs;
-            }
+            std::cout << "Frame capture path: " << captureFramePath << '\n';
         }
-        else
+        if (!startupActions.empty())
         {
-            captureEligibleSinceMs = 0;
+            std::cout << "Startup UI actions: " << startupActions << '\n';
         }
+        std::cout << "ShiftLight simulator controls:\n";
+        std::cout << "  Mouse drag/click: navigate LVGL UI\n";
+        std::cout << "  Left/Right: switch cards\n";
+        std::cout << "  Enter: open selected card, Esc: home, L: logo\n";
+        std::cout << "  B: BLE state, W: WiFi state, Up/Down: RPM, S: shift, Space: pause RPM, R: reset\n";
 
-        if (!capturedFrame &&
-            captureReady &&
-            captureEligibleSinceMs != 0 &&
-            nowMs - captureEligibleSinceMs >= kCaptureSettlingMs)
+        bool running = true;
+        bool capturedFrame = false;
+        uint32_t captureEligibleSinceMs = 0;
+        while (running)
         {
-            try
+            SDL_Event event{};
+            while (SDL_PollEvent(&event))
             {
-                std::filesystem::path outputPath(captureFramePath);
-                if (outputPath.has_parent_path())
+                if (event.type == SDL_KEYDOWN && event.key.repeat == 0)
                 {
-                    std::filesystem::create_directories(outputPath.parent_path());
-                }
-
-                if (window.saveFramebufferBmp(captureFramePath.c_str()))
-                {
-                    capturedFrame = true;
-                    std::cout << "Captured LVGL frame to " << captureFramePath << '\n';
-                    if (exitOnCapture)
+                    if (!handle_ui_hotkey(event.key.keysym.sym))
                     {
-                        running = false;
+                        handle_simulator_hotkey(event.key.keysym.sym, app);
                     }
                 }
-                else
+
+                if (!window.processEvent(event))
                 {
-                    std::cerr << "Failed to capture LVGL frame to " << captureFramePath << '\n';
+                    running = false;
                 }
             }
-            catch (const std::exception &ex)
-            {
-                std::cerr << "Failed to prepare capture path " << captureFramePath << ": " << ex.what() << '\n';
-            }
-        }
-        SDL_Delay(5);
-    }
 
-    return 0;
+            window.pumpTime();
+            const uint32_t nowMs = SDL_GetTicks();
+
+            const std::vector<UiDebugAction> pendingUiActions = app.takePendingUiActions();
+            for (UiDebugAction action : pendingUiActions)
+            {
+                ui_s3_debug_dispatch(action);
+            }
+
+            app.tick(nowMs);
+            const UiRuntimeState currentState = app.stateSnapshot();
+            ui_s3_loop(currentState);
+            lv_timer_handler();
+            app.updateUiDebugSnapshot(ui_s3_debug_snapshot());
+            window.setLedBarPreview(build_virtual_led_bar_frame(currentState, app.ledBarConfigSnapshot(), nowMs));
+            window.render();
+
+            const TelemetryServiceConfig currentTelemetryConfig = app.telemetryConfigSnapshot();
+            const bool captureReady = !captureFramePath.empty() && should_capture_frame(currentTelemetryConfig, currentState);
+            if (captureReady)
+            {
+                if (captureEligibleSinceMs == 0)
+                {
+                    captureEligibleSinceMs = nowMs;
+                }
+            }
+            else
+            {
+                captureEligibleSinceMs = 0;
+            }
+
+            if (!capturedFrame &&
+                captureReady &&
+                captureEligibleSinceMs != 0 &&
+                nowMs - captureEligibleSinceMs >= kCaptureSettlingMs)
+            {
+                try
+                {
+                    std::filesystem::path outputPath(captureFramePath);
+                    if (outputPath.has_parent_path())
+                    {
+                        std::filesystem::create_directories(outputPath.parent_path());
+                    }
+
+                    if (window.saveFramebufferBmp(captureFramePath.c_str()))
+                    {
+                        capturedFrame = true;
+                        std::cout << "Captured LVGL frame to " << captureFramePath << '\n';
+                        if (exitOnCapture)
+                        {
+                            running = false;
+                        }
+                    }
+                    else
+                    {
+                        std::cerr << "Failed to capture LVGL frame to " << captureFramePath << '\n';
+                    }
+                }
+                catch (const std::exception &ex)
+                {
+                    std::cerr << "Failed to prepare capture path " << captureFramePath << ": " << ex.what() << '\n';
+                }
+            }
+
+            SDL_Delay(5);
+        }
+
+        webServer.stop();
+        return 0;
+    }
+    catch (const std::exception &ex)
+    {
+        std::cerr << "[sim] exception: " << ex.what() << '\n';
+        return 1;
+    }
 }

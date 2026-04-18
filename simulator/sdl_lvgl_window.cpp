@@ -15,6 +15,11 @@ namespace
                (static_cast<uint32_t>(color32.ch.green) << 8) |
                static_cast<uint32_t>(color32.ch.blue);
     }
+
+    uint32_t rgb_to_argb(uint32_t rgb)
+    {
+        return 0xFF000000u | rgb;
+    }
 }
 
 SdlLvglWindow::~SdlLvglWindow()
@@ -27,6 +32,10 @@ bool SdlLvglWindow::init(const SdlLvglWindowConfig &config)
     width_ = config.width;
     height_ = config.height;
     scale_ = std::max(1, config.scale);
+    ledBarPreviewHeight_ = config.showLedBarPreview ? std::max(56, config.ledBarPreviewHeight) : 0;
+    displayOffsetY_ = ledBarPreviewHeight_;
+    windowWidth_ = width_;
+    windowHeight_ = height_ + ledBarPreviewHeight_;
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0)
     {
@@ -38,8 +47,8 @@ bool SdlLvglWindow::init(const SdlLvglWindowConfig &config)
     window_ = SDL_CreateWindow(config.title,
                                SDL_WINDOWPOS_CENTERED,
                                SDL_WINDOWPOS_CENTERED,
-                               width_ * scale_,
-                               height_ * scale_,
+                               windowWidth_ * scale_,
+                               windowHeight_ * scale_,
                                SDL_WINDOW_SHOWN);
     if (!window_)
     {
@@ -61,8 +70,8 @@ bool SdlLvglWindow::init(const SdlLvglWindowConfig &config)
     texture_ = SDL_CreateTexture(renderer_,
                                  SDL_PIXELFORMAT_ARGB8888,
                                  SDL_TEXTUREACCESS_STREAMING,
-                                 width_,
-                                 height_);
+                                 windowWidth_,
+                                 windowHeight_);
     if (!texture_)
     {
         shutdown();
@@ -70,6 +79,7 @@ bool SdlLvglWindow::init(const SdlLvglWindowConfig &config)
     }
 
     framebuffer_.assign(static_cast<size_t>(width_ * height_), 0xFF000000u);
+    composedFramebuffer_.assign(static_cast<size_t>(windowWidth_ * windowHeight_), 0xFF000000u);
     drawBuf1_.resize(static_cast<size_t>(width_ * kBufferLines));
     drawBuf2_.resize(static_cast<size_t>(width_ * kBufferLines));
 
@@ -123,23 +133,37 @@ bool SdlLvglWindow::processEvent(const SDL_Event &event)
     case SDL_QUIT:
         return false;
     case SDL_MOUSEMOTION:
-        pointer_.x = std::clamp(event.motion.x / scale_, 0, width_ - 1);
-        pointer_.y = std::clamp(event.motion.y / scale_, 0, height_ - 1);
+    {
+        const int localX = event.motion.x / scale_;
+        const int localY = event.motion.y / scale_ - displayOffsetY_;
+        pointer_.x = std::clamp(localX, 0, width_ - 1);
+        pointer_.y = std::clamp(localY, 0, height_ - 1);
         break;
+    }
     case SDL_MOUSEBUTTONDOWN:
         if (event.button.button == SDL_BUTTON_LEFT)
         {
-            pointer_.pressed = true;
-            pointer_.x = std::clamp(event.button.x / scale_, 0, width_ - 1);
-            pointer_.y = std::clamp(event.button.y / scale_, 0, height_ - 1);
+            const int localX = event.button.x / scale_;
+            const int localY = event.button.y / scale_ - displayOffsetY_;
+            pointer_.pressed = localX >= 0 && localX < width_ && localY >= 0 && localY < height_;
+            if (pointer_.pressed)
+            {
+                pointer_.x = std::clamp(localX, 0, width_ - 1);
+                pointer_.y = std::clamp(localY, 0, height_ - 1);
+            }
         }
         break;
     case SDL_MOUSEBUTTONUP:
         if (event.button.button == SDL_BUTTON_LEFT)
         {
             pointer_.pressed = false;
-            pointer_.x = std::clamp(event.button.x / scale_, 0, width_ - 1);
-            pointer_.y = std::clamp(event.button.y / scale_, 0, height_ - 1);
+            const int localX = event.button.x / scale_;
+            const int localY = event.button.y / scale_ - displayOffsetY_;
+            if (localX >= 0 && localX < width_ && localY >= 0 && localY < height_)
+            {
+                pointer_.x = std::clamp(localX, 0, width_ - 1);
+                pointer_.y = std::clamp(localY, 0, height_ - 1);
+            }
         }
         break;
     default:
@@ -156,30 +180,36 @@ void SdlLvglWindow::pumpTime()
     lastTickMs_ = now;
 }
 
+void SdlLvglWindow::setLedBarPreview(const VirtualLedBarFrame &frame)
+{
+    ledBarFrame_ = frame;
+}
+
 void SdlLvglWindow::render()
 {
-    SDL_UpdateTexture(texture_, nullptr, framebuffer_.data(), width_ * static_cast<int>(sizeof(uint32_t)));
+    composeFrame();
+    SDL_UpdateTexture(texture_, nullptr, composedFramebuffer_.data(), windowWidth_ * static_cast<int>(sizeof(uint32_t)));
     SDL_SetRenderDrawColor(renderer_, 0, 0, 0, 255);
     SDL_RenderClear(renderer_);
 
-    SDL_Rect dstRect{0, 0, width_ * scale_, height_ * scale_};
+    SDL_Rect dstRect{0, 0, windowWidth_ * scale_, windowHeight_ * scale_};
     SDL_RenderCopy(renderer_, texture_, nullptr, &dstRect);
     SDL_RenderPresent(renderer_);
 }
 
 bool SdlLvglWindow::saveFramebufferBmp(const char *path) const
 {
-    if (!path || !*path || framebuffer_.empty())
+    if (!path || !*path || composedFramebuffer_.empty())
     {
         return false;
     }
 
     SDL_Surface *surface = SDL_CreateRGBSurfaceWithFormatFrom(
-        const_cast<uint32_t *>(framebuffer_.data()),
-        width_,
-        height_,
+        const_cast<uint32_t *>(composedFramebuffer_.data()),
+        windowWidth_,
+        windowHeight_,
         32,
-        width_ * static_cast<int>(sizeof(uint32_t)),
+        windowWidth_ * static_cast<int>(sizeof(uint32_t)),
         SDL_PIXELFORMAT_ARGB8888);
     if (!surface)
     {
@@ -194,6 +224,16 @@ bool SdlLvglWindow::saveFramebufferBmp(const char *path) const
 lv_disp_t *SdlLvglWindow::display() const
 {
     return disp_;
+}
+
+int SdlLvglWindow::windowWidth() const
+{
+    return windowWidth_;
+}
+
+int SdlLvglWindow::windowHeight() const
+{
+    return windowHeight_;
 }
 
 void SdlLvglWindow::flush_cb(lv_disp_drv_t *dispDrv, const lv_area_t *area, lv_color_t *color_p)
@@ -219,6 +259,85 @@ void SdlLvglWindow::blitArea(const lv_area_t *area, const lv_color_t *colors)
         {
             const size_t index = static_cast<size_t>(y * width_ + x);
             framebuffer_[index] = lv_color_to_argb8888(*colors++);
+        }
+    }
+}
+
+void SdlLvglWindow::composeFrame()
+{
+    std::fill(composedFramebuffer_.begin(), composedFramebuffer_.end(), rgb_to_argb(0x08090C));
+
+    if (ledBarPreviewHeight_ > 0)
+    {
+        fillRect(0, 0, windowWidth_, ledBarPreviewHeight_, rgb_to_argb(0x090B10));
+        fillRect(12, 12, windowWidth_ - 24, ledBarPreviewHeight_ - 24, rgb_to_argb(0x11151C));
+
+        const int ledCount = static_cast<int>(ledBarFrame_.leds.size());
+        if (ledCount > 0)
+        {
+            const int paddingX = 32;
+            const int availableWidth = windowWidth_ - paddingX * 2;
+            const int gap = ledCount > 24 ? 6 : 8;
+            const int radius = std::max(6, std::min(12, (availableWidth - gap * (ledCount - 1)) / (ledCount * 2)));
+            const int diameter = radius * 2;
+            const int totalWidth = ledCount * diameter + (ledCount - 1) * gap;
+            const int startX = std::max(paddingX, (windowWidth_ - totalWidth) / 2);
+            const int centerY = ledBarPreviewHeight_ / 2;
+
+            for (int i = 0; i < ledCount; ++i)
+            {
+                fillCircle(startX + radius + i * (diameter + gap),
+                           centerY,
+                           radius,
+                           rgb_to_argb(ledBarFrame_.leds[static_cast<size_t>(i)]));
+            }
+        }
+    }
+
+    for (int y = 0; y < height_; ++y)
+    {
+        const size_t srcOffset = static_cast<size_t>(y * width_);
+        const size_t dstOffset = static_cast<size_t>((y + displayOffsetY_) * windowWidth_);
+        std::copy_n(framebuffer_.data() + srcOffset, width_, composedFramebuffer_.data() + dstOffset);
+    }
+}
+
+void SdlLvglWindow::fillRect(int x, int y, int w, int h, uint32_t color)
+{
+    const int xStart = std::max(0, x);
+    const int yStart = std::max(0, y);
+    const int xEnd = std::min(windowWidth_, x + w);
+    const int yEnd = std::min(windowHeight_, y + h);
+
+    for (int py = yStart; py < yEnd; ++py)
+    {
+        const size_t rowOffset = static_cast<size_t>(py * windowWidth_);
+        for (int px = xStart; px < xEnd; ++px)
+        {
+            composedFramebuffer_[rowOffset + static_cast<size_t>(px)] = color;
+        }
+    }
+}
+
+void SdlLvglWindow::fillCircle(int cx, int cy, int radius, uint32_t color)
+{
+    const int xMin = std::max(0, cx - radius);
+    const int xMax = std::min(windowWidth_ - 1, cx + radius);
+    const int yMin = std::max(0, cy - radius);
+    const int yMax = std::min(windowHeight_ - 1, cy + radius);
+    const int radiusSq = radius * radius;
+
+    for (int py = yMin; py <= yMax; ++py)
+    {
+        const size_t rowOffset = static_cast<size_t>(py * windowWidth_);
+        for (int px = xMin; px <= xMax; ++px)
+        {
+            const int dx = px - cx;
+            const int dy = py - cy;
+            if (dx * dx + dy * dy <= radiusSq)
+            {
+                composedFramebuffer_[rowOffset + static_cast<size_t>(px)] = color;
+            }
         }
     }
 }

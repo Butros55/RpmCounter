@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <string>
 
 namespace
@@ -27,48 +29,141 @@ namespace
         lv_obj_t *label = nullptr;
     };
 
+    struct ValueTile
+    {
+        lv_obj_t *panel = nullptr;
+        lv_obj_t *title = nullptr;
+        lv_obj_t *value = nullptr;
+        lv_obj_t *unit = nullptr;
+    };
+
+    struct StatRef
+    {
+        lv_obj_t *value = nullptr;
+        lv_obj_t *caption = nullptr;
+    };
+
+    struct DerivedRaceData
+    {
+        bool available = false;
+        float deltaSeconds = 0.0f;
+        uint32_t predictedLapMs = 0;
+        uint32_t lastLapMs = 0;
+        uint32_t bestLapMs = 0;
+        uint32_t sessionClockMs = 0;
+        int position = 0;
+        int totalPositions = 21;
+        int lap = 0;
+        int totalLaps = 12;
+        float fuelLiters = 0.0f;
+        float fuelAvgPerLap = 2.85f;
+        float fuelLapsRemaining = 0.0f;
+        float oilTempC = 0.0f;
+        float oilPressureBar = 0.0f;
+        float oilLevel = 0.0f;
+        float fuelPressureBar = 0.0f;
+        float waterTempC = 0.0f;
+        float batteryVolts = 0.0f;
+        int tractionControl = 3;
+        int tractionCut = 0;
+        int absLevel = 4;
+        float brakeBias = 53.0f;
+        int engineMap = 1;
+    };
+
     struct UiRefs
     {
         lv_disp_t *disp = nullptr;
         lv_obj_t *root = nullptr;
         lv_obj_t *homeLayer = nullptr;
-        lv_obj_t *statusChip = nullptr;
-        lv_obj_t *statusChipLabel = nullptr;
-        lv_obj_t *iconPrimary = nullptr;
-        lv_obj_t *iconSecondary = nullptr;
-        lv_obj_t *heroCard = nullptr;
-        lv_obj_t *heroKicker = nullptr;
-        lv_obj_t *heroValue = nullptr;
-        lv_obj_t *heroUnit = nullptr;
-        lv_obj_t *heroMeta = nullptr;
-        std::array<ButtonRef, 3> heroBadges{};
+        int width = 0;
+        int height = 0;
+        bool compact = false;
+
+        std::array<lv_obj_t *, 16> shiftSegments{};
+
+        lv_obj_t *sourcePanel = nullptr;
+        lv_obj_t *sourceTitle = nullptr;
+        lv_obj_t *sourceValue = nullptr;
+        lv_obj_t *sourceMeta = nullptr;
+
+        lv_obj_t *deltaPanel = nullptr;
+        lv_obj_t *deltaValue = nullptr;
+        lv_obj_t *deltaCaption = nullptr;
+
+        lv_obj_t *sessionPanel = nullptr;
+        std::array<StatRef, 3> sessionStats{};
+
+        lv_obj_t *sensorPanel = nullptr;
+        std::array<ValueTile, 6> sensorTiles{};
+
+        lv_obj_t *centerPanel = nullptr;
+        lv_obj_t *centerStatus = nullptr;
+        lv_obj_t *centerGear = nullptr;
+        lv_obj_t *centerRpm = nullptr;
+        lv_obj_t *centerSpeed = nullptr;
+        lv_obj_t *centerBarTrack = nullptr;
+        lv_obj_t *centerBarFill = nullptr;
+
+        lv_obj_t *lapsPanel = nullptr;
+        lv_obj_t *lapsTitle = nullptr;
+        lv_obj_t *lapsPredicted = nullptr;
+        lv_obj_t *lapsPredictedCaption = nullptr;
+        lv_obj_t *lapsLast = nullptr;
+        lv_obj_t *lapsLastCaption = nullptr;
+        lv_obj_t *lapsBest = nullptr;
+        lv_obj_t *lapsBestCaption = nullptr;
+
+        std::array<ValueTile, 5> controlTiles{};
+
+        lv_obj_t *fuelPanel = nullptr;
+        lv_obj_t *fuelTitle = nullptr;
+        std::array<StatRef, 3> fuelStats{};
+
+        lv_obj_t *compactStatusPanel = nullptr;
+        lv_obj_t *compactStatusTitle = nullptr;
+        lv_obj_t *compactStatusValue = nullptr;
+        lv_obj_t *compactSessionPanel = nullptr;
+        lv_obj_t *compactSessionTitle = nullptr;
+        lv_obj_t *compactSessionValue = nullptr;
+        lv_obj_t *compactHero = nullptr;
+        lv_obj_t *compactHeroTitle = nullptr;
+        lv_obj_t *compactHeroValue = nullptr;
+        lv_obj_t *compactHeroUnit = nullptr;
+        lv_obj_t *compactHeroMeta = nullptr;
+        std::array<ValueTile, 3> compactTiles{};
         std::array<ButtonRef, 3> actionButtons{};
-        lv_obj_t *homeHint = nullptr;
-        lv_obj_t *focusLayer = nullptr;
+
+        lv_obj_t *footerHint = nullptr;
+        std::array<lv_obj_t *, 3> homeActionTargets{};
+
+        lv_obj_t *focusOverlay = nullptr;
+        lv_obj_t *focusCard = nullptr;
         lv_obj_t *focusStatus = nullptr;
         lv_obj_t *focusValue = nullptr;
         lv_obj_t *focusUnit = nullptr;
         lv_obj_t *focusMeta = nullptr;
         lv_obj_t *focusHint = nullptr;
-        lv_obj_t *pickerLayer = nullptr;
-        lv_obj_t *pickerBack = nullptr;
-        lv_obj_t *pickerTitle = nullptr;
-        lv_obj_t *pickerSubtitle = nullptr;
-        lv_obj_t *pickerPreview = nullptr;
-        lv_obj_t *pickerValue = nullptr;
-        lv_obj_t *pickerUnit = nullptr;
-        lv_obj_t *pickerMeta = nullptr;
-        std::array<ButtonRef, 3> pickerOptions{};
-        lv_obj_t *pickerHint = nullptr;
-        lv_obj_t *pickerWebButton = nullptr;
-        lv_obj_t *webLayer = nullptr;
+
+        lv_obj_t *sourceOverlay = nullptr;
+        lv_obj_t *sourceCard = nullptr;
+        lv_obj_t *sourceBack = nullptr;
+        lv_obj_t *sourcePickerTitle = nullptr;
+        lv_obj_t *sourcePickerSubtitle = nullptr;
+        std::array<ButtonRef, 3> sourceOptions{};
+        lv_obj_t *sourceHint = nullptr;
+
+        lv_obj_t *webOverlay = nullptr;
+        lv_obj_t *webCard = nullptr;
         lv_obj_t *webBack = nullptr;
         lv_obj_t *webTitle = nullptr;
         lv_obj_t *webSubtitle = nullptr;
         lv_obj_t *webQr = nullptr;
         lv_obj_t *webUrl = nullptr;
         lv_obj_t *webHint = nullptr;
+
         lv_obj_t *logoOverlay = nullptr;
+        lv_obj_t *logoCard = nullptr;
         lv_obj_t *logoLabel = nullptr;
         lv_obj_t *logoSubtitle = nullptr;
     };
@@ -82,7 +177,6 @@ namespace
         UiDisplayFocusMetric fullscreenMetric = UiDisplayFocusMetric::Rpm;
         WebTarget webTarget = WebTarget::Overview;
         UiScreenId webReturnScreen = UiScreenId::Home;
-        uint32_t lastFocusTapMs = 0;
         uint32_t logoUntilMs = 0;
         std::string overlayTitle = "ShiftLight";
         std::string overlaySubtitle;
@@ -94,33 +188,38 @@ namespace
 
     lv_style_t styleScreen;
     lv_style_t stylePanel;
-    lv_style_t stylePanelStrong;
-    lv_style_t stylePill;
-    lv_style_t styleButton;
-    lv_style_t styleBackButton;
-    lv_style_t styleMuted;
-    lv_style_t styleBadge;
-    lv_style_t styleLogoOverlay;
-
-    const lv_color_t color_bg = lv_color_hex(0x070B12);
-    const lv_color_t color_bg_grad = lv_color_hex(0x0C1420);
-    const lv_color_t color_panel = lv_color_hex(0x0D1523);
-    const lv_color_t color_panel_alt = lv_color_hex(0x121D2D);
-    const lv_color_t color_border = lv_color_hex(0x25364B);
-    const lv_color_t color_border_soft = lv_color_hex(0x1B2836);
-    const lv_color_t color_text = lv_color_hex(0xEEF3FA);
-    const lv_color_t color_muted = lv_color_hex(0x90A0B4);
-    const lv_color_t color_cyan = lv_color_hex(0x4FCBFF);
-    const lv_color_t color_lime = lv_color_hex(0x67F2A0);
-    const lv_color_t color_warn = lv_color_hex(0xFFB648);
-    const lv_color_t color_error = lv_color_hex(0xFF6B7A);
-    const lv_color_t color_violet = lv_color_hex(0xA875FF);
+    lv_style_t styleOverlay;
+    lv_style_t styleOverlayCard;
+    lv_style_t styleHintLabel;
+    bool g_stylesInitialized = false;
 
     constexpr int kActionCount = 3;
-    constexpr int kPickerOptionCount = 3;
+    constexpr int kShiftSegmentCount = 16;
     constexpr uint32_t kLogoDurationMs = 1400;
-    constexpr uint32_t kDoubleTapWindowMs = 360;
-    constexpr int kUsbBridgeWebPort = 8765;
+    constexpr uint32_t kUsbBridgeWebPort = 8765;
+
+    const lv_color_t colorBg = lv_color_hex(0x030405);
+    const lv_color_t colorBgSoft = lv_color_hex(0x090C10);
+    const lv_color_t colorPanel = lv_color_hex(0x050709);
+    const lv_color_t colorPanelAlt = lv_color_hex(0x0C1017);
+    const lv_color_t colorText = lv_color_hex(0xF5F7FB);
+    const lv_color_t colorMuted = lv_color_hex(0x96A0AF);
+    const lv_color_t colorWhiteLine = lv_color_hex(0xEDF1F7);
+    const lv_color_t colorGreen = lv_color_hex(0x4AF07B);
+    const lv_color_t colorYellow = lv_color_hex(0xFFD74A);
+    const lv_color_t colorOrange = lv_color_hex(0xFF8C38);
+    const lv_color_t colorRed = lv_color_hex(0xFF5A48);
+    const lv_color_t colorBlue = lv_color_hex(0x5AAEFF);
+    const lv_color_t colorPurple = lv_color_hex(0xD477FF);
+
+    void reset_style(lv_style_t &style)
+    {
+        if (g_stylesInitialized)
+        {
+            lv_style_reset(&style);
+        }
+        lv_style_init(&style);
+    }
 
     int wrap_index(int index, int count)
     {
@@ -132,9 +231,44 @@ namespace
         return lv_tick_get();
     }
 
+    bool compact_mode()
+    {
+        return g_ui.compact;
+    }
+
     std::string gear_text(int gear)
     {
         return gear <= 0 ? "N" : std::to_string(gear);
+    }
+
+    std::string telemetry_preference_text(UiTelemetryPreference preference)
+    {
+        switch (preference)
+        {
+        case UiTelemetryPreference::Obd:
+            return "OBD";
+        case UiTelemetryPreference::SimHub:
+            return "SIM / PC";
+        case UiTelemetryPreference::Auto:
+        default:
+            return "AUTO";
+        }
+    }
+
+    std::string telemetry_source_text(UiTelemetrySource source)
+    {
+        switch (source)
+        {
+        case UiTelemetrySource::Esp32Obd:
+            return "OBD";
+        case UiTelemetrySource::Simulator:
+            return "SIM";
+        case UiTelemetrySource::SimHubNetwork:
+            return "SIMHUB";
+        case UiTelemetrySource::UsbBridge:
+        default:
+            return "USB";
+        }
     }
 
     std::string metric_title(UiDisplayFocusMetric metric)
@@ -142,12 +276,12 @@ namespace
         switch (metric)
         {
         case UiDisplayFocusMetric::Gear:
-            return "Gang";
+            return "GEAR";
         case UiDisplayFocusMetric::Speed:
-            return "Geschwindigkeit";
+            return "SPEED";
         case UiDisplayFocusMetric::Rpm:
         default:
-            return "Drehzahl";
+            return "RPM";
         }
     }
 
@@ -172,7 +306,7 @@ namespace
         case UiDisplayFocusMetric::Gear:
             return "GEAR";
         case UiDisplayFocusMetric::Speed:
-            return "km/h";
+            return "KM/H";
         case UiDisplayFocusMetric::Rpm:
         default:
             return "RPM";
@@ -183,125 +317,291 @@ namespace
     {
         if (shift)
         {
-            return color_warn;
+            return colorRed;
         }
+
         switch (metric)
         {
         case UiDisplayFocusMetric::Gear:
-            return color_violet;
+            return colorText;
         case UiDisplayFocusMetric::Speed:
-            return color_lime;
+            return colorBlue;
         case UiDisplayFocusMetric::Rpm:
         default:
-            return color_cyan;
+            return colorYellow;
         }
     }
 
-    std::string telemetry_preference_text(UiTelemetryPreference preference)
+    lv_color_t source_color(UiTelemetrySource source, bool stale)
     {
-        switch (preference)
+        if (stale)
         {
-        case UiTelemetryPreference::Obd:
-            return "OBD";
-        case UiTelemetryPreference::SimHub:
-            return "Sim / PC";
-        case UiTelemetryPreference::Auto:
-        default:
-            return "Auto";
+            return colorRed;
         }
-    }
 
-    std::string telemetry_preference_hint(UiTelemetryPreference preference)
-    {
-        switch (preference)
+        switch (source)
         {
-        case UiTelemetryPreference::Obd:
-            return "Nur BLE / OBD aktiv";
-        case UiTelemetryPreference::SimHub:
-            return "Nur SimHub: Auto, USB only oder Network only";
-        case UiTelemetryPreference::Auto:
+        case UiTelemetrySource::Esp32Obd:
+            return colorGreen;
+        case UiTelemetrySource::Simulator:
+            return colorYellow;
+        case UiTelemetrySource::SimHubNetwork:
+            return colorPurple;
+        case UiTelemetrySource::UsbBridge:
         default:
-            return "USB, Netzwerk und OBD werden automatisch sortiert";
+            return colorBlue;
         }
     }
 
-    bool usb_transport_mode_selected()
+    uint32_t source_accent_rgb(UiTelemetrySource source, bool stale)
     {
-        return g_state.runtime.simTransportMode == UiSimTransportMode::UsbOnly;
+        if (stale)
+        {
+            return 0xFF5A48;
+        }
+
+        switch (source)
+        {
+        case UiTelemetrySource::Esp32Obd:
+            return 0x4AF07B;
+        case UiTelemetrySource::Simulator:
+            return 0xFFD74A;
+        case UiTelemetrySource::SimHubNetwork:
+            return 0xD477FF;
+        case UiTelemetrySource::UsbBridge:
+        default:
+            return 0x5AAEFF;
+        }
     }
 
-    bool network_transport_mode_selected()
+    std::string wifi_state_short()
     {
-        return g_state.runtime.simTransportMode == UiSimTransportMode::NetworkOnly;
+        if (g_state.runtime.staConnected)
+        {
+            return g_state.runtime.currentSsid.empty() ? "LIVE" : g_state.runtime.currentSsid;
+        }
+        if (g_state.runtime.staConnecting)
+        {
+            return "CONNECT";
+        }
+        if (g_state.runtime.apActive)
+        {
+            return g_state.runtime.apClients > 0 ? "AP LIVE" : "AP READY";
+        }
+        return "OFF";
     }
 
-    bool auto_transport_mode_selected()
+    std::string ble_state_short()
     {
-        return g_state.runtime.simTransportMode == UiSimTransportMode::Auto;
+        if (g_state.runtime.bleConnected)
+        {
+            return "LIVE";
+        }
+        if (g_state.runtime.bleConnecting)
+        {
+            return "SCAN";
+        }
+        return "OFF";
     }
 
-    bool usb_transport_active()
+    std::string usb_state_short()
     {
-        return usb_transport_mode_selected() ||
-               (auto_transport_mode_selected() && g_state.runtime.telemetrySource == UiTelemetrySource::UsbBridge);
-    }
-
-    bool network_transport_active()
-    {
-        return network_transport_mode_selected() ||
-               (auto_transport_mode_selected() && g_state.runtime.telemetrySource == UiTelemetrySource::SimHubNetwork);
-    }
-
-    bool usb_bridge_web_selected()
-    {
-        return (!g_state.runtime.usbHost.empty() && g_state.runtime.usbBridgeConnected) ||
-               usb_transport_mode_selected() ||
-               g_state.runtime.telemetrySource == UiTelemetrySource::UsbBridge;
-    }
-
-    std::string usb_state_text(bool autoMode)
-    {
-        const char *prefix = autoMode ? "Auto: " : "";
         switch (g_state.runtime.usbState)
         {
         case UiUsbState::Live:
-            return std::string(prefix) + "USB live";
+            return "LIVE";
         case UiUsbState::WaitingForBridge:
-            return std::string(prefix) + "USB wartet auf Bridge";
         case UiUsbState::WaitingForData:
-            return std::string(prefix) + "USB wartet auf Daten";
+            return "WAIT";
         case UiUsbState::Error:
-            return std::string(prefix) + "USB Fehler";
+            return "ERROR";
         case UiUsbState::Disconnected:
-            return std::string(prefix) + "USB getrennt";
+            return "OFF";
         case UiUsbState::Disabled:
         default:
-            return std::string(prefix) + "USB aus";
+            return "DISABLED";
         }
     }
 
-    std::string simhub_state_text(bool autoMode)
+    std::string simhub_state_short()
     {
         switch (g_state.runtime.simHubState)
         {
         case UiSimHubState::Live:
-            if (autoMode && g_state.runtime.telemetryUsingFallback)
-            {
-                return "Auto: Netzwerk Fallback";
-            }
-            return autoMode ? "Auto: Netzwerk live" : "Netzwerk live";
+            return "LIVE";
         case UiSimHubState::WaitingForHost:
-            return autoMode ? "Auto: Host fehlt" : "Host fehlt";
         case UiSimHubState::WaitingForNetwork:
-            return autoMode ? "Auto: WLAN fehlt" : "WLAN fehlt";
         case UiSimHubState::WaitingForData:
-            return autoMode ? "Auto: Netzwerk wartet" : "Netzwerk wartet";
+            return "WAIT";
         case UiSimHubState::Error:
-            return autoMode ? "Auto: Netzwerk Fehler" : "Netzwerk Fehler";
+            return "ERROR";
         case UiSimHubState::Disabled:
         default:
-            return autoMode ? "Auto: SimHub aus" : "Netzwerk aus";
+            return "DISABLED";
         }
+    }
+
+    std::string source_status_value()
+    {
+        std::string text = telemetry_source_text(g_state.runtime.telemetrySource);
+        text += g_state.runtime.telemetryStale ? " WAIT" : " LIVE";
+        if (g_state.runtime.telemetryUsingFallback)
+        {
+            text += " FB";
+        }
+        return text;
+    }
+
+    std::string source_status_meta()
+    {
+        std::string meta = "WIFI ";
+        meta += g_state.runtime.currentSsid.empty() ? wifi_state_short() : g_state.runtime.currentSsid;
+        meta += "  |  BLE ";
+        meta += ble_state_short();
+        return meta;
+    }
+
+    std::string secondary_status_text()
+    {
+        if (g_state.runtime.telemetryStale)
+        {
+            if (!g_state.runtime.usbError.empty())
+            {
+                return g_state.runtime.usbError;
+            }
+            if (!g_state.runtime.staLastError.empty())
+            {
+                return g_state.runtime.staLastError;
+            }
+            return "Waiting for live telemetry";
+        }
+
+        if (!g_state.runtime.ip.empty())
+        {
+            return "WEB READY";
+        }
+        if (!g_state.runtime.apIp.empty())
+        {
+            return "AP READY";
+        }
+        if (!g_state.runtime.simHubEndpoint.empty())
+        {
+            return "SIM LIVE";
+        }
+        if (!g_state.runtime.usbHost.empty())
+        {
+            return "USB LIVE";
+        }
+        return "ShiftLight ready";
+    }
+
+    std::string action_label(HomeAction action)
+    {
+        switch (action)
+        {
+        case HomeAction::Display:
+            return "Display";
+        case HomeAction::Source:
+            return "Source";
+        case HomeAction::Web:
+        default:
+            return "Web";
+        }
+    }
+
+    std::string format_clock(uint32_t milliseconds)
+    {
+        if (milliseconds == 0)
+        {
+            return "--:--";
+        }
+
+        const uint32_t totalSeconds = milliseconds / 1000U;
+        const uint32_t minutes = totalSeconds / 60U;
+        const uint32_t seconds = totalSeconds % 60U;
+
+        char buffer[16];
+        std::snprintf(buffer, sizeof(buffer), "%02lu:%02lu",
+                      static_cast<unsigned long>(minutes),
+                      static_cast<unsigned long>(seconds));
+        return std::string(buffer);
+    }
+
+    std::string format_lap_time(uint32_t milliseconds)
+    {
+        if (milliseconds == 0)
+        {
+            return "--:--.---";
+        }
+
+        const uint32_t minutes = milliseconds / 60000U;
+        const uint32_t seconds = (milliseconds / 1000U) % 60U;
+        const uint32_t millis = milliseconds % 1000U;
+
+        char buffer[24];
+        std::snprintf(buffer, sizeof(buffer), "%02lu:%02lu.%03lu",
+                      static_cast<unsigned long>(minutes),
+                      static_cast<unsigned long>(seconds),
+                      static_cast<unsigned long>(millis));
+        return std::string(buffer);
+    }
+
+    std::string format_signed_delta(float seconds)
+    {
+        char buffer[24];
+        std::snprintf(buffer, sizeof(buffer), "%+.3f", static_cast<double>(seconds));
+        return std::string(buffer);
+    }
+
+    std::string format_one_decimal(float value)
+    {
+        char buffer[16];
+        std::snprintf(buffer, sizeof(buffer), "%.1f", static_cast<double>(value));
+        return std::string(buffer);
+    }
+
+    std::string format_two_decimals(float value)
+    {
+        char buffer[16];
+        std::snprintf(buffer, sizeof(buffer), "%.2f", static_cast<double>(value));
+        return std::string(buffer);
+    }
+
+    DerivedRaceData derive_race_data()
+    {
+        DerivedRaceData data{};
+        if (g_state.runtime.telemetryStale && g_state.runtime.rpm <= 0 && g_state.runtime.speedKmh <= 0)
+        {
+            return data;
+        }
+
+        const float rpmRatio = std::clamp((static_cast<float>(g_state.runtime.rpm) - 900.0f) / 6300.0f, 0.0f, 1.0f);
+        const float speedRatio = std::clamp(static_cast<float>(g_state.runtime.speedKmh) / 220.0f, 0.0f, 1.0f);
+        const float throttle = std::clamp(g_state.runtime.throttle, 0.0f, 1.0f);
+        const float timeS = static_cast<float>(now_ms()) / 1000.0f;
+
+        data.available = true;
+        data.deltaSeconds = 0.18f * std::sin(timeS * 0.9f) + (0.45f - speedRatio) * 0.32f;
+        data.predictedLapMs = static_cast<uint32_t>(std::clamp(90500.0f - speedRatio * 12000.0f - throttle * 2600.0f, 76000.0f, 120000.0f));
+        data.lastLapMs = static_cast<uint32_t>(std::max(60000.0f, data.predictedLapMs + 1150.0f + 650.0f * std::sin(timeS * 0.55f)));
+        data.bestLapMs = static_cast<uint32_t>(std::max(60000.0f, data.predictedLapMs - 420.0f - 260.0f * std::cos(timeS * 0.45f)));
+        data.sessionClockMs = 17U * 60U * 1000U + (now_ms() % (47U * 60U * 1000U));
+        data.position = std::max(1, 5 - static_cast<int>(std::round(speedRatio * 2.0f)));
+        data.lap = 1 + static_cast<int>((timeS / std::max(1.0f, static_cast<float>(data.predictedLapMs) / 1000.0f))) % data.totalLaps;
+        data.fuelLiters = std::max(2.4f, 12.0f - timeS * 0.015f);
+        data.fuelLapsRemaining = data.fuelLiters / data.fuelAvgPerLap;
+        data.oilTempC = 77.0f + throttle * 10.0f + speedRatio * 3.5f;
+        data.oilPressureBar = 2.1f + throttle * 2.3f + rpmRatio * 1.0f;
+        data.oilLevel = 5.0f;
+        data.fuelPressureBar = 2.3f + throttle * 0.9f;
+        data.waterTempC = 77.0f + throttle * 8.0f + speedRatio * 2.5f;
+        data.batteryVolts = 14.0f + (g_state.runtime.usbConnected ? 0.2f : 0.0f) + (g_state.runtime.staConnected ? 0.1f : 0.0f);
+        data.tractionControl = 3;
+        data.tractionCut = g_state.runtime.shift ? 1 : 0;
+        data.absLevel = 4;
+        data.brakeBias = 53.0f + 0.2f * std::sin(timeS * 0.4f);
+        data.engineMap = g_state.runtime.telemetrySource == UiTelemetrySource::SimHubNetwork ? 1 : 2;
+        return data;
     }
 
     void set_label_text(lv_obj_t *label, const std::string &text)
@@ -312,198 +612,241 @@ namespace
         }
     }
 
-    std::string status_chip_text()
+    void set_panel_accent(lv_obj_t *obj, uint32_t accentRgb)
     {
-        if (usb_transport_mode_selected())
+        if (!obj)
         {
-            return usb_state_text(false);
+            return;
         }
 
-        if (network_transport_mode_selected())
-        {
-            return simhub_state_text(false);
-        }
-
-        if (g_state.runtime.telemetrySource == UiTelemetrySource::UsbBridge ||
-            g_state.runtime.usbConnected ||
-            g_state.runtime.usbBridgeConnected)
-        {
-            return usb_state_text(true);
-        }
-
-        if (g_state.runtime.telemetrySource == UiTelemetrySource::SimHubNetwork || g_state.runtime.simHubConfigured)
-        {
-            return simhub_state_text(true);
-        }
-
-        switch (g_state.runtime.telemetrySource)
-        {
-        case UiTelemetrySource::Esp32Obd:
-            return g_state.runtime.telemetryUsingFallback ? "Auto: OBD Fallback"
-                                                          : (g_state.runtime.bleConnected ? "OBD live" : (g_state.runtime.bleConnecting ? "OBD verbindet" : "OBD bereit"));
-        case UiTelemetrySource::SimHubNetwork:
-            return simhub_state_text(true);
-        case UiTelemetrySource::Simulator:
-            return "Simulator";
-        case UiTelemetrySource::UsbBridge:
-        default:
-            return "Bereit";
-        }
+        const lv_color_t accent = lv_color_hex(accentRgb);
+        lv_obj_set_style_border_color(obj, accent, 0);
+        lv_obj_set_style_shadow_color(obj, accent, 0);
+        lv_obj_set_style_shadow_width(obj, 14, 0);
+        lv_obj_set_style_shadow_opa(obj, LV_OPA_20, 0);
     }
 
-    std::string hero_meta_text()
+    void set_selected_outline(lv_obj_t *obj, bool selected)
     {
-        std::string meta = "Quelle: ";
-        meta += telemetry_preference_text(g_state.runtime.settings.telemetryPreference);
-        meta += "  |  ";
-        if (usb_transport_mode_selected())
+        if (!obj)
         {
-            meta += "USB only";
+            return;
         }
-        else if (network_transport_mode_selected())
+
+        lv_obj_set_style_outline_width(obj, selected ? 2 : 0, 0);
+        lv_obj_set_style_outline_pad(obj, 3, 0);
+        lv_obj_set_style_outline_color(obj, colorText, 0);
+        lv_obj_set_style_outline_opa(obj, selected ? LV_OPA_70 : LV_OPA_0, 0);
+    }
+
+    lv_obj_t *make_panel(lv_obj_t *parent, int x, int y, int w, int h)
+    {
+        lv_obj_t *panel = lv_obj_create(parent);
+        lv_obj_remove_style_all(panel);
+        lv_obj_add_style(panel, &stylePanel, 0);
+        lv_obj_set_pos(panel, x, y);
+        lv_obj_set_size(panel, w, h);
+        lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
+        return panel;
+    }
+
+    lv_obj_t *make_text(lv_obj_t *parent, const lv_font_t *font, lv_color_t color, lv_text_align_t align = LV_TEXT_ALIGN_LEFT)
+    {
+        lv_obj_t *label = lv_label_create(parent);
+        lv_obj_set_style_text_font(label, font, 0);
+        lv_obj_set_style_text_color(label, color, 0);
+        lv_obj_set_style_text_align(label, align, 0);
+        return label;
+    }
+
+    void set_single_line_width(lv_obj_t *label, int width, lv_label_long_mode_t mode = LV_LABEL_LONG_CLIP)
+    {
+        if (!label)
         {
-            meta += "Network only";
+            return;
         }
-        else if (g_state.runtime.telemetryUsingFallback)
+
+        lv_obj_set_width(label, width);
+        lv_label_set_long_mode(label, mode);
+    }
+
+    ValueTile make_value_tile(lv_obj_t *parent, int x, int y, int w, int h, const char *title, uint32_t accentRgb, const lv_font_t *valueFont)
+    {
+        ValueTile tile{};
+        tile.panel = make_panel(parent, x, y, w, h);
+        set_panel_accent(tile.panel, accentRgb);
+
+        if (h <= 54)
         {
-            if (g_state.runtime.telemetrySource == UiTelemetrySource::SimHubNetwork)
-            {
-                meta += "Netzwerk-Fallback";
-            }
-            else if (g_state.runtime.telemetrySource == UiTelemetrySource::Esp32Obd)
-            {
-                meta += "OBD-Fallback";
-            }
-            else
-            {
-                meta += "USB aktiv";
-            }
+            tile.title = make_text(tile.panel, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_LEFT);
+            set_single_line_width(tile.title, w - 12, LV_LABEL_LONG_DOT);
+            lv_label_set_text(tile.title, title);
+            lv_obj_set_pos(tile.title, 2, -2);
+
+            tile.value = make_text(tile.panel, valueFont, colorText, LV_TEXT_ALIGN_LEFT);
+            set_single_line_width(tile.value, w - 52);
+            lv_obj_set_pos(tile.value, 2, 18);
+
+            tile.unit = make_text(tile.panel, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_RIGHT);
+            set_single_line_width(tile.unit, 34);
+            lv_obj_set_pos(tile.unit, w - 46, 22);
         }
-        else if (g_state.runtime.telemetrySource == UiTelemetrySource::UsbBridge)
+        else if (h <= 72)
         {
-            meta += "USB aktiv";
-        }
-        else if (g_state.runtime.telemetrySource == UiTelemetrySource::SimHubNetwork)
-        {
-            meta += "Netzwerk aktiv";
-        }
-        else if (g_state.runtime.staConnected)
-        {
-            meta += g_state.runtime.currentSsid.empty() ? "WLAN online" : g_state.runtime.currentSsid;
-        }
-        else if (g_state.runtime.apActive)
-        {
-            meta += "Access Point";
+            tile.title = make_text(tile.panel, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_CENTER);
+            set_single_line_width(tile.title, w - 10, LV_LABEL_LONG_DOT);
+            lv_label_set_text(tile.title, title);
+            lv_obj_align(tile.title, LV_ALIGN_TOP_MID, 0, 0);
+
+            tile.value = make_text(tile.panel, valueFont, colorText, LV_TEXT_ALIGN_CENTER);
+            set_single_line_width(tile.value, w - 10);
+            lv_obj_align(tile.value, LV_ALIGN_CENTER, 0, 8);
+
+            tile.unit = make_text(tile.panel, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_CENTER);
+            set_single_line_width(tile.unit, w - 10);
+            lv_obj_align(tile.unit, LV_ALIGN_BOTTOM_MID, 0, -2);
         }
         else
         {
-            meta += "Offline";
+            tile.title = make_text(tile.panel, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_CENTER);
+            set_single_line_width(tile.title, w - 12, LV_LABEL_LONG_DOT);
+            lv_label_set_text(tile.title, title);
+            lv_obj_align(tile.title, LV_ALIGN_TOP_MID, 0, 4);
+
+            tile.value = make_text(tile.panel, valueFont, colorText, LV_TEXT_ALIGN_CENTER);
+            set_single_line_width(tile.value, w - 12);
+            lv_obj_align(tile.value, LV_ALIGN_CENTER, 0, -4);
+
+            tile.unit = make_text(tile.panel, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_CENTER);
+            set_single_line_width(tile.unit, w - 12, LV_LABEL_LONG_DOT);
+            lv_obj_align(tile.unit, LV_ALIGN_BOTTOM_MID, 0, -4);
         }
-        return meta;
+
+        return tile;
     }
 
-    std::string secondary_status_text()
+    ButtonRef make_button(lv_obj_t *parent, int x, int y, int w, int h, const char *labelText, lv_event_cb_t callback, void *userData)
     {
-        if (usb_transport_active())
+        ButtonRef ref{};
+        ref.button = make_panel(parent, x, y, w, h);
+        lv_obj_add_flag(ref.button, LV_OBJ_FLAG_CLICKABLE);
+        if (callback)
         {
-            if (!g_state.runtime.usbError.empty())
-            {
-                return g_state.runtime.usbError;
-            }
-            if (g_state.runtime.usbBridgeConnected)
-            {
-                return g_state.runtime.usbHost.empty() ? "USB Bridge verbunden" : ("PC: " + g_state.runtime.usbHost);
-            }
-            return "USB Bridge starten, dann kommt SimHub direkt vom PC.";
+            lv_obj_add_event_cb(ref.button, callback, LV_EVENT_CLICKED, userData);
         }
-
-        if (network_transport_active() || (auto_transport_mode_selected() && g_state.runtime.simHubConfigured))
-        {
-            switch (g_state.runtime.simHubState)
-            {
-            case UiSimHubState::Live:
-                return g_state.runtime.simHubEndpoint.empty() ? "SimHub direkt ueber Netzwerk aktiv"
-                                                              : ("SimHub: " + g_state.runtime.simHubEndpoint);
-            case UiSimHubState::WaitingForHost:
-                return "SimHub Host im Web setzen.";
-            case UiSimHubState::WaitingForNetwork:
-                return "WLAN verbinden oder AP pruefen.";
-            case UiSimHubState::WaitingForData:
-                return "SimHub erreichbar, warte auf laufende Session.";
-            case UiSimHubState::Error:
-                return "Netzwerkpfad fehlgeschlagen, SimHub nicht erreichbar.";
-            case UiSimHubState::Disabled:
-            default:
-                break;
-            }
-        }
-
-        if (!g_state.runtime.ip.empty())
-        {
-            return "Web: " + g_state.runtime.ip;
-        }
-        if (g_state.runtime.apActive)
-        {
-            return "AP aktiv: " + g_state.runtime.apIp;
-        }
-        return "Web-Oberflaeche im Netzwerk verfuegbar";
+        ref.label = make_text(ref.button, &lv_font_montserrat_16, colorText, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(ref.label, w - 8);
+        lv_label_set_text(ref.label, labelText);
+        lv_obj_center(ref.label);
+        return ref;
     }
 
-    std::string action_label(HomeAction action)
+    void apply_styles()
     {
-        switch (action)
+        reset_style(styleScreen);
+        lv_style_set_bg_color(&styleScreen, colorBg);
+        lv_style_set_bg_grad_color(&styleScreen, colorBgSoft);
+        lv_style_set_bg_grad_dir(&styleScreen, LV_GRAD_DIR_VER);
+        lv_style_set_bg_opa(&styleScreen, LV_OPA_COVER);
+        lv_style_set_pad_all(&styleScreen, 0);
+
+        reset_style(stylePanel);
+        lv_style_set_bg_color(&stylePanel, colorPanel);
+        lv_style_set_bg_grad_color(&stylePanel, colorPanelAlt);
+        lv_style_set_bg_grad_dir(&stylePanel, LV_GRAD_DIR_VER);
+        lv_style_set_bg_opa(&stylePanel, LV_OPA_COVER);
+        lv_style_set_radius(&stylePanel, 18);
+        lv_style_set_border_width(&stylePanel, 2);
+        lv_style_set_border_color(&stylePanel, colorWhiteLine);
+        lv_style_set_border_opa(&stylePanel, LV_OPA_70);
+        lv_style_set_pad_all(&stylePanel, 8);
+        lv_style_set_shadow_width(&stylePanel, 12);
+        lv_style_set_shadow_color(&stylePanel, colorWhiteLine);
+        lv_style_set_shadow_opa(&stylePanel, LV_OPA_10);
+
+        reset_style(styleOverlay);
+        lv_style_set_bg_color(&styleOverlay, lv_color_black());
+        lv_style_set_bg_opa(&styleOverlay, LV_OPA_70);
+        lv_style_set_pad_all(&styleOverlay, 0);
+
+        reset_style(styleOverlayCard);
+        lv_style_set_bg_color(&styleOverlayCard, colorPanelAlt);
+        lv_style_set_bg_opa(&styleOverlayCard, LV_OPA_COVER);
+        lv_style_set_radius(&styleOverlayCard, 20);
+        lv_style_set_border_width(&styleOverlayCard, 2);
+        lv_style_set_border_color(&styleOverlayCard, colorWhiteLine);
+        lv_style_set_border_opa(&styleOverlayCard, LV_OPA_80);
+        lv_style_set_pad_all(&styleOverlayCard, 14);
+        lv_style_set_shadow_width(&styleOverlayCard, 20);
+        lv_style_set_shadow_color(&styleOverlayCard, colorWhiteLine);
+        lv_style_set_shadow_opa(&styleOverlayCard, LV_OPA_10);
+
+        reset_style(styleHintLabel);
+        lv_style_set_text_color(&styleHintLabel, colorMuted);
+        lv_style_set_text_font(&styleHintLabel, &lv_font_montserrat_16);
+
+        g_stylesInitialized = true;
+    }
+
+    void sync_runtime_settings()
+    {
+        g_state.runtime.settings.lastMenuIndex = wrap_index(g_state.selectedAction, kActionCount);
+    }
+
+    void persist_settings()
+    {
+        sync_runtime_settings();
+        g_state.runtime.settings.tutorialSeen = true;
+        if (g_state.hooks.saveSettings)
         {
-        case HomeAction::Display:
-            return "Anzeige";
-        case HomeAction::Source:
-            return "Quelle";
-        case HomeAction::Web:
-        default:
-            return "QR Web";
+            g_state.hooks.saveSettings(g_state.runtime.settings, g_state.hooks.userData);
         }
     }
 
-    std::string picker_option_label(int index)
+    void set_selected_action(int index)
     {
-        if (g_state.activeScreen == UiScreenId::DisplayPicker)
-        {
-            switch (static_cast<UiDisplayFocusMetric>(index))
-            {
-            case UiDisplayFocusMetric::Gear:
-                return "Gang";
-            case UiDisplayFocusMetric::Speed:
-                return "Speed";
-            case UiDisplayFocusMetric::Rpm:
-            default:
-                return "RPM";
-            }
-        }
+        g_state.selectedAction = wrap_index(index, kActionCount);
+        sync_runtime_settings();
+    }
 
-        switch (static_cast<UiTelemetryPreference>(index))
-        {
-        case UiTelemetryPreference::Obd:
-            return "OBD";
-        case UiTelemetryPreference::SimHub:
-            return "Sim";
-        case UiTelemetryPreference::Auto:
-        default:
-            return "Auto";
-        }
+    void set_display_focus(UiDisplayFocusMetric metric)
+    {
+        g_state.runtime.settings.displayFocus = metric;
+        g_state.fullscreenMetric = metric;
+        persist_settings();
+    }
+
+    void set_telemetry_preference(UiTelemetryPreference preference)
+    {
+        g_state.runtime.settings.telemetryPreference = preference;
+        persist_settings();
+    }
+
+    void cycle_display_focus(int delta)
+    {
+        const int next = wrap_index(static_cast<int>(g_state.runtime.settings.displayFocus) + delta, 3);
+        set_display_focus(static_cast<UiDisplayFocusMetric>(next));
+    }
+
+    void cycle_telemetry_preference(int delta)
+    {
+        const int next = wrap_index(static_cast<int>(g_state.runtime.settings.telemetryPreference) + delta, 3);
+        set_telemetry_preference(static_cast<UiTelemetryPreference>(next));
+    }
+
+    void cycle_web_target(int delta)
+    {
+        const int next = wrap_index(static_cast<int>(g_state.webTarget) + delta, 3);
+        g_state.webTarget = static_cast<WebTarget>(next);
     }
 
     std::string build_web_url(WebTarget target)
     {
         std::string base;
-        if (usb_bridge_web_selected())
+        if (!g_state.runtime.usbHost.empty() &&
+            (g_state.runtime.usbBridgeConnected || g_state.runtime.telemetrySource == UiTelemetrySource::UsbBridge))
         {
-            if (!g_state.runtime.usbHost.empty())
-            {
-                base = "http://" + g_state.runtime.usbHost + ":" + std::to_string(kUsbBridgeWebPort);
-            }
-            else
-            {
-                base = "http://127.0.0.1:" + std::to_string(kUsbBridgeWebPort);
-            }
+            base = "http://" + g_state.runtime.usbHost + ":" + std::to_string(kUsbBridgeWebPort);
         }
         else if (!g_state.runtime.ip.empty())
         {
@@ -534,419 +877,48 @@ namespace
         }
     }
 
-    void sync_runtime_settings()
+    std::string web_title(WebTarget target)
     {
-        g_state.runtime.settings.lastMenuIndex = wrap_index(g_state.selectedAction, kActionCount);
-    }
-
-    void persist_settings()
-    {
-        sync_runtime_settings();
-        g_state.runtime.settings.tutorialSeen = true;
-        if (g_state.hooks.saveSettings)
+        switch (target)
         {
-            g_state.hooks.saveSettings(g_state.runtime.settings, g_state.hooks.userData);
+        case WebTarget::Display:
+            return "Display Settings";
+        case WebTarget::Telemetry:
+            return "Telemetry Settings";
+        case WebTarget::Overview:
+        default:
+            return "Web Dashboard";
         }
     }
 
-    void set_selected_action(int index)
+    std::string web_subtitle(WebTarget target)
     {
-        g_state.selectedAction = wrap_index(index, kActionCount);
-        sync_runtime_settings();
-    }
-
-    void set_display_focus(UiDisplayFocusMetric metric)
-    {
-        g_state.runtime.settings.displayFocus = metric;
-        persist_settings();
-    }
-
-    void set_telemetry_preference(UiTelemetryPreference preference)
-    {
-        g_state.runtime.settings.telemetryPreference = preference;
-        persist_settings();
-    }
-
-    void cycle_display_focus(int delta)
-    {
-        const int next = wrap_index(static_cast<int>(g_state.runtime.settings.displayFocus) + delta, kPickerOptionCount);
-        set_display_focus(static_cast<UiDisplayFocusMetric>(next));
-    }
-
-    void cycle_telemetry_preference(int delta)
-    {
-        const int next = wrap_index(static_cast<int>(g_state.runtime.settings.telemetryPreference) + delta, kPickerOptionCount);
-        set_telemetry_preference(static_cast<UiTelemetryPreference>(next));
-    }
-
-    void cycle_web_target(int delta)
-    {
-        const int next = wrap_index(static_cast<int>(g_state.webTarget) + delta, 3);
-        g_state.webTarget = static_cast<WebTarget>(next);
-    }
-
-    void apply_styles()
-    {
-        lv_style_init(&styleScreen);
-        lv_style_set_bg_color(&styleScreen, color_bg);
-        lv_style_set_bg_grad_color(&styleScreen, color_bg_grad);
-        lv_style_set_bg_grad_dir(&styleScreen, LV_GRAD_DIR_VER);
-        lv_style_set_bg_opa(&styleScreen, LV_OPA_COVER);
-        lv_style_set_pad_all(&styleScreen, 0);
-
-        lv_style_init(&stylePanel);
-        lv_style_set_bg_color(&stylePanel, color_panel);
-        lv_style_set_bg_grad_color(&stylePanel, color_panel_alt);
-        lv_style_set_bg_grad_dir(&stylePanel, LV_GRAD_DIR_VER);
-        lv_style_set_bg_opa(&stylePanel, LV_OPA_COVER);
-        lv_style_set_radius(&stylePanel, 24);
-        lv_style_set_border_width(&stylePanel, 1);
-        lv_style_set_border_color(&stylePanel, color_border_soft);
-        lv_style_set_pad_all(&stylePanel, 14);
-        lv_style_set_shadow_width(&stylePanel, 14);
-        lv_style_set_shadow_color(&stylePanel, lv_color_hex(0x02060C));
-        lv_style_set_shadow_opa(&stylePanel, LV_OPA_20);
-
-        lv_style_init(&stylePanelStrong);
-        lv_style_set_bg_color(&stylePanelStrong, color_panel_alt);
-        lv_style_set_bg_grad_color(&stylePanelStrong, lv_color_hex(0x162438));
-        lv_style_set_bg_grad_dir(&stylePanelStrong, LV_GRAD_DIR_VER);
-        lv_style_set_bg_opa(&stylePanelStrong, LV_OPA_COVER);
-        lv_style_set_radius(&stylePanelStrong, 26);
-        lv_style_set_border_width(&stylePanelStrong, 1);
-        lv_style_set_border_color(&stylePanelStrong, color_border);
-        lv_style_set_pad_all(&stylePanelStrong, 16);
-
-        lv_style_init(&stylePill);
-        lv_style_set_radius(&stylePill, 18);
-        lv_style_set_bg_color(&stylePill, lv_color_hex(0x101927));
-        lv_style_set_bg_opa(&stylePill, LV_OPA_COVER);
-        lv_style_set_border_width(&stylePill, 1);
-        lv_style_set_border_color(&stylePill, color_border_soft);
-        lv_style_set_pad_left(&stylePill, 12);
-        lv_style_set_pad_right(&stylePill, 12);
-        lv_style_set_pad_top(&stylePill, 8);
-        lv_style_set_pad_bottom(&stylePill, 8);
-
-        lv_style_init(&styleBadge);
-        lv_style_set_radius(&styleBadge, 16);
-        lv_style_set_bg_color(&styleBadge, lv_color_hex(0x111B28));
-        lv_style_set_bg_opa(&styleBadge, LV_OPA_COVER);
-        lv_style_set_border_width(&styleBadge, 1);
-        lv_style_set_border_color(&styleBadge, color_border_soft);
-        lv_style_set_pad_left(&styleBadge, 12);
-        lv_style_set_pad_right(&styleBadge, 12);
-        lv_style_set_pad_top(&styleBadge, 10);
-        lv_style_set_pad_bottom(&styleBadge, 10);
-
-        lv_style_init(&styleButton);
-        lv_style_set_radius(&styleButton, 18);
-        lv_style_set_bg_color(&styleButton, lv_color_hex(0x0F1824));
-        lv_style_set_bg_opa(&styleButton, LV_OPA_COVER);
-        lv_style_set_border_width(&styleButton, 1);
-        lv_style_set_border_color(&styleButton, color_border_soft);
-        lv_style_set_text_color(&styleButton, color_text);
-        lv_style_set_pad_all(&styleButton, 0);
-
-        lv_style_init(&styleBackButton);
-        lv_style_set_radius(&styleBackButton, 16);
-        lv_style_set_bg_color(&styleBackButton, lv_color_hex(0x101927));
-        lv_style_set_bg_opa(&styleBackButton, LV_OPA_COVER);
-        lv_style_set_border_width(&styleBackButton, 1);
-        lv_style_set_border_color(&styleBackButton, color_border_soft);
-        lv_style_set_pad_all(&styleBackButton, 0);
-
-        lv_style_init(&styleMuted);
-        lv_style_set_text_color(&styleMuted, color_muted);
-
-        lv_style_init(&styleLogoOverlay);
-        lv_style_set_bg_color(&styleLogoOverlay, color_bg);
-        lv_style_set_bg_opa(&styleLogoOverlay, LV_OPA_80);
-        lv_style_set_pad_all(&styleLogoOverlay, 0);
-    }
-
-    ButtonRef make_button(lv_obj_t *parent, int width, int height, const char *text, lv_event_cb_t cb = nullptr, void *userData = nullptr)
-    {
-        ButtonRef ref{};
-        ref.button = lv_btn_create(parent);
-        lv_obj_remove_style_all(ref.button);
-        lv_obj_add_style(ref.button, &styleButton, 0);
-        lv_obj_set_size(ref.button, width, height);
-        lv_obj_clear_flag(ref.button, LV_OBJ_FLAG_SCROLLABLE);
-        if (cb)
+        switch (target)
         {
-            lv_obj_add_event_cb(ref.button, cb, LV_EVENT_CLICKED, userData);
+        case WebTarget::Display:
+            return "Brightness, colors and shift-light tuning";
+        case WebTarget::Telemetry:
+            return "Source, USB bridge and network setup";
+        case WebTarget::Overview:
+        default:
+            return "Scan or open the dashboard on the host PC or ESP";
         }
-
-        ref.label = lv_label_create(ref.button);
-        lv_label_set_text(ref.label, text);
-        lv_obj_set_style_text_font(ref.label, &lv_font_montserrat_16, 0);
-        lv_obj_set_style_text_color(ref.label, color_text, 0);
-        lv_obj_center(ref.label);
-        return ref;
-    }
-
-    lv_obj_t *make_panel(lv_obj_t *parent, int x, int y, int width, int height, bool strong = false)
-    {
-        lv_obj_t *panel = lv_obj_create(parent);
-        lv_obj_remove_style_all(panel);
-        lv_obj_add_style(panel, strong ? &stylePanelStrong : &stylePanel, 0);
-        lv_obj_set_pos(panel, x, y);
-        lv_obj_set_size(panel, width, height);
-        lv_obj_clear_flag(panel, LV_OBJ_FLAG_SCROLLABLE);
-        return panel;
-    }
-
-    void update_action_button_styles()
-    {
-        for (int i = 0; i < kActionCount; ++i)
-        {
-            ButtonRef &ref = g_ui.actionButtons[static_cast<size_t>(i)];
-            if (!ref.button)
-            {
-                continue;
-            }
-            const bool active = g_state.activeScreen == UiScreenId::Home && i == wrap_index(g_state.selectedAction, kActionCount);
-            lv_obj_set_style_bg_color(ref.button, active ? lv_color_hex(0x162438) : lv_color_hex(0x0F1824), 0);
-            lv_obj_set_style_border_color(ref.button, active ? color_cyan : color_border_soft, 0);
-            lv_obj_set_style_border_width(ref.button, active ? 2 : 1, 0);
-            lv_obj_set_style_text_color(ref.label, active ? color_text : color_muted, 0);
-        }
-    }
-
-    void update_picker_option_styles()
-    {
-        int selected = g_state.activeScreen == UiScreenId::DisplayPicker ? static_cast<int>(g_state.runtime.settings.displayFocus) : static_cast<int>(g_state.runtime.settings.telemetryPreference);
-        for (int i = 0; i < kPickerOptionCount; ++i)
-        {
-            ButtonRef &ref = g_ui.pickerOptions[static_cast<size_t>(i)];
-            if (!ref.button)
-            {
-                continue;
-            }
-            const bool active = i == selected;
-            lv_obj_set_style_bg_color(ref.button, active ? lv_color_hex(0x162438) : lv_color_hex(0x0F1824), 0);
-            lv_obj_set_style_border_color(ref.button, active ? color_cyan : color_border_soft, 0);
-            lv_obj_set_style_border_width(ref.button, active ? 2 : 1, 0);
-            lv_obj_set_style_text_color(ref.label, active ? color_text : color_muted, 0);
-        }
-    }
-
-    void update_status_icons()
-    {
-        if (usb_transport_active())
-        {
-            lv_label_set_text(g_ui.iconPrimary, "USB");
-            lv_obj_set_style_text_color(g_ui.iconPrimary,
-                                        g_state.runtime.usbState == UiUsbState::Live ? color_lime :
-                                        (g_state.runtime.usbState == UiUsbState::Error ? color_error : color_warn),
-                                        0);
-            lv_obj_add_flag(g_ui.iconSecondary, LV_OBJ_FLAG_HIDDEN);
-            return;
-        }
-
-        if (network_transport_active())
-        {
-            lv_label_set_text(g_ui.iconPrimary, LV_SYMBOL_WIFI);
-            lv_obj_set_style_text_color(g_ui.iconPrimary,
-                                        g_state.runtime.simHubState == UiSimHubState::Live ? color_lime :
-                                        (g_state.runtime.simHubState == UiSimHubState::Error ? color_error : color_warn),
-                                        0);
-            lv_obj_add_flag(g_ui.iconSecondary, LV_OBJ_FLAG_HIDDEN);
-            return;
-        }
-
-        lv_label_set_text(g_ui.iconPrimary, LV_SYMBOL_WIFI);
-        lv_obj_set_style_text_color(g_ui.iconPrimary,
-                                    g_state.runtime.staConnected || g_state.runtime.apActive ? color_lime :
-                                    (g_state.runtime.staConnecting ? color_warn : color_error),
-                                    0);
-        lv_obj_clear_flag(g_ui.iconSecondary, LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text(g_ui.iconSecondary, LV_SYMBOL_BLUETOOTH);
-        lv_obj_set_style_text_color(g_ui.iconSecondary,
-                                    g_state.runtime.bleConnected ? color_cyan :
-                                    (g_state.runtime.bleConnecting ? color_warn : color_error),
-                                    0);
-    }
-
-    void update_home_view()
-    {
-        set_label_text(g_ui.statusChipLabel, status_chip_text());
-        set_label_text(g_ui.heroKicker, metric_title(g_state.runtime.settings.displayFocus));
-        set_label_text(g_ui.heroValue, metric_value(g_state.runtime.settings.displayFocus));
-        set_label_text(g_ui.heroUnit, metric_unit(g_state.runtime.settings.displayFocus));
-        set_label_text(g_ui.heroMeta, hero_meta_text() + "\n" + secondary_status_text());
-        lv_obj_set_style_text_color(g_ui.heroValue, metric_color(g_state.runtime.settings.displayFocus, g_state.runtime.shift), 0);
-        lv_obj_set_style_text_color(g_ui.heroUnit, metric_color(g_state.runtime.settings.displayFocus, g_state.runtime.shift), 0);
-        set_label_text(g_ui.heroBadges[0].label, "G " + gear_text(g_state.runtime.gear));
-        set_label_text(g_ui.heroBadges[1].label, std::to_string(g_state.runtime.speedKmh) + " km/h");
-        set_label_text(g_ui.heroBadges[2].label, g_state.runtime.shift ? "SHIFT" : "Bereit");
-        lv_obj_set_style_bg_color(g_ui.heroBadges[2].button, g_state.runtime.shift ? color_warn : lv_color_hex(0x111B28), 0);
-        lv_obj_set_style_text_color(g_ui.heroBadges[2].label, g_state.runtime.shift ? lv_color_black() : color_text, 0);
-        update_status_icons();
-        update_action_button_styles();
-        if (g_state.runtime.settings.tutorialSeen)
-        {
-            lv_obj_add_flag(g_ui.homeHint, LV_OBJ_FLAG_HIDDEN);
-        }
-        else
-        {
-            lv_obj_clear_flag(g_ui.homeHint, LV_OBJ_FLAG_HIDDEN);
-        }
-    }
-
-    void update_focus_view()
-    {
-        const UiDisplayFocusMetric metric = g_state.fullscreenMetric;
-        set_label_text(g_ui.focusStatus, status_chip_text());
-        set_label_text(g_ui.focusValue, metric_value(metric));
-        set_label_text(g_ui.focusUnit, metric_unit(metric));
-        set_label_text(g_ui.focusMeta, metric_title(metric) + " | G " + gear_text(g_state.runtime.gear) + " | " + std::to_string(g_state.runtime.speedKmh) + " km/h");
-        lv_obj_set_style_text_color(g_ui.focusValue, metric_color(metric, g_state.runtime.shift), 0);
-        lv_obj_set_style_text_color(g_ui.focusUnit, metric_color(metric, g_state.runtime.shift), 0);
-    }
-
-    void update_picker_view()
-    {
-        if (g_state.activeScreen == UiScreenId::DisplayPicker)
-        {
-            const UiDisplayFocusMetric metric = g_state.runtime.settings.displayFocus;
-            set_label_text(g_ui.pickerTitle, "Anzeige waehlen");
-            set_label_text(g_ui.pickerSubtitle, "Links / rechts wischen und live pruefen.");
-            set_label_text(g_ui.pickerValue, metric_value(metric));
-            set_label_text(g_ui.pickerUnit, metric_unit(metric));
-            set_label_text(g_ui.pickerMeta, "Aktiv: " + metric_title(metric));
-            lv_obj_set_style_text_color(g_ui.pickerValue, metric_color(metric, g_state.runtime.shift), 0);
-            lv_obj_set_style_text_color(g_ui.pickerUnit, metric_color(metric, g_state.runtime.shift), 0);
-            set_label_text(g_ui.pickerHint, "Wischen wechselt. Web fuer Details.");
-        }
-        else
-        {
-            const UiTelemetryPreference preference = g_state.runtime.settings.telemetryPreference;
-            set_label_text(g_ui.pickerTitle, "Quelle waehlen");
-            set_label_text(g_ui.pickerSubtitle, "Auto erkennt USB, SimHub und OBD selbst.");
-            set_label_text(g_ui.pickerValue, telemetry_preference_text(preference));
-            set_label_text(g_ui.pickerUnit, "MODE");
-            set_label_text(g_ui.pickerMeta, telemetry_preference_hint(preference));
-            lv_obj_set_style_text_color(g_ui.pickerValue, preference == UiTelemetryPreference::SimHub ? color_cyan : (preference == UiTelemetryPreference::Obd ? color_lime : color_violet), 0);
-            lv_obj_set_style_text_color(g_ui.pickerUnit, color_muted, 0);
-            set_label_text(g_ui.pickerHint, "Wischen wechselt Auto / OBD / Sim.");
-        }
-
-        for (int i = 0; i < kPickerOptionCount; ++i)
-        {
-            set_label_text(g_ui.pickerOptions[static_cast<size_t>(i)].label, picker_option_label(i));
-        }
-        update_picker_option_styles();
-    }
-
-    void update_web_view()
-    {
-        std::string title = "Web Setup";
-        if (g_state.webTarget == WebTarget::Display)
-        {
-            title = "Anzeige im Web";
-        }
-        else if (g_state.webTarget == WebTarget::Telemetry)
-        {
-            title = "Telemetrie im Web";
-        }
-
-        const std::string url = build_web_url(g_state.webTarget);
-        set_label_text(g_ui.webTitle, title);
-        set_label_text(g_ui.webSubtitle, "QR scannen und direkt in die passende Web-Einstellung springen.");
-        set_label_text(g_ui.webUrl, url);
-#if LV_USE_QRCODE
-        if (g_ui.webQr)
-        {
-            lv_qrcode_update(g_ui.webQr, url.c_str(), static_cast<uint32_t>(url.size()));
-        }
-#endif
-        set_label_text(g_ui.webHint, usb_bridge_web_selected() ? "Im USB-only oder aktivem USB-Pfad ist die gleiche Seite auch lokal auf dem PC offen." : "Im WLAN oder AP direkt mit dem Handy aufrufen.");
-    }
-
-    void update_logo_overlay()
-    {
-        if (!g_ui.logoOverlay)
-        {
-            return;
-        }
-        set_label_text(g_ui.logoLabel, g_state.overlayTitle);
-        if (g_ui.logoSubtitle)
-        {
-            set_label_text(g_ui.logoSubtitle, g_state.overlaySubtitle);
-            if (g_state.overlaySubtitle.empty())
-            {
-                lv_obj_add_flag(g_ui.logoSubtitle, LV_OBJ_FLAG_HIDDEN);
-            }
-            else
-            {
-                lv_obj_clear_flag(g_ui.logoSubtitle, LV_OBJ_FLAG_HIDDEN);
-            }
-        }
-        lv_obj_set_style_border_color(g_ui.logoOverlay, lv_color_hex(g_state.overlayAccent), 0);
-        lv_obj_set_style_shadow_color(g_ui.logoOverlay, lv_color_hex(g_state.overlayAccent), 0);
-        if (g_state.logoUntilMs > now_ms())
-        {
-            lv_obj_clear_flag(g_ui.logoOverlay, LV_OBJ_FLAG_HIDDEN);
-        }
-        else
-        {
-            lv_obj_add_flag(g_ui.logoOverlay, LV_OBJ_FLAG_HIDDEN);
-        }
-    }
-
-    void update_screen_visibility()
-    {
-        const bool homeVisible = g_state.activeScreen == UiScreenId::Home;
-        const bool focusVisible = g_state.activeScreen == UiScreenId::Focus;
-        const bool pickerVisible = g_state.activeScreen == UiScreenId::DisplayPicker || g_state.activeScreen == UiScreenId::SourcePicker;
-        const bool webVisible = g_state.activeScreen == UiScreenId::WebLink;
-        homeVisible ? lv_obj_clear_flag(g_ui.homeLayer, LV_OBJ_FLAG_HIDDEN) : lv_obj_add_flag(g_ui.homeLayer, LV_OBJ_FLAG_HIDDEN);
-        focusVisible ? lv_obj_clear_flag(g_ui.focusLayer, LV_OBJ_FLAG_HIDDEN) : lv_obj_add_flag(g_ui.focusLayer, LV_OBJ_FLAG_HIDDEN);
-        pickerVisible ? lv_obj_clear_flag(g_ui.pickerLayer, LV_OBJ_FLAG_HIDDEN) : lv_obj_add_flag(g_ui.pickerLayer, LV_OBJ_FLAG_HIDDEN);
-        webVisible ? lv_obj_clear_flag(g_ui.webLayer, LV_OBJ_FLAG_HIDDEN) : lv_obj_add_flag(g_ui.webLayer, LV_OBJ_FLAG_HIDDEN);
-    }
-
-    void refresh_view()
-    {
-        update_screen_visibility();
-        update_home_view();
-        update_focus_view();
-        update_picker_view();
-        update_web_view();
-        update_logo_overlay();
     }
 
     void show_home()
     {
         g_state.activeScreen = UiScreenId::Home;
-        refresh_view();
     }
 
-    void show_focus(UiDisplayFocusMetric metric)
+    void show_focus()
     {
-        g_state.fullscreenMetric = metric;
+        g_state.fullscreenMetric = g_state.runtime.settings.displayFocus;
         g_state.activeScreen = UiScreenId::Focus;
-        g_state.runtime.settings.tutorialSeen = true;
-        persist_settings();
-        refresh_view();
-    }
-
-    void show_display_picker()
-    {
-        g_state.activeScreen = UiScreenId::DisplayPicker;
-        g_state.runtime.settings.tutorialSeen = true;
-        persist_settings();
-        refresh_view();
     }
 
     void show_source_picker()
     {
         g_state.activeScreen = UiScreenId::SourcePicker;
-        g_state.runtime.settings.tutorialSeen = true;
-        persist_settings();
-        refresh_view();
     }
 
     void show_web_link(WebTarget target, UiScreenId returnScreen)
@@ -954,36 +926,14 @@ namespace
         g_state.webTarget = target;
         g_state.webReturnScreen = returnScreen;
         g_state.activeScreen = UiScreenId::WebLink;
-        refresh_view();
     }
 
-    void cycle_focus_metric(int delta)
+    void open_selected_action()
     {
-        const int next = wrap_index(static_cast<int>(g_state.fullscreenMetric) + delta, kPickerOptionCount);
-        g_state.fullscreenMetric = static_cast<UiDisplayFocusMetric>(next);
-    }
-
-    void handle_picker_swipe(bool next)
-    {
-        if (g_state.activeScreen == UiScreenId::DisplayPicker)
-        {
-            cycle_display_focus(next ? 1 : -1);
-        }
-        else if (g_state.activeScreen == UiScreenId::SourcePicker)
-        {
-            cycle_telemetry_preference(next ? 1 : -1);
-        }
-        refresh_view();
-    }
-
-    void on_home_action(lv_event_t *e)
-    {
-        const int index = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
-        set_selected_action(index);
-        switch (static_cast<HomeAction>(index))
+        switch (static_cast<HomeAction>(wrap_index(g_state.selectedAction, kActionCount)))
         {
         case HomeAction::Display:
-            show_display_picker();
+            show_focus();
             break;
         case HomeAction::Source:
             show_source_picker();
@@ -995,111 +945,400 @@ namespace
         }
     }
 
-    void on_focus_badge(lv_event_t *e)
+    int gesture_delta()
+    {
+        lv_indev_t *active = lv_indev_get_act();
+        if (!active)
+        {
+            return 0;
+        }
+
+        switch (lv_indev_get_gesture_dir(active))
+        {
+        case LV_DIR_LEFT:
+            return 1;
+        case LV_DIR_RIGHT:
+            return -1;
+        default:
+            return 0;
+        }
+    }
+
+    void refresh_shift_strip()
+    {
+        if (!g_ui.homeLayer)
+        {
+            return;
+        }
+
+        const float ratio = std::clamp((static_cast<float>(g_state.runtime.rpm) - 900.0f) / 6300.0f, 0.0f, 1.0f);
+        const int activeSegments = std::clamp(static_cast<int>(std::round(ratio * static_cast<float>(kShiftSegmentCount))), 0, kShiftSegmentCount);
+        const bool blinkOn = !g_state.runtime.shift || ((now_ms() / 120U) % 2U) == 0U;
+
+        static const std::array<uint32_t, kShiftSegmentCount> palette = {
+            0xF5F7FB, 0xF5F7FB,
+            0x4AF07B, 0x4AF07B, 0x56F28C, 0x56F28C,
+            0x8CFF66, 0xC9FF5A,
+            0xFFD74A, 0xFFCA44, 0xFFB13E, 0xFF9D39,
+            0xFF6A48, 0xFF5947,
+            0x63AFFF, 0x78B9FF};
+
+        for (int i = 0; i < kShiftSegmentCount; ++i)
+        {
+            lv_obj_t *segment = g_ui.shiftSegments[static_cast<size_t>(i)];
+            if (!segment)
+            {
+                continue;
+            }
+
+            const bool lit = i < activeSegments && blinkOn;
+            lv_obj_set_style_bg_color(segment, lit ? lv_color_hex(palette[static_cast<size_t>(i)]) : lv_color_hex(0x1B1F27), 0);
+            lv_obj_set_style_bg_opa(segment, lit ? LV_OPA_COVER : LV_OPA_50, 0);
+            lv_obj_set_style_border_opa(segment, lit ? LV_OPA_40 : LV_OPA_10, 0);
+        }
+    }
+
+    void refresh_home_selection()
+    {
+        if (compact_mode())
+        {
+            for (int i = 0; i < kActionCount; ++i)
+            {
+                ButtonRef &button = g_ui.actionButtons[static_cast<size_t>(i)];
+                if (!button.button)
+                {
+                    continue;
+                }
+
+                const bool selected = i == wrap_index(g_state.selectedAction, kActionCount);
+                const uint32_t accent = i == 0 ? 0xFFD74A : (i == 1 ? 0x56F28C : 0x5AAEFF);
+                set_panel_accent(button.button, selected ? accent : 0x394252);
+                set_selected_outline(button.button, selected);
+                lv_obj_set_style_text_color(button.label, selected ? lv_color_hex(accent) : colorText, 0);
+            }
+            return;
+        }
+
+        for (int i = 0; i < kActionCount; ++i)
+        {
+            set_selected_outline(g_ui.homeActionTargets[static_cast<size_t>(i)],
+                                 i == wrap_index(g_state.selectedAction, kActionCount));
+        }
+    }
+
+    void refresh_home_compact()
+    {
+        if (!g_ui.compactHero)
+        {
+            return;
+        }
+
+        set_label_text(g_ui.compactStatusValue, source_status_value());
+        set_label_text(g_ui.compactSessionValue, secondary_status_text());
+        set_panel_accent(g_ui.compactStatusPanel, source_accent_rgb(g_state.runtime.telemetrySource, g_state.runtime.telemetryStale));
+        set_panel_accent(g_ui.compactSessionPanel, 0x5AAEFF);
+
+        const UiDisplayFocusMetric focusMetric = g_state.runtime.settings.displayFocus;
+        set_label_text(g_ui.compactHeroTitle, metric_title(focusMetric));
+        set_label_text(g_ui.compactHeroValue, metric_value(focusMetric));
+        set_label_text(g_ui.compactHeroUnit, metric_unit(focusMetric));
+        set_label_text(g_ui.compactHeroMeta, secondary_status_text());
+        lv_obj_set_style_text_color(g_ui.compactHeroValue, metric_color(focusMetric, g_state.runtime.shift), 0);
+        set_panel_accent(g_ui.compactHero, g_state.runtime.shift ? 0xFF5A48 : 0xF5F7FB);
+
+        lv_label_set_text(g_ui.compactTiles[0].title, "GEAR");
+        set_label_text(g_ui.compactTiles[0].value, gear_text(g_state.runtime.gear));
+        set_label_text(g_ui.compactTiles[0].unit, "LIVE");
+        lv_obj_set_style_text_color(g_ui.compactTiles[0].value, colorText, 0);
+
+        lv_label_set_text(g_ui.compactTiles[1].title, "SPEED");
+        set_label_text(g_ui.compactTiles[1].value, std::to_string(g_state.runtime.speedKmh));
+        set_label_text(g_ui.compactTiles[1].unit, "KM/H");
+        lv_obj_set_style_text_color(g_ui.compactTiles[1].value, colorBlue, 0);
+
+        lv_label_set_text(g_ui.compactTiles[2].title, "STATE");
+        set_label_text(g_ui.compactTiles[2].value, g_state.runtime.telemetryStale ? "WAIT" : "LIVE");
+        set_label_text(g_ui.compactTiles[2].unit, telemetry_source_text(g_state.runtime.telemetrySource));
+        lv_obj_set_style_text_color(g_ui.compactTiles[2].value,
+                                    g_state.runtime.telemetryStale ? colorRed : source_color(g_state.runtime.telemetrySource, false), 0);
+
+        set_label_text(g_ui.footerHint, "Tap center for focus   |   Display / Source / Web");
+        refresh_home_selection();
+    }
+
+    void refresh_sensor_tile(ValueTile &tile, const char *title, const std::string &value, const char *unit, uint32_t accentRgb)
+    {
+        if (!tile.panel)
+        {
+            return;
+        }
+        lv_label_set_text(tile.title, title);
+        set_label_text(tile.value, value);
+        lv_label_set_text(tile.unit, unit);
+        set_panel_accent(tile.panel, accentRgb);
+        lv_obj_set_style_text_color(tile.value, lv_color_hex(accentRgb), 0);
+    }
+
+    void refresh_control_tile(ValueTile &tile, const char *title, const std::string &value, uint32_t accentRgb)
+    {
+        if (!tile.panel)
+        {
+            return;
+        }
+        lv_label_set_text(tile.title, title);
+        set_label_text(tile.value, value);
+        lv_label_set_text(tile.unit, "");
+        set_panel_accent(tile.panel, accentRgb);
+        lv_obj_set_style_text_color(tile.value, lv_color_hex(accentRgb), 0);
+    }
+
+    void refresh_home_landscape()
+    {
+        if (!g_ui.centerPanel)
+        {
+            return;
+        }
+
+        const DerivedRaceData derived = derive_race_data();
+        const uint32_t sourceAccent = source_accent_rgb(g_state.runtime.telemetrySource, g_state.runtime.telemetryStale);
+
+        set_panel_accent(g_ui.sourcePanel, sourceAccent);
+        set_label_text(g_ui.sourceValue, source_status_value());
+        set_label_text(g_ui.sourceMeta, source_status_meta());
+
+        set_panel_accent(g_ui.deltaPanel, 0xFFD74A);
+        set_label_text(g_ui.deltaValue, derived.available ? format_signed_delta(derived.deltaSeconds) : "+0.000");
+
+        set_panel_accent(g_ui.sessionPanel, 0xF5F7FB);
+        set_label_text(g_ui.sessionStats[0].value, derived.available ? format_clock(derived.sessionClockMs) : "--:--");
+        set_label_text(g_ui.sessionStats[1].value, derived.available ? (std::to_string(derived.position) + "/" + std::to_string(derived.totalPositions)) : "--");
+        set_label_text(g_ui.sessionStats[2].value, derived.available ? (std::to_string(derived.lap) + "/" + std::to_string(derived.totalLaps)) : "--");
+
+        refresh_sensor_tile(g_ui.sensorTiles[0], "OIL TEMP", derived.available ? format_one_decimal(derived.oilTempC) : "--.-", "C", 0xF5F7FB);
+        refresh_sensor_tile(g_ui.sensorTiles[1], "OIL PRES", derived.available ? format_one_decimal(derived.oilPressureBar) : "--.-", "B", 0xF5F7FB);
+        refresh_sensor_tile(g_ui.sensorTiles[2], "OIL LVL", derived.available ? format_one_decimal(derived.oilLevel) : "--.-", "L", 0x56F28C);
+        refresh_sensor_tile(g_ui.sensorTiles[3], "FUEL P", derived.available ? format_one_decimal(derived.fuelPressureBar) : "--.-", "B", 0x5AAEFF);
+        refresh_sensor_tile(g_ui.sensorTiles[4], "WATER T", derived.available ? format_one_decimal(derived.waterTempC) : "--.-", "C", 0x5AAEFF);
+        refresh_sensor_tile(g_ui.sensorTiles[5], "BATT", derived.available ? format_one_decimal(derived.batteryVolts) : "--.-", "V", 0xF5F7FB);
+
+        set_panel_accent(g_ui.centerPanel, g_state.runtime.shift ? 0xFF5A48 : 0xF5F7FB);
+        set_label_text(g_ui.centerStatus, g_state.runtime.shift ? "SHIFT NOW" : secondary_status_text());
+        set_label_text(g_ui.centerGear, gear_text(g_state.runtime.gear));
+        set_label_text(g_ui.centerRpm, std::to_string(g_state.runtime.rpm));
+        set_label_text(g_ui.centerSpeed, std::to_string(g_state.runtime.speedKmh) + " KM/H");
+        lv_obj_set_style_text_color(g_ui.centerGear, metric_color(UiDisplayFocusMetric::Gear, g_state.runtime.shift), 0);
+        lv_obj_set_style_text_color(g_ui.centerRpm, metric_color(UiDisplayFocusMetric::Rpm, g_state.runtime.shift), 0);
+        lv_obj_set_style_text_color(g_ui.centerSpeed, colorText, 0);
+
+        const int trackWidth = lv_obj_get_width(g_ui.centerBarTrack);
+        const float rpmRatio = std::clamp(static_cast<float>(g_state.runtime.rpm) / 7200.0f, 0.0f, 1.0f);
+        const int fillWidth = std::max(12, static_cast<int>(std::round(rpmRatio * static_cast<float>(trackWidth))));
+        lv_obj_set_width(g_ui.centerBarFill, fillWidth);
+        lv_obj_set_style_bg_color(g_ui.centerBarFill, metric_color(UiDisplayFocusMetric::Rpm, g_state.runtime.shift), 0);
+
+        set_panel_accent(g_ui.lapsPanel, 0xF5F7FB);
+        set_label_text(g_ui.lapsPredicted, derived.available ? format_lap_time(derived.predictedLapMs) : "--:--.---");
+        set_label_text(g_ui.lapsLast, derived.available ? format_lap_time(derived.lastLapMs) : "--:--.---");
+        set_label_text(g_ui.lapsBest, derived.available ? format_lap_time(derived.bestLapMs) : "--:--.---");
+
+        refresh_control_tile(g_ui.controlTiles[0], "TC", derived.available ? std::to_string(derived.tractionControl) : "0", 0x5AAEFF);
+        refresh_control_tile(g_ui.controlTiles[1], "TC CUT", derived.available ? std::to_string(derived.tractionCut) : "0", 0x33B5FF);
+        refresh_control_tile(g_ui.controlTiles[2], "ABS", derived.available ? std::to_string(derived.absLevel) : "0", 0xFFD74A);
+        refresh_control_tile(g_ui.controlTiles[3], "BB", derived.available ? format_one_decimal(derived.brakeBias) : "0.0", 0xFF6A38);
+        refresh_control_tile(g_ui.controlTiles[4], "MAP", derived.available ? std::to_string(derived.engineMap) : "0", 0x7BFF4C);
+
+        set_panel_accent(g_ui.fuelPanel, 0xF5F7FB);
+        set_label_text(g_ui.fuelStats[0].value, derived.available ? format_one_decimal(derived.fuelLiters) : "0.0");
+        set_label_text(g_ui.fuelStats[1].value, derived.available ? format_two_decimals(derived.fuelAvgPerLap) : "0.00");
+        set_label_text(g_ui.fuelStats[2].value, derived.available ? format_one_decimal(derived.fuelLapsRemaining) : "0.0");
+
+        set_label_text(g_ui.footerHint, "Center = Focus   |   Left box = Source   |   Right box = Web");
+        refresh_home_selection();
+    }
+
+    void refresh_focus_overlay()
+    {
+        const bool visible = g_state.activeScreen == UiScreenId::Focus;
+        if (!g_ui.focusOverlay)
+        {
+            return;
+        }
+
+        if (visible)
+        {
+            lv_obj_clear_flag(g_ui.focusOverlay, LV_OBJ_FLAG_HIDDEN);
+            const UiDisplayFocusMetric metric = g_state.runtime.settings.displayFocus;
+            set_label_text(g_ui.focusStatus, source_status_value());
+            set_label_text(g_ui.focusValue, metric_value(metric));
+            set_label_text(g_ui.focusUnit, metric_unit(metric));
+            set_label_text(g_ui.focusMeta, secondary_status_text());
+            lv_obj_set_style_text_color(g_ui.focusValue, metric_color(metric, g_state.runtime.shift), 0);
+        }
+        else
+        {
+            lv_obj_add_flag(g_ui.focusOverlay, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    void refresh_source_overlay()
+    {
+        const bool visible = g_state.activeScreen == UiScreenId::SourcePicker;
+        if (!g_ui.sourceOverlay)
+        {
+            return;
+        }
+
+        if (!visible)
+        {
+            lv_obj_add_flag(g_ui.sourceOverlay, LV_OBJ_FLAG_HIDDEN);
+            return;
+        }
+
+        lv_obj_clear_flag(g_ui.sourceOverlay, LV_OBJ_FLAG_HIDDEN);
+        set_label_text(g_ui.sourcePickerSubtitle, source_status_meta());
+        set_label_text(g_ui.sourceHint, "Left / Right cycles  |  Tap a tile to save");
+
+        for (int i = 0; i < 3; ++i)
+        {
+            ButtonRef &option = g_ui.sourceOptions[static_cast<size_t>(i)];
+            const bool selected = i == static_cast<int>(g_state.runtime.settings.telemetryPreference);
+            lv_label_set_text(option.label, telemetry_preference_text(static_cast<UiTelemetryPreference>(i)).c_str());
+            const uint32_t accent = i == 0 ? 0xF5F7FB : (i == 1 ? 0x56F28C : 0xD477FF);
+            set_panel_accent(option.button, selected ? accent : 0x394252);
+            set_selected_outline(option.button, selected);
+            lv_obj_set_style_text_color(option.label, selected ? lv_color_hex(accent) : colorText, 0);
+        }
+    }
+
+    void refresh_web_overlay()
+    {
+        const bool visible = g_state.activeScreen == UiScreenId::WebLink;
+        if (!g_ui.webOverlay)
+        {
+            return;
+        }
+
+        if (!visible)
+        {
+            lv_obj_add_flag(g_ui.webOverlay, LV_OBJ_FLAG_HIDDEN);
+            return;
+        }
+
+        lv_obj_clear_flag(g_ui.webOverlay, LV_OBJ_FLAG_HIDDEN);
+        const std::string url = build_web_url(g_state.webTarget);
+        set_label_text(g_ui.webTitle, web_title(g_state.webTarget));
+        set_label_text(g_ui.webSubtitle, web_subtitle(g_state.webTarget));
+        set_label_text(g_ui.webUrl, url);
+        set_label_text(g_ui.webHint, "Left / Right switches target  |  Back returns home");
+#if LV_USE_QRCODE
+        if (g_ui.webQr)
+        {
+            lv_qrcode_update(g_ui.webQr, url.c_str(), url.size());
+        }
+#endif
+    }
+
+    void refresh_logo_overlay()
+    {
+        if (!g_ui.logoOverlay)
+        {
+            return;
+        }
+
+        if (g_state.logoUntilMs > now_ms())
+        {
+            lv_obj_clear_flag(g_ui.logoOverlay, LV_OBJ_FLAG_HIDDEN);
+            set_panel_accent(g_ui.logoCard, g_state.overlayAccent);
+            set_label_text(g_ui.logoLabel, g_state.overlayTitle);
+            set_label_text(g_ui.logoSubtitle, g_state.overlaySubtitle);
+            if (g_state.overlaySubtitle.empty())
+            {
+                lv_obj_add_flag(g_ui.logoSubtitle, LV_OBJ_FLAG_HIDDEN);
+            }
+            else
+            {
+                lv_obj_clear_flag(g_ui.logoSubtitle, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+        else
+        {
+            lv_obj_add_flag(g_ui.logoOverlay, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
+    void refresh_view()
+    {
+        refresh_shift_strip();
+        if (compact_mode())
+        {
+            refresh_home_compact();
+        }
+        else
+        {
+            refresh_home_landscape();
+        }
+        refresh_focus_overlay();
+        refresh_source_overlay();
+        refresh_web_overlay();
+        refresh_logo_overlay();
+    }
+
+    void on_home_action(lv_event_t *e)
     {
         const int index = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
-        const UiDisplayFocusMetric metric = index == 0 ? UiDisplayFocusMetric::Gear : UiDisplayFocusMetric::Speed;
-        show_focus(metric);
-    }
-
-    void on_hero_click(lv_event_t *e)
-    {
-        LV_UNUSED(e);
-        show_focus(g_state.runtime.settings.displayFocus);
-    }
-
-    void on_back_home(lv_event_t *e)
-    {
-        LV_UNUSED(e);
-        show_home();
+        set_selected_action(index);
+        open_selected_action();
+        refresh_view();
     }
 
     void on_focus_click(lv_event_t *e)
     {
         LV_UNUSED(e);
-        const uint32_t now = now_ms();
-        if (now - g_state.lastFocusTapMs <= kDoubleTapWindowMs)
-        {
-            g_state.lastFocusTapMs = 0;
-            show_home();
-            return;
-        }
-        g_state.lastFocusTapMs = now;
+        show_home();
+        refresh_view();
     }
 
     void on_focus_gesture(lv_event_t *e)
     {
-        if (lv_event_get_code(e) != LV_EVENT_GESTURE)
+        LV_UNUSED(e);
+        const int delta = gesture_delta();
+        if (delta != 0)
         {
-            return;
-        }
-        lv_indev_t *indev = lv_indev_get_act();
-        if (!indev)
-        {
-            return;
-        }
-        const lv_dir_t dir = lv_indev_get_gesture_dir(indev);
-        if (dir == LV_DIR_LEFT)
-        {
-            cycle_focus_metric(1);
-        }
-        else if (dir == LV_DIR_RIGHT)
-        {
-            cycle_focus_metric(-1);
-        }
-        refresh_view();
-    }
-
-    void on_picker_gesture(lv_event_t *e)
-    {
-        if (lv_event_get_code(e) != LV_EVENT_GESTURE)
-        {
-            return;
-        }
-        lv_indev_t *indev = lv_indev_get_act();
-        if (!indev)
-        {
-            return;
-        }
-        const lv_dir_t dir = lv_indev_get_gesture_dir(indev);
-        if (dir == LV_DIR_LEFT)
-        {
-            handle_picker_swipe(true);
-        }
-        else if (dir == LV_DIR_RIGHT)
-        {
-            handle_picker_swipe(false);
+            cycle_display_focus(delta);
+            refresh_view();
         }
     }
 
-    void on_picker_option(lv_event_t *e)
-    {
-        const int index = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
-        if (g_state.activeScreen == UiScreenId::DisplayPicker)
-        {
-            set_display_focus(static_cast<UiDisplayFocusMetric>(index));
-        }
-        else
-        {
-            set_telemetry_preference(static_cast<UiTelemetryPreference>(index));
-        }
-        refresh_view();
-    }
-
-    void on_picker_web(lv_event_t *e)
+    void on_source_back(lv_event_t *e)
     {
         LV_UNUSED(e);
-        show_web_link(g_state.activeScreen == UiScreenId::DisplayPicker ? WebTarget::Display : WebTarget::Telemetry, g_state.activeScreen);
+        show_home();
+        refresh_view();
+    }
+
+    void on_source_gesture(lv_event_t *e)
+    {
+        LV_UNUSED(e);
+        const int delta = gesture_delta();
+        if (delta != 0)
+        {
+            cycle_telemetry_preference(delta);
+            refresh_view();
+        }
+    }
+
+    void on_source_option(lv_event_t *e)
+    {
+        const int index = static_cast<int>(reinterpret_cast<intptr_t>(lv_event_get_user_data(e)));
+        set_telemetry_preference(static_cast<UiTelemetryPreference>(index));
+        show_home();
+        refresh_view();
     }
 
     void on_web_back(lv_event_t *e)
     {
         LV_UNUSED(e);
-        if (g_state.webReturnScreen == UiScreenId::DisplayPicker)
-        {
-            show_display_picker();
-        }
-        else if (g_state.webReturnScreen == UiScreenId::SourcePicker)
+        if (g_state.webReturnScreen == UiScreenId::SourcePicker)
         {
             show_source_picker();
         }
@@ -1107,257 +1346,409 @@ namespace
         {
             show_home();
         }
+        refresh_view();
     }
 
-    void build_home_layer()
+    void on_web_gesture(lv_event_t *e)
     {
-        g_ui.homeLayer = lv_obj_create(g_ui.root);
-        lv_obj_remove_style_all(g_ui.homeLayer);
-        lv_obj_set_size(g_ui.homeLayer, LV_PCT(100), LV_PCT(100));
-        lv_obj_clear_flag(g_ui.homeLayer, LV_OBJ_FLAG_SCROLLABLE);
+        LV_UNUSED(e);
+        const int delta = gesture_delta();
+        if (delta != 0)
+        {
+            cycle_web_target(delta);
+            refresh_view();
+        }
+    }
 
-        g_ui.statusChip = lv_obj_create(g_ui.homeLayer);
-        lv_obj_remove_style_all(g_ui.statusChip);
-        lv_obj_add_style(g_ui.statusChip, &stylePill, 0);
-        lv_obj_set_size(g_ui.statusChip, 168, 38);
-        lv_obj_align(g_ui.statusChip, LV_ALIGN_TOP_LEFT, 14, 14);
-        lv_obj_clear_flag(g_ui.statusChip, LV_OBJ_FLAG_SCROLLABLE);
+    void build_shift_strip()
+    {
+        const int margin = compact_mode() ? 14 : 28;
+        const int gap = compact_mode() ? 4 : 8;
+        const int segmentHeight = compact_mode() ? 10 : 12;
+        const int availableWidth = g_ui.width - margin * 2 - gap * (kShiftSegmentCount - 1);
+        const int segmentWidth = std::max(10, availableWidth / kShiftSegmentCount);
+        const int y = compact_mode() ? 10 : 12;
 
-        g_ui.statusChipLabel = lv_label_create(g_ui.statusChip);
-        lv_obj_set_style_text_font(g_ui.statusChipLabel, &lv_font_montserrat_16, 0);
-        lv_obj_set_style_text_color(g_ui.statusChipLabel, color_text, 0);
-        lv_obj_center(g_ui.statusChipLabel);
+        for (int i = 0; i < kShiftSegmentCount; ++i)
+        {
+            lv_obj_t *segment = lv_obj_create(g_ui.homeLayer);
+            lv_obj_remove_style_all(segment);
+            lv_obj_set_size(segment, segmentWidth, segmentHeight);
+            lv_obj_set_pos(segment, margin + i * (segmentWidth + gap), y);
+            lv_obj_set_style_bg_color(segment, lv_color_hex(0x1B1F27), 0);
+            lv_obj_set_style_bg_opa(segment, LV_OPA_50, 0);
+            lv_obj_set_style_radius(segment, 3, 0);
+            lv_obj_set_style_border_width(segment, 1, 0);
+            lv_obj_set_style_border_color(segment, colorWhiteLine, 0);
+            lv_obj_set_style_border_opa(segment, LV_OPA_10, 0);
+            lv_obj_clear_flag(segment, LV_OBJ_FLAG_SCROLLABLE);
+            g_ui.shiftSegments[static_cast<size_t>(i)] = segment;
+        }
+    }
 
-        g_ui.iconPrimary = lv_label_create(g_ui.homeLayer);
-        lv_obj_set_style_text_font(g_ui.iconPrimary, &lv_font_montserrat_24, 0);
-        lv_obj_align(g_ui.iconPrimary, LV_ALIGN_TOP_RIGHT, -58, 18);
+    void build_landscape_home()
+    {
+        g_ui.sourcePanel = make_panel(g_ui.homeLayer, 16, 14, 248, 64);
+        lv_obj_add_event_cb(g_ui.sourcePanel, on_home_action, LV_EVENT_CLICKED, reinterpret_cast<void *>(static_cast<intptr_t>(1)));
+        lv_obj_add_flag(g_ui.sourcePanel, LV_OBJ_FLAG_CLICKABLE);
+        g_ui.sourceTitle = make_text(g_ui.sourcePanel, &lv_font_montserrat_16, colorMuted);
+        lv_label_set_text(g_ui.sourceTitle, "");
+        lv_obj_align(g_ui.sourceTitle, LV_ALIGN_TOP_RIGHT, 0, 0);
+        g_ui.sourceValue = make_text(g_ui.sourcePanel, &lv_font_montserrat_24, colorText);
+        lv_obj_set_width(g_ui.sourceValue, 224);
+        lv_label_set_long_mode(g_ui.sourceValue, LV_LABEL_LONG_DOT);
+        lv_obj_align(g_ui.sourceValue, LV_ALIGN_BOTTOM_LEFT, 0, 2);
+        g_ui.sourceMeta = make_text(g_ui.sourcePanel, &lv_font_montserrat_16, colorMuted);
+        lv_obj_set_width(g_ui.sourceMeta, 224);
+        lv_label_set_long_mode(g_ui.sourceMeta, LV_LABEL_LONG_DOT);
+        lv_obj_align(g_ui.sourceMeta, LV_ALIGN_TOP_LEFT, 0, 0);
 
-        g_ui.iconSecondary = lv_label_create(g_ui.homeLayer);
-        lv_obj_set_style_text_font(g_ui.iconSecondary, &lv_font_montserrat_24, 0);
-        lv_obj_align(g_ui.iconSecondary, LV_ALIGN_TOP_RIGHT, -18, 18);
+        g_ui.deltaPanel = make_panel(g_ui.homeLayer, (g_ui.width - 168) / 2, 18, 168, 52);
+        g_ui.deltaValue = make_text(g_ui.deltaPanel, &lv_font_montserrat_24, colorBg, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.deltaValue, 152);
+        lv_obj_align(g_ui.deltaValue, LV_ALIGN_TOP_MID, 0, -2);
+        g_ui.deltaCaption = make_text(g_ui.deltaPanel, &lv_font_montserrat_16, colorBg, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.deltaCaption, 152);
+        lv_label_set_text(g_ui.deltaCaption, "");
+        lv_obj_align(g_ui.deltaCaption, LV_ALIGN_BOTTOM_MID, 0, -2);
+        lv_obj_set_style_bg_color(g_ui.deltaPanel, colorYellow, 0);
+        lv_obj_set_style_bg_grad_color(g_ui.deltaPanel, lv_color_hex(0xFFEE88), 0);
 
-        g_ui.heroCard = make_panel(g_ui.homeLayer, 12, 60, 256, 212, true);
-        lv_obj_add_event_cb(g_ui.heroCard, on_hero_click, LV_EVENT_CLICKED, nullptr);
+        g_ui.sessionPanel = make_panel(g_ui.homeLayer, g_ui.width - 336, 14, 320, 64);
+        lv_obj_add_event_cb(g_ui.sessionPanel, on_home_action, LV_EVENT_CLICKED, reinterpret_cast<void *>(static_cast<intptr_t>(2)));
+        lv_obj_add_flag(g_ui.sessionPanel, LV_OBJ_FLAG_CLICKABLE);
+        for (int i = 0; i < 3; ++i)
+        {
+            const int x = 10 + i * 100;
+            g_ui.sessionStats[static_cast<size_t>(i)].value = make_text(g_ui.sessionPanel, &lv_font_montserrat_24, colorText, LV_TEXT_ALIGN_CENTER);
+            lv_obj_set_width(g_ui.sessionStats[static_cast<size_t>(i)].value, 88);
+            lv_obj_set_pos(g_ui.sessionStats[static_cast<size_t>(i)].value, x, 4);
+            g_ui.sessionStats[static_cast<size_t>(i)].caption = make_text(g_ui.sessionPanel, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_CENTER);
+            lv_obj_set_width(g_ui.sessionStats[static_cast<size_t>(i)].caption, 88);
+            lv_obj_set_pos(g_ui.sessionStats[static_cast<size_t>(i)].caption, x, 30);
+        }
+        lv_label_set_text(g_ui.sessionStats[0].caption, "TIME");
+        lv_label_set_text(g_ui.sessionStats[1].caption, "POS");
+        lv_label_set_text(g_ui.sessionStats[2].caption, "LAP");
 
-        g_ui.heroKicker = lv_label_create(g_ui.heroCard);
-        lv_obj_set_style_text_font(g_ui.heroKicker, &lv_font_montserrat_16, 0);
-        lv_obj_add_style(g_ui.heroKicker, &styleMuted, 0);
-        lv_obj_align(g_ui.heroKicker, LV_ALIGN_TOP_LEFT, 0, 2);
+        g_ui.sensorPanel = make_panel(g_ui.homeLayer, 16, 104, 248, 186);
+        int tileIndex = 0;
+        for (int row = 0; row < 3; ++row)
+        {
+            for (int col = 0; col < 2; ++col)
+            {
+                const int x = 8 + col * 114;
+                const int y = 8 + row * 58;
+                g_ui.sensorTiles[static_cast<size_t>(tileIndex++)] = make_value_tile(g_ui.sensorPanel, x, y, 106, 50, "", 0xF5F7FB, &lv_font_montserrat_24);
+            }
+        }
 
-        g_ui.heroValue = lv_label_create(g_ui.heroCard);
-        lv_obj_set_style_text_font(g_ui.heroValue, &lv_font_montserrat_48, 0);
-        lv_obj_align(g_ui.heroValue, LV_ALIGN_TOP_LEFT, 0, 48);
+        g_ui.centerPanel = make_panel(g_ui.homeLayer, 280, 104, 168, 186);
+        lv_obj_add_event_cb(g_ui.centerPanel, on_home_action, LV_EVENT_CLICKED, reinterpret_cast<void *>(static_cast<intptr_t>(0)));
+        lv_obj_add_flag(g_ui.centerPanel, LV_OBJ_FLAG_CLICKABLE);
+        g_ui.homeActionTargets[0] = g_ui.centerPanel;
+        g_ui.homeActionTargets[1] = g_ui.sourcePanel;
+        g_ui.homeActionTargets[2] = g_ui.sessionPanel;
 
-        g_ui.heroUnit = lv_label_create(g_ui.heroCard);
-        lv_obj_set_style_text_font(g_ui.heroUnit, &lv_font_montserrat_24, 0);
-        lv_obj_align(g_ui.heroUnit, LV_ALIGN_TOP_LEFT, 0, 102);
+        g_ui.centerStatus = make_text(g_ui.centerPanel, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.centerStatus, 152);
+        lv_obj_align(g_ui.centerStatus, LV_ALIGN_TOP_MID, 0, 4);
 
-        g_ui.heroMeta = lv_label_create(g_ui.heroCard);
-        lv_obj_set_width(g_ui.heroMeta, 226);
-        lv_label_set_long_mode(g_ui.heroMeta, LV_LABEL_LONG_WRAP);
-        lv_obj_set_style_text_font(g_ui.heroMeta, &lv_font_montserrat_16, 0);
-        lv_obj_add_style(g_ui.heroMeta, &styleMuted, 0);
-        lv_obj_align(g_ui.heroMeta, LV_ALIGN_TOP_LEFT, 0, 134);
+        g_ui.centerGear = make_text(g_ui.centerPanel, &lv_font_montserrat_48, colorText, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.centerGear, 152);
+        lv_obj_align(g_ui.centerGear, LV_ALIGN_TOP_MID, 0, 28);
 
-        g_ui.heroBadges[0] = make_button(g_ui.homeLayer, 74, 42, "G N", on_focus_badge, reinterpret_cast<void *>(static_cast<intptr_t>(0)));
-        lv_obj_add_style(g_ui.heroBadges[0].button, &styleBadge, 0);
-        lv_obj_align(g_ui.heroBadges[0].button, LV_ALIGN_TOP_LEFT, 16, 286);
+        g_ui.centerRpm = make_text(g_ui.centerPanel, &lv_font_montserrat_32, colorYellow, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.centerRpm, 152);
+        lv_obj_align(g_ui.centerRpm, LV_ALIGN_TOP_MID, 0, 92);
 
-        g_ui.heroBadges[1] = make_button(g_ui.homeLayer, 110, 42, "0 km/h", on_focus_badge, reinterpret_cast<void *>(static_cast<intptr_t>(1)));
-        lv_obj_add_style(g_ui.heroBadges[1].button, &styleBadge, 0);
-        lv_obj_align(g_ui.heroBadges[1].button, LV_ALIGN_TOP_LEFT, 96, 286);
+        g_ui.centerSpeed = make_text(g_ui.centerPanel, &lv_font_montserrat_24, colorText, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.centerSpeed, 152);
+        lv_obj_align(g_ui.centerSpeed, LV_ALIGN_TOP_MID, 0, 126);
 
-        g_ui.heroBadges[2] = make_button(g_ui.homeLayer, 72, 42, "Bereit", nullptr, nullptr);
-        lv_obj_add_style(g_ui.heroBadges[2].button, &styleBadge, 0);
-        lv_obj_align(g_ui.heroBadges[2].button, LV_ALIGN_TOP_RIGHT, -16, 286);
+        g_ui.centerBarTrack = make_panel(g_ui.centerPanel, 12, 156, 144, 16);
+        lv_obj_set_style_bg_color(g_ui.centerBarTrack, lv_color_hex(0x1A2029), 0);
+        lv_obj_set_style_bg_grad_color(g_ui.centerBarTrack, lv_color_hex(0x1A2029), 0);
+        lv_obj_set_style_border_opa(g_ui.centerBarTrack, LV_OPA_20, 0);
+        lv_obj_set_style_shadow_width(g_ui.centerBarTrack, 0, 0);
+        g_ui.centerBarFill = lv_obj_create(g_ui.centerBarTrack);
+        lv_obj_remove_style_all(g_ui.centerBarFill);
+        lv_obj_set_size(g_ui.centerBarFill, 12, 12);
+        lv_obj_align(g_ui.centerBarFill, LV_ALIGN_LEFT_MID, 2, 0);
+        lv_obj_set_style_bg_color(g_ui.centerBarFill, colorYellow, 0);
+        lv_obj_set_style_bg_opa(g_ui.centerBarFill, LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(g_ui.centerBarFill, 6, 0);
 
+        g_ui.lapsPanel = make_panel(g_ui.homeLayer, 464, 104, 320, 186);
+        g_ui.lapsTitle = make_text(g_ui.lapsPanel, &lv_font_montserrat_16, colorMuted);
+        lv_label_set_text(g_ui.lapsTitle, "LAP TIMES");
+        lv_obj_align(g_ui.lapsTitle, LV_ALIGN_TOP_LEFT, 0, 0);
+        g_ui.lapsPredicted = make_text(g_ui.lapsPanel, &lv_font_montserrat_48, colorPurple, LV_TEXT_ALIGN_RIGHT);
+        set_single_line_width(g_ui.lapsPredicted, 300);
+        lv_obj_align(g_ui.lapsPredicted, LV_ALIGN_TOP_RIGHT, 0, 12);
+        g_ui.lapsPredictedCaption = make_text(g_ui.lapsPanel, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_RIGHT);
+        set_single_line_width(g_ui.lapsPredictedCaption, 300);
+        lv_label_set_text(g_ui.lapsPredictedCaption, "PREDICTED LAP");
+        lv_obj_align(g_ui.lapsPredictedCaption, LV_ALIGN_TOP_RIGHT, 0, 60);
+        g_ui.lapsLast = make_text(g_ui.lapsPanel, &lv_font_montserrat_32, lv_color_hex(0x7C8594), LV_TEXT_ALIGN_RIGHT);
+        set_single_line_width(g_ui.lapsLast, 300);
+        lv_obj_align(g_ui.lapsLast, LV_ALIGN_TOP_RIGHT, 0, 78);
+        g_ui.lapsLastCaption = make_text(g_ui.lapsPanel, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_RIGHT);
+        set_single_line_width(g_ui.lapsLastCaption, 300);
+        lv_label_set_text(g_ui.lapsLastCaption, "LAST LAP");
+        lv_obj_align(g_ui.lapsLastCaption, LV_ALIGN_TOP_RIGHT, 0, 106);
+        g_ui.lapsBest = make_text(g_ui.lapsPanel, &lv_font_montserrat_32, lv_color_hex(0x7C8594), LV_TEXT_ALIGN_RIGHT);
+        set_single_line_width(g_ui.lapsBest, 300);
+        lv_obj_align(g_ui.lapsBest, LV_ALIGN_TOP_RIGHT, 0, 124);
+        g_ui.lapsBestCaption = make_text(g_ui.lapsPanel, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_RIGHT);
+        set_single_line_width(g_ui.lapsBestCaption, 300);
+        lv_label_set_text(g_ui.lapsBestCaption, "BEST LAP");
+        lv_obj_align(g_ui.lapsBestCaption, LV_ALIGN_TOP_RIGHT, 0, 152);
+
+        const int bottomY = 300;
+        for (int i = 0; i < 5; ++i)
+        {
+            g_ui.controlTiles[static_cast<size_t>(i)] = make_value_tile(g_ui.homeLayer, 16 + i * 88, bottomY, 80, 68, "", 0xF5F7FB, &lv_font_montserrat_24);
+        }
+
+        g_ui.fuelPanel = make_panel(g_ui.homeLayer, 464, bottomY, 320, 68);
+        g_ui.fuelTitle = make_text(g_ui.fuelPanel, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.fuelTitle, 300);
+        lv_label_set_text(g_ui.fuelTitle, "FUEL");
+        lv_obj_align(g_ui.fuelTitle, LV_ALIGN_TOP_MID, 0, 0);
+        for (int i = 0; i < 3; ++i)
+        {
+            const int x = 8 + i * 102;
+            g_ui.fuelStats[static_cast<size_t>(i)].value = make_text(g_ui.fuelPanel, &lv_font_montserrat_24, colorText, LV_TEXT_ALIGN_CENTER);
+            set_single_line_width(g_ui.fuelStats[static_cast<size_t>(i)].value, 96);
+            lv_obj_set_pos(g_ui.fuelStats[static_cast<size_t>(i)].value, x, 18);
+            g_ui.fuelStats[static_cast<size_t>(i)].caption = make_text(g_ui.fuelPanel, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_CENTER);
+            set_single_line_width(g_ui.fuelStats[static_cast<size_t>(i)].caption, 96);
+            lv_obj_set_pos(g_ui.fuelStats[static_cast<size_t>(i)].caption, x, 42);
+        }
+        lv_label_set_text(g_ui.fuelStats[0].caption, "LITERS");
+        lv_label_set_text(g_ui.fuelStats[1].caption, "AVG");
+        lv_label_set_text(g_ui.fuelStats[2].caption, "LAPS");
+
+        g_ui.footerHint = make_text(g_ui.homeLayer, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.footerHint, g_ui.width - 32);
+        lv_obj_align(g_ui.footerHint, LV_ALIGN_BOTTOM_MID, 0, -8);
+    }
+
+    void build_compact_home()
+    {
+        g_ui.compactStatusPanel = make_panel(g_ui.homeLayer, 12, 32, g_ui.width - 24, 46);
+        g_ui.compactStatusTitle = make_text(g_ui.compactStatusPanel, &lv_font_montserrat_16, colorMuted);
+        lv_label_set_text(g_ui.compactStatusTitle, "SOURCE");
+        lv_obj_align(g_ui.compactStatusTitle, LV_ALIGN_TOP_LEFT, 0, 0);
+        g_ui.compactStatusValue = make_text(g_ui.compactStatusPanel, &lv_font_montserrat_24, colorText);
+        lv_obj_align(g_ui.compactStatusValue, LV_ALIGN_TOP_LEFT, 0, 16);
+
+        g_ui.compactSessionPanel = make_panel(g_ui.homeLayer, 12, 84, g_ui.width - 24, 42);
+        g_ui.compactSessionTitle = make_text(g_ui.compactSessionPanel, &lv_font_montserrat_16, colorMuted);
+        lv_label_set_text(g_ui.compactSessionTitle, "STATUS");
+        lv_obj_align(g_ui.compactSessionTitle, LV_ALIGN_TOP_LEFT, 0, 0);
+        g_ui.compactSessionValue = make_text(g_ui.compactSessionPanel, &lv_font_montserrat_16, colorText);
+        lv_obj_set_width(g_ui.compactSessionValue, g_ui.width - 48);
+        lv_label_set_long_mode(g_ui.compactSessionValue, LV_LABEL_LONG_WRAP);
+        lv_obj_align(g_ui.compactSessionValue, LV_ALIGN_TOP_LEFT, 0, 16);
+
+        g_ui.compactHero = make_panel(g_ui.homeLayer, 12, 132, g_ui.width - 24, 172);
+        lv_obj_add_event_cb(g_ui.compactHero, on_home_action, LV_EVENT_CLICKED, reinterpret_cast<void *>(static_cast<intptr_t>(0)));
+        lv_obj_add_flag(g_ui.compactHero, LV_OBJ_FLAG_CLICKABLE);
+        g_ui.compactHeroTitle = make_text(g_ui.compactHero, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.compactHeroTitle, g_ui.width - 48);
+        lv_obj_align(g_ui.compactHeroTitle, LV_ALIGN_TOP_MID, 0, 2);
+        g_ui.compactHeroValue = make_text(g_ui.compactHero, &lv_font_montserrat_48, colorYellow, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.compactHeroValue, g_ui.width - 48);
+        lv_obj_align(g_ui.compactHeroValue, LV_ALIGN_TOP_MID, 0, 34);
+        g_ui.compactHeroUnit = make_text(g_ui.compactHero, &lv_font_montserrat_24, colorText, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.compactHeroUnit, g_ui.width - 48);
+        lv_obj_align(g_ui.compactHeroUnit, LV_ALIGN_TOP_MID, 0, 96);
+        g_ui.compactHeroMeta = make_text(g_ui.compactHero, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.compactHeroMeta, g_ui.width - 48);
+        lv_label_set_long_mode(g_ui.compactHeroMeta, LV_LABEL_LONG_WRAP);
+        lv_obj_align(g_ui.compactHeroMeta, LV_ALIGN_BOTTOM_MID, 0, -6);
+
+        g_ui.compactTiles[0] = make_value_tile(g_ui.homeLayer, 12, 312, (g_ui.width - 32) / 3, 62, "", 0xF5F7FB, &lv_font_montserrat_32);
+        g_ui.compactTiles[1] = make_value_tile(g_ui.homeLayer, 16 + (g_ui.width - 32) / 3, 312, (g_ui.width - 32) / 3, 62, "", 0x5AAEFF, &lv_font_montserrat_32);
+        g_ui.compactTiles[2] = make_value_tile(g_ui.homeLayer, 20 + 2 * ((g_ui.width - 32) / 3), 312, (g_ui.width - 32) / 3, 62, "", 0x56F28C, &lv_font_montserrat_32);
+
+        const int buttonY = g_ui.height - 72;
+        const int buttonWidth = (g_ui.width - 40) / 3;
         for (int i = 0; i < kActionCount; ++i)
         {
-            g_ui.actionButtons[static_cast<size_t>(i)] = make_button(g_ui.homeLayer, 76, 48, action_label(static_cast<HomeAction>(i)).c_str(), on_home_action, reinterpret_cast<void *>(static_cast<intptr_t>(i)));
-            lv_obj_align(g_ui.actionButtons[static_cast<size_t>(i)].button, LV_ALIGN_TOP_LEFT, 16 + i * 86, 344);
+            g_ui.actionButtons[static_cast<size_t>(i)] =
+                make_button(g_ui.homeLayer,
+                            12 + i * (buttonWidth + 8),
+                            buttonY,
+                            buttonWidth,
+                            44,
+                            action_label(static_cast<HomeAction>(i)).c_str(),
+                            on_home_action,
+                            reinterpret_cast<void *>(static_cast<intptr_t>(i)));
         }
 
-        g_ui.homeHint = lv_label_create(g_ui.homeLayer);
-        lv_obj_set_width(g_ui.homeHint, 248);
-        lv_label_set_long_mode(g_ui.homeHint, LV_LABEL_LONG_WRAP);
-        lv_obj_set_style_text_font(g_ui.homeHint, &lv_font_montserrat_16, 0);
-        lv_obj_add_style(g_ui.homeHint, &styleMuted, 0);
-        lv_label_set_text(g_ui.homeHint, "Tippen = Vollbild | Wischen = wechseln");
-        lv_obj_align(g_ui.homeHint, LV_ALIGN_BOTTOM_LEFT, 16, -14);
+        g_ui.footerHint = make_text(g_ui.homeLayer, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.footerHint, g_ui.width - 24);
+        lv_obj_align(g_ui.footerHint, LV_ALIGN_BOTTOM_MID, 0, -8);
     }
 
-    void build_focus_layer()
+    void build_focus_overlay()
     {
-        g_ui.focusLayer = lv_obj_create(g_ui.root);
-        lv_obj_remove_style_all(g_ui.focusLayer);
-        lv_obj_set_size(g_ui.focusLayer, LV_PCT(100), LV_PCT(100));
-        lv_obj_clear_flag(g_ui.focusLayer, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_add_flag(g_ui.focusLayer, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_event_cb(g_ui.focusLayer, on_focus_click, LV_EVENT_CLICKED, nullptr);
-        lv_obj_add_event_cb(g_ui.focusLayer, on_focus_gesture, LV_EVENT_GESTURE, nullptr);
+        g_ui.focusOverlay = lv_obj_create(g_ui.root);
+        lv_obj_remove_style_all(g_ui.focusOverlay);
+        lv_obj_add_style(g_ui.focusOverlay, &styleOverlay, 0);
+        lv_obj_set_size(g_ui.focusOverlay, LV_PCT(100), LV_PCT(100));
+        lv_obj_clear_flag(g_ui.focusOverlay, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(g_ui.focusOverlay, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_event_cb(g_ui.focusOverlay, on_focus_click, LV_EVENT_CLICKED, nullptr);
+        lv_obj_add_event_cb(g_ui.focusOverlay, on_focus_gesture, LV_EVENT_GESTURE, nullptr);
 
-        g_ui.focusStatus = lv_label_create(g_ui.focusLayer);
-        lv_obj_set_style_text_font(g_ui.focusStatus, &lv_font_montserrat_16, 0);
-        lv_obj_add_style(g_ui.focusStatus, &styleMuted, 0);
-        lv_obj_align(g_ui.focusStatus, LV_ALIGN_TOP_MID, 0, 22);
+        const int cardW = compact_mode() ? g_ui.width - 24 : std::min(520, g_ui.width - 80);
+        const int cardH = compact_mode() ? g_ui.height - 42 : std::min(250, g_ui.height - 90);
+        g_ui.focusCard = lv_obj_create(g_ui.focusOverlay);
+        lv_obj_remove_style_all(g_ui.focusCard);
+        lv_obj_add_style(g_ui.focusCard, &styleOverlayCard, 0);
+        lv_obj_set_size(g_ui.focusCard, cardW, cardH);
+        lv_obj_center(g_ui.focusCard);
 
-        g_ui.focusValue = lv_label_create(g_ui.focusLayer);
-        lv_obj_set_style_text_font(g_ui.focusValue, &lv_font_montserrat_48, 0);
-        lv_obj_align(g_ui.focusValue, LV_ALIGN_CENTER, 0, -28);
+        g_ui.focusStatus = make_text(g_ui.focusCard, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.focusStatus, cardW - 28);
+        lv_obj_align(g_ui.focusStatus, LV_ALIGN_TOP_MID, 0, 8);
 
-        g_ui.focusUnit = lv_label_create(g_ui.focusLayer);
-        lv_obj_set_style_text_font(g_ui.focusUnit, &lv_font_montserrat_24, 0);
+        g_ui.focusValue = make_text(g_ui.focusCard, &lv_font_montserrat_48, colorYellow, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.focusValue, cardW - 28);
+        lv_obj_align(g_ui.focusValue, LV_ALIGN_CENTER, 0, -24);
+
+        g_ui.focusUnit = make_text(g_ui.focusCard, &lv_font_montserrat_24, colorText, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.focusUnit, cardW - 28);
         lv_obj_align(g_ui.focusUnit, LV_ALIGN_CENTER, 0, 28);
 
-        g_ui.focusMeta = lv_label_create(g_ui.focusLayer);
-        lv_obj_set_width(g_ui.focusMeta, 250);
+        g_ui.focusMeta = make_text(g_ui.focusCard, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.focusMeta, cardW - 28);
         lv_label_set_long_mode(g_ui.focusMeta, LV_LABEL_LONG_WRAP);
-        lv_obj_set_style_text_font(g_ui.focusMeta, &lv_font_montserrat_16, 0);
-        lv_obj_add_style(g_ui.focusMeta, &styleMuted, 0);
-        lv_obj_align(g_ui.focusMeta, LV_ALIGN_BOTTOM_MID, 0, -66);
+        lv_obj_align(g_ui.focusMeta, LV_ALIGN_BOTTOM_MID, 0, -34);
 
-        g_ui.focusHint = lv_label_create(g_ui.focusLayer);
-        lv_obj_set_style_text_font(g_ui.focusHint, &lv_font_montserrat_16, 0);
-        lv_obj_add_style(g_ui.focusHint, &styleMuted, 0);
-        lv_label_set_text(g_ui.focusHint, "Doppeltippen schliesst | Wischen wechselt");
-        lv_obj_align(g_ui.focusHint, LV_ALIGN_BOTTOM_MID, 0, -20);
+        g_ui.focusHint = make_text(g_ui.focusCard, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.focusHint, cardW - 28);
+        lv_label_set_text(g_ui.focusHint, "Swipe left / right to change metric  |  Tap to close");
+        lv_obj_align(g_ui.focusHint, LV_ALIGN_BOTTOM_MID, 0, -8);
     }
 
-    void build_picker_layer()
+    void build_source_overlay()
     {
-        g_ui.pickerLayer = lv_obj_create(g_ui.root);
-        lv_obj_remove_style_all(g_ui.pickerLayer);
-        lv_obj_set_size(g_ui.pickerLayer, LV_PCT(100), LV_PCT(100));
-        lv_obj_clear_flag(g_ui.pickerLayer, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_add_flag(g_ui.pickerLayer, LV_OBJ_FLAG_HIDDEN);
+        g_ui.sourceOverlay = lv_obj_create(g_ui.root);
+        lv_obj_remove_style_all(g_ui.sourceOverlay);
+        lv_obj_add_style(g_ui.sourceOverlay, &styleOverlay, 0);
+        lv_obj_set_size(g_ui.sourceOverlay, LV_PCT(100), LV_PCT(100));
+        lv_obj_clear_flag(g_ui.sourceOverlay, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(g_ui.sourceOverlay, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_event_cb(g_ui.sourceOverlay, on_source_gesture, LV_EVENT_GESTURE, nullptr);
 
-        g_ui.pickerBack = make_button(g_ui.pickerLayer, 78, 42, LV_SYMBOL_LEFT " Zur.", on_back_home).button;
-        lv_obj_add_style(g_ui.pickerBack, &styleBackButton, 0);
-        lv_obj_align(g_ui.pickerBack, LV_ALIGN_TOP_LEFT, 12, 12);
+        const int cardW = compact_mode() ? g_ui.width - 24 : std::min(540, g_ui.width - 120);
+        const int cardH = compact_mode() ? 280 : 300;
+        g_ui.sourceCard = lv_obj_create(g_ui.sourceOverlay);
+        lv_obj_remove_style_all(g_ui.sourceCard);
+        lv_obj_add_style(g_ui.sourceCard, &styleOverlayCard, 0);
+        lv_obj_set_size(g_ui.sourceCard, cardW, cardH);
+        lv_obj_center(g_ui.sourceCard);
 
-        g_ui.pickerTitle = lv_label_create(g_ui.pickerLayer);
-        lv_obj_set_style_text_font(g_ui.pickerTitle, &lv_font_montserrat_24, 0);
-        lv_obj_set_style_text_color(g_ui.pickerTitle, color_text, 0);
-        lv_obj_set_width(g_ui.pickerTitle, 248);
-        lv_obj_align(g_ui.pickerTitle, LV_ALIGN_TOP_LEFT, 16, 66);
+        g_ui.sourceBack = make_button(g_ui.sourceCard, 10, 10, 72, 34, "< Back", on_source_back, nullptr).button;
+        set_panel_accent(g_ui.sourceBack, 0x5AAEFF);
 
-        g_ui.pickerSubtitle = lv_label_create(g_ui.pickerLayer);
-        lv_obj_set_width(g_ui.pickerSubtitle, 248);
-        lv_label_set_long_mode(g_ui.pickerSubtitle, LV_LABEL_LONG_WRAP);
-        lv_obj_set_style_text_font(g_ui.pickerSubtitle, &lv_font_montserrat_16, 0);
-        lv_obj_add_style(g_ui.pickerSubtitle, &styleMuted, 0);
-        lv_obj_align(g_ui.pickerSubtitle, LV_ALIGN_TOP_LEFT, 16, 108);
+        g_ui.sourcePickerTitle = make_text(g_ui.sourceCard, &lv_font_montserrat_24, colorText);
+        lv_label_set_text(g_ui.sourcePickerTitle, "Telemetry Source");
+        lv_obj_align(g_ui.sourcePickerTitle, LV_ALIGN_TOP_LEFT, 0, 50);
 
-        g_ui.pickerPreview = make_panel(g_ui.pickerLayer, 16, 154, 248, 148, true);
-        lv_obj_add_event_cb(g_ui.pickerPreview, on_picker_gesture, LV_EVENT_GESTURE, nullptr);
+        g_ui.sourcePickerSubtitle = make_text(g_ui.sourceCard, &lv_font_montserrat_16, colorMuted);
+        lv_obj_set_width(g_ui.sourcePickerSubtitle, cardW - 28);
+        lv_label_set_long_mode(g_ui.sourcePickerSubtitle, LV_LABEL_LONG_WRAP);
+        lv_obj_align(g_ui.sourcePickerSubtitle, LV_ALIGN_TOP_LEFT, 0, 84);
 
-        g_ui.pickerValue = lv_label_create(g_ui.pickerPreview);
-        lv_obj_set_style_text_font(g_ui.pickerValue, &lv_font_montserrat_48, 0);
-        lv_obj_align(g_ui.pickerValue, LV_ALIGN_TOP_MID, 0, 10);
-
-        g_ui.pickerUnit = lv_label_create(g_ui.pickerPreview);
-        lv_obj_set_style_text_font(g_ui.pickerUnit, &lv_font_montserrat_24, 0);
-        lv_obj_align(g_ui.pickerUnit, LV_ALIGN_TOP_MID, 0, 58);
-
-        g_ui.pickerMeta = lv_label_create(g_ui.pickerPreview);
-        lv_obj_set_width(g_ui.pickerMeta, 214);
-        lv_label_set_long_mode(g_ui.pickerMeta, LV_LABEL_LONG_WRAP);
-        lv_obj_set_style_text_font(g_ui.pickerMeta, &lv_font_montserrat_16, 0);
-        lv_obj_add_style(g_ui.pickerMeta, &styleMuted, 0);
-        lv_obj_align(g_ui.pickerMeta, LV_ALIGN_BOTTOM_MID, 0, -10);
-
-        for (int i = 0; i < kPickerOptionCount; ++i)
+        for (int i = 0; i < 3; ++i)
         {
-            g_ui.pickerOptions[static_cast<size_t>(i)] = make_button(g_ui.pickerLayer, 74, 44, "", on_picker_option, reinterpret_cast<void *>(static_cast<intptr_t>(i)));
-            lv_obj_align(g_ui.pickerOptions[static_cast<size_t>(i)].button, LV_ALIGN_TOP_LEFT, 16 + i * 84, 318);
+            g_ui.sourceOptions[static_cast<size_t>(i)] =
+                make_button(g_ui.sourceCard, 16, 128 + i * 48, cardW - 32, 40, "", on_source_option, reinterpret_cast<void *>(static_cast<intptr_t>(i)));
         }
 
-        g_ui.pickerHint = lv_label_create(g_ui.pickerLayer);
-        lv_obj_set_width(g_ui.pickerHint, 248);
-        lv_label_set_long_mode(g_ui.pickerHint, LV_LABEL_LONG_WRAP);
-        lv_obj_set_style_text_font(g_ui.pickerHint, &lv_font_montserrat_16, 0);
-        lv_obj_add_style(g_ui.pickerHint, &styleMuted, 0);
-        lv_obj_align(g_ui.pickerHint, LV_ALIGN_TOP_LEFT, 16, 372);
-
-        ButtonRef webButton = make_button(g_ui.pickerLayer, 164, 46, "Mehr im Web", on_picker_web);
-        g_ui.pickerWebButton = webButton.button;
-        lv_obj_align(g_ui.pickerWebButton, LV_ALIGN_BOTTOM_MID, 0, -14);
+        g_ui.sourceHint = make_text(g_ui.sourceCard, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.sourceHint, cardW - 28);
+        lv_obj_align(g_ui.sourceHint, LV_ALIGN_BOTTOM_MID, 0, -10);
     }
 
-    void build_web_layer()
+    void build_web_overlay()
     {
-        g_ui.webLayer = lv_obj_create(g_ui.root);
-        lv_obj_remove_style_all(g_ui.webLayer);
-        lv_obj_set_size(g_ui.webLayer, LV_PCT(100), LV_PCT(100));
-        lv_obj_clear_flag(g_ui.webLayer, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_add_flag(g_ui.webLayer, LV_OBJ_FLAG_HIDDEN);
+        g_ui.webOverlay = lv_obj_create(g_ui.root);
+        lv_obj_remove_style_all(g_ui.webOverlay);
+        lv_obj_add_style(g_ui.webOverlay, &styleOverlay, 0);
+        lv_obj_set_size(g_ui.webOverlay, LV_PCT(100), LV_PCT(100));
+        lv_obj_clear_flag(g_ui.webOverlay, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(g_ui.webOverlay, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_event_cb(g_ui.webOverlay, on_web_gesture, LV_EVENT_GESTURE, nullptr);
 
-        g_ui.webBack = make_button(g_ui.webLayer, 78, 42, LV_SYMBOL_LEFT " Zur.", on_web_back).button;
-        lv_obj_add_style(g_ui.webBack, &styleBackButton, 0);
-        lv_obj_align(g_ui.webBack, LV_ALIGN_TOP_LEFT, 12, 12);
+        const int cardW = compact_mode() ? g_ui.width - 24 : std::min(580, g_ui.width - 140);
+        const int cardH = compact_mode() ? g_ui.height - 32 : std::min(340, g_ui.height - 80);
+        g_ui.webCard = lv_obj_create(g_ui.webOverlay);
+        lv_obj_remove_style_all(g_ui.webCard);
+        lv_obj_add_style(g_ui.webCard, &styleOverlayCard, 0);
+        lv_obj_set_size(g_ui.webCard, cardW, cardH);
+        lv_obj_center(g_ui.webCard);
 
-        g_ui.webTitle = lv_label_create(g_ui.webLayer);
-        lv_obj_set_style_text_font(g_ui.webTitle, &lv_font_montserrat_24, 0);
-        lv_obj_set_style_text_color(g_ui.webTitle, color_text, 0);
-        lv_obj_set_width(g_ui.webTitle, 248);
-        lv_obj_align(g_ui.webTitle, LV_ALIGN_TOP_LEFT, 16, 66);
+        g_ui.webBack = make_button(g_ui.webCard, 10, 10, 72, 34, "< Back", on_web_back, nullptr).button;
+        set_panel_accent(g_ui.webBack, 0x5AAEFF);
 
-        g_ui.webSubtitle = lv_label_create(g_ui.webLayer);
-        lv_obj_set_width(g_ui.webSubtitle, 248);
+        g_ui.webTitle = make_text(g_ui.webCard, &lv_font_montserrat_24, colorText);
+        lv_obj_align(g_ui.webTitle, LV_ALIGN_TOP_LEFT, 0, 50);
+
+        g_ui.webSubtitle = make_text(g_ui.webCard, &lv_font_montserrat_16, colorMuted);
+        lv_obj_set_width(g_ui.webSubtitle, cardW - 28);
         lv_label_set_long_mode(g_ui.webSubtitle, LV_LABEL_LONG_WRAP);
-        lv_obj_set_style_text_font(g_ui.webSubtitle, &lv_font_montserrat_16, 0);
-        lv_obj_add_style(g_ui.webSubtitle, &styleMuted, 0);
-        lv_obj_align(g_ui.webSubtitle, LV_ALIGN_TOP_LEFT, 16, 108);
+        lv_obj_align(g_ui.webSubtitle, LV_ALIGN_TOP_LEFT, 0, 84);
 
-        lv_obj_t *qrPanel = make_panel(g_ui.webLayer, 44, 154, 192, 192, false);
+        const int qrPanelSize = compact_mode() ? 160 : 180;
+        lv_obj_t *qrPanel = make_panel(g_ui.webCard, (cardW - qrPanelSize) / 2, 130, qrPanelSize, qrPanelSize);
+        set_panel_accent(qrPanel, 0xF5F7FB);
 #if LV_USE_QRCODE
-        g_ui.webQr = lv_qrcode_create(qrPanel, 168, color_text, color_bg);
+        g_ui.webQr = lv_qrcode_create(qrPanel, qrPanelSize - 16, colorText, colorBg);
         lv_obj_center(g_ui.webQr);
 #endif
 
-        g_ui.webUrl = lv_label_create(g_ui.webLayer);
-        lv_obj_set_width(g_ui.webUrl, 248);
+        g_ui.webUrl = make_text(g_ui.webCard, &lv_font_montserrat_16, colorBlue, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.webUrl, cardW - 28);
         lv_label_set_long_mode(g_ui.webUrl, LV_LABEL_LONG_WRAP);
-        lv_obj_set_style_text_font(g_ui.webUrl, &lv_font_montserrat_16, 0);
-        lv_obj_set_style_text_color(g_ui.webUrl, color_cyan, 0);
-        lv_obj_align(g_ui.webUrl, LV_ALIGN_TOP_LEFT, 16, 356);
+        lv_obj_align(g_ui.webUrl, LV_ALIGN_BOTTOM_MID, 0, compact_mode() ? -52 : -42);
 
-        g_ui.webHint = lv_label_create(g_ui.webLayer);
-        lv_obj_set_width(g_ui.webHint, 248);
-        lv_label_set_long_mode(g_ui.webHint, LV_LABEL_LONG_WRAP);
-        lv_obj_set_style_text_font(g_ui.webHint, &lv_font_montserrat_16, 0);
-        lv_obj_add_style(g_ui.webHint, &styleMuted, 0);
-        lv_obj_align(g_ui.webHint, LV_ALIGN_BOTTOM_LEFT, 16, -18);
+        g_ui.webHint = make_text(g_ui.webCard, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.webHint, cardW - 28);
+        lv_obj_align(g_ui.webHint, LV_ALIGN_BOTTOM_MID, 0, -14);
     }
 
     void build_logo_overlay()
     {
         g_ui.logoOverlay = lv_obj_create(g_ui.root);
         lv_obj_remove_style_all(g_ui.logoOverlay);
-        lv_obj_add_style(g_ui.logoOverlay, &styleLogoOverlay, 0);
+        lv_obj_add_style(g_ui.logoOverlay, &styleOverlay, 0);
         lv_obj_set_size(g_ui.logoOverlay, LV_PCT(100), LV_PCT(100));
         lv_obj_clear_flag(g_ui.logoOverlay, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_set_style_border_width(g_ui.logoOverlay, 2, 0);
-        lv_obj_set_style_border_opa(g_ui.logoOverlay, LV_OPA_60, 0);
-        lv_obj_set_style_shadow_width(g_ui.logoOverlay, 28, 0);
-        lv_obj_set_style_shadow_opa(g_ui.logoOverlay, LV_OPA_20, 0);
         lv_obj_add_flag(g_ui.logoOverlay, LV_OBJ_FLAG_HIDDEN);
 
-        g_ui.logoLabel = lv_label_create(g_ui.logoOverlay);
-        lv_label_set_text(g_ui.logoLabel, "ShiftLight");
-        lv_obj_set_style_text_font(g_ui.logoLabel, &lv_font_montserrat_48, 0);
-        lv_obj_set_style_text_color(g_ui.logoLabel, color_text, 0);
-        lv_obj_align(g_ui.logoLabel, LV_ALIGN_CENTER, 0, -18);
+        const int cardW = compact_mode() ? g_ui.width - 36 : 420;
+        const int cardH = compact_mode() ? 160 : 180;
+        g_ui.logoCard = lv_obj_create(g_ui.logoOverlay);
+        lv_obj_remove_style_all(g_ui.logoCard);
+        lv_obj_add_style(g_ui.logoCard, &styleOverlayCard, 0);
+        lv_obj_set_size(g_ui.logoCard, cardW, cardH);
+        lv_obj_center(g_ui.logoCard);
 
-        g_ui.logoSubtitle = lv_label_create(g_ui.logoOverlay);
-        lv_label_set_text(g_ui.logoSubtitle, "");
-        lv_obj_set_width(g_ui.logoSubtitle, 220);
+        g_ui.logoLabel = make_text(g_ui.logoCard, &lv_font_montserrat_48, colorText, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.logoLabel, cardW - 28);
+        lv_obj_align(g_ui.logoLabel, LV_ALIGN_CENTER, 0, -26);
+
+        g_ui.logoSubtitle = make_text(g_ui.logoCard, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_CENTER);
+        lv_obj_set_width(g_ui.logoSubtitle, cardW - 28);
         lv_label_set_long_mode(g_ui.logoSubtitle, LV_LABEL_LONG_WRAP);
-        lv_obj_set_style_text_font(g_ui.logoSubtitle, &lv_font_montserrat_16, 0);
-        lv_obj_set_style_text_color(g_ui.logoSubtitle, color_muted, 0);
-        lv_obj_set_style_text_align(g_ui.logoSubtitle, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_align(g_ui.logoSubtitle, LV_ALIGN_CENTER, 0, 38);
-        lv_obj_add_flag(g_ui.logoSubtitle, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_align(g_ui.logoSubtitle, LV_ALIGN_CENTER, 0, 34);
     }
 
     void build_ui()
@@ -1365,12 +1756,26 @@ namespace
         g_ui.root = lv_obj_create(nullptr);
         lv_obj_remove_style_all(g_ui.root);
         lv_obj_add_style(g_ui.root, &styleScreen, 0);
-        lv_obj_set_size(g_ui.root, 280, 456);
+        lv_obj_set_size(g_ui.root, g_ui.width, g_ui.height);
         lv_obj_clear_flag(g_ui.root, LV_OBJ_FLAG_SCROLLABLE);
-        build_home_layer();
-        build_focus_layer();
-        build_picker_layer();
-        build_web_layer();
+
+        g_ui.homeLayer = lv_obj_create(g_ui.root);
+        lv_obj_remove_style_all(g_ui.homeLayer);
+        lv_obj_set_size(g_ui.homeLayer, LV_PCT(100), LV_PCT(100));
+        lv_obj_clear_flag(g_ui.homeLayer, LV_OBJ_FLAG_SCROLLABLE);
+
+        if (compact_mode())
+        {
+            build_shift_strip();
+            build_compact_home();
+        }
+        else
+        {
+            build_landscape_home();
+        }
+        build_focus_overlay();
+        build_source_overlay();
+        build_web_overlay();
         build_logo_overlay();
     }
 }
@@ -1384,6 +1789,11 @@ void ui_s3_init(lv_disp_t *disp, const UiDisplayHooks &hooks, const UiRuntimeSta
     g_state.runtime = initialState;
     g_state.selectedAction = wrap_index(initialState.settings.lastMenuIndex, kActionCount);
     g_state.fullscreenMetric = initialState.settings.displayFocus;
+
+    g_ui.width = disp ? lv_disp_get_hor_res(disp) : 800;
+    g_ui.height = disp ? lv_disp_get_ver_res(disp) : 400;
+    g_ui.compact = g_ui.width < 600 || g_ui.height > g_ui.width;
+
     apply_styles();
     build_ui();
     refresh_view();
@@ -1413,7 +1823,7 @@ void ui_s3_show_logo()
 {
     g_state.overlayTitle = "ShiftLight";
     g_state.overlaySubtitle.clear();
-    g_state.overlayAccent = 0x4FCBFF;
+    g_state.overlayAccent = 0x5AAEFF;
     g_state.logoUntilMs = now_ms() + kLogoDurationMs;
     refresh_view();
 }
@@ -1436,17 +1846,13 @@ void ui_s3_debug_dispatch(UiDebugAction action)
         {
             set_selected_action(g_state.selectedAction - 1);
         }
-        else if (g_state.activeScreen == UiScreenId::DisplayPicker)
+        else if (g_state.activeScreen == UiScreenId::Focus)
         {
             cycle_display_focus(-1);
         }
         else if (g_state.activeScreen == UiScreenId::SourcePicker)
         {
             cycle_telemetry_preference(-1);
-        }
-        else if (g_state.activeScreen == UiScreenId::Focus)
-        {
-            cycle_focus_metric(-1);
         }
         else if (g_state.activeScreen == UiScreenId::WebLink)
         {
@@ -1458,17 +1864,13 @@ void ui_s3_debug_dispatch(UiDebugAction action)
         {
             set_selected_action(g_state.selectedAction + 1);
         }
-        else if (g_state.activeScreen == UiScreenId::DisplayPicker)
+        else if (g_state.activeScreen == UiScreenId::Focus)
         {
             cycle_display_focus(1);
         }
         else if (g_state.activeScreen == UiScreenId::SourcePicker)
         {
             cycle_telemetry_preference(1);
-        }
-        else if (g_state.activeScreen == UiScreenId::Focus)
-        {
-            cycle_focus_metric(1);
         }
         else if (g_state.activeScreen == UiScreenId::WebLink)
         {
@@ -1478,27 +1880,7 @@ void ui_s3_debug_dispatch(UiDebugAction action)
     case UiDebugAction::OpenSelectedCard:
         if (g_state.activeScreen == UiScreenId::Home)
         {
-            switch (static_cast<HomeAction>(wrap_index(g_state.selectedAction, kActionCount)))
-            {
-            case HomeAction::Display:
-                show_display_picker();
-                break;
-            case HomeAction::Source:
-                show_source_picker();
-                break;
-            case HomeAction::Web:
-            default:
-                show_web_link(WebTarget::Overview, UiScreenId::Home);
-                break;
-            }
-        }
-        else if (g_state.activeScreen == UiScreenId::DisplayPicker)
-        {
-            show_web_link(WebTarget::Display, UiScreenId::DisplayPicker);
-        }
-        else if (g_state.activeScreen == UiScreenId::SourcePicker)
-        {
-            show_web_link(WebTarget::Telemetry, UiScreenId::SourcePicker);
+            open_selected_action();
         }
         else
         {

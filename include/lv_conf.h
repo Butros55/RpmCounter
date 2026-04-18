@@ -10,7 +10,7 @@
 
 #include <stdint.h>
 
-#define LV_HOR_RES_MAX (280)
+#define LV_HOR_RES_MAX (800)
 #define LV_VER_RES_MAX (456)
 
 #define LV_COLOR_DEPTH 16
@@ -18,7 +18,7 @@
 #define LV_COLOR_SCREEN_TRANSP 0
 
 #define LV_MEM_CUSTOM 0
-#define LV_MEM_SIZE (48U * 1024U)
+#define LV_MEM_SIZE (96U * 1024U)
 #define LV_MEM_ADR 0
 
 #define LV_DISP_DEF_REFR_PERIOD 30

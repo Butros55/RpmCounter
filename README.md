@@ -167,27 +167,88 @@ Expected result:
 ### Quick start on Windows
 
 ```powershell
+.\run_simulator.cmd
+```
+
+Alternativ direkt:
+
+```powershell
+.\simulator\run_simulator.cmd
 .\simulator\run_simulator.ps1
+```
+
+This now starts the desktop UI in the new `800x400` landscape format in `Auto` mode by default: the simulator prefers live SimHub data and falls back to the internal telemetry until SimHub becomes live.
+
+The launcher now prefers the repo-local LLVM-MinGW toolchain under `.tools\llvm-mingw`, so Visual Studio is no longer required for the default Windows path. It also reuses the existing CMake cache, which makes repeat starts much faster after the first build. On a normal local start it also opens the dashboard root page in the default browser automatically.
+
+The simulator now runs as a local stand-alone desktop stack:
+
+- shared LVGL DDU UI
+- native local ShiftLight dashboard on `http://127.0.0.1:8765`
+- virtual external LED bar preview above the `800x400` display
+- optional live SimHub telemetry via HTTP or UDP JSON
+
+Useful variants:
+
+```powershell
+# 800x400 default, Auto mode: prefer SimHub and fall back to local mock telemetry
+.\run_simulator.cmd
+
+# Auto is the default, but you can force either side when needed
+.\run_simulator.cmd -Telemetry Auto
+.\run_simulator.cmd -Telemetry SimHub
+.\run_simulator.cmd -Telemetry Simulator
+
+# Change the local dashboard port
+.\run_simulator.cmd -WebPort 8770
+
+# Larger preview window on the desktop
+.\run_simulator.cmd -Scale 2
+
+# Disable the automatic browser open, the local dashboard, or the LED-bar preview if needed
+.\run_simulator.cmd -NoBrowser
+.\run_simulator.cmd -NoWeb
+.\run_simulator.cmd -NoLedBar
+
+# Force a full reconfigure if you changed generator/toolchain details
+.\run_simulator.cmd -Fresh
+
+# Capture one frame and exit automatically
+.\run_simulator.cmd -CaptureFramePath "build/simulator/captures/ui.bmp" -ExitOnCapture
+
+# Open and navigate via startup actions before capturing
+.\run_simulator.cmd -UiActions "right,open" -CaptureFramePath "build/simulator/captures/source.bmp" -ExitOnCapture
 ```
 
 ### Manual build
 
 ```powershell
-cmake -S . -B build/simulator -G "Visual Studio 17 2022" -A x64
-cmake --build build/simulator --config Debug --target rpmcounter_simulator
-.\build\simulator\Debug\rpmcounter_simulator.exe
+cmake -S . -B build/simulator-local -G "MinGW Makefiles" `
+  -D CMAKE_BUILD_TYPE=Debug `
+  -D CMAKE_C_COMPILER=.tools\llvm-mingw\llvm-mingw-20260407-ucrt-x86_64\bin\x86_64-w64-mingw32-gcc.exe `
+  -D CMAKE_CXX_COMPILER=.tools\llvm-mingw\llvm-mingw-20260407-ucrt-x86_64\bin\x86_64-w64-mingw32-g++.exe `
+  -D CMAKE_MAKE_PROGRAM=.tools\llvm-mingw\llvm-mingw-20260407-ucrt-x86_64\bin\mingw32-make.exe
+cmake --build build/simulator-local --target rpmcounter_simulator --parallel
+.\build\simulator-local\rpmcounter_simulator.exe
 ```
 
 The simulator reuses the shared LVGL UI from `src/ui/ui_s3_main.cpp`, opens an SDL2 window, accepts mouse clicks/drags, and feeds the UI with deterministic mock state.
 
 ### SimHub telemetry
 
-`run_simulator.ps1` now supports two telemetry modes:
+`run_simulator.ps1` now supports three launcher modes:
 
-- `SIM_MODE=true`: internal simulator telemetry
-- `SIM_MODE=false`: use real SimHub telemetry
+- `-Telemetry Auto`: prefer real SimHub telemetry and keep the UI alive with simulator fallback until live data arrives
+- `-Telemetry SimHub` / `SIM_MODE=false`: use real SimHub telemetry without fallback
+- `-Telemetry Simulator` / `SIM_MODE=true`: internal simulator telemetry
 
-With `SIM_MODE=false`, the simulator defaults to the local SimHub HTTP API on `http://127.0.0.1:8888`. This is the recommended mode for Assetto Corsa Competizione because SimHub already consumes ACC's UDP broadcast and exposes normalized telemetry through its local API.
+`Auto` and `SimHub` both use the local SimHub HTTP API on `http://127.0.0.1:8888` by default. This is the recommended mode for Assetto Corsa Competizione because SimHub already consumes ACC's UDP broadcast and exposes normalized telemetry through its local API.
+
+The desktop window size can also be overridden through:
+
+- `SIM_WINDOW_WIDTH`
+- `SIM_WINDOW_HEIGHT`
+- `SIM_WINDOW_SCALE`
 
 Optional source selection:
 
@@ -201,10 +262,33 @@ $env:SIM_MODE = "false"
 $env:SIMHUB_SOURCE = "http"
 $env:SIMHUB_HTTP_PORT = "8888"
 $env:SIM_DEBUG_TELEMETRY = "true"
+$env:SIM_WINDOW_WIDTH = "800"
+$env:SIM_WINDOW_HEIGHT = "400"
+$env:SIM_WINDOW_SCALE = "1"
 .\simulator\run_simulator.ps1
 ```
 
-If no live SimHub data is available yet, the desktop UI stays in a visible `SimHub waiting` state with zeroed telemetry instead of switching to animated demo RPM. Once live data has been received, the simulator keeps the last known values for up to 2 seconds and then marks them as stale. The old fallback simulator can still be enabled explicitly with `SIM_ALLOW_FALLBACK_SIMULATOR=true`.
+In the default `Auto` launch mode, the desktop UI starts with simulator fallback so the dashboard is immediately usable, then switches over to live SimHub data as soon as it arrives. In explicit `SimHub` mode without fallback, the UI stays in a visible `SimHub waiting` state with zeroed telemetry until data is available. Once live data has been received, the simulator keeps the last known values for up to 2 seconds and then marks them as stale.
+
+### Local desktop dashboard
+
+When the simulator is running, open:
+
+```text
+http://127.0.0.1:8765
+```
+
+This now opens the ShiftLight dashboard root page, not a separate simulator-only site.
+
+The local dashboard can:
+
+- show live RPM / speed / gear / source state
+- expose dashboard and `/settings` style navigation
+- switch the LED-bar behavior between `Casual`, `F1-Style`, `Aggressiv`, and `GT3 / Endurance`
+- change the virtual LED-bar count and thresholds
+- adjust display brightness
+- switch between internal simulator telemetry and SimHub
+- send UI navigation and test commands to the running simulator
 
 Optional test hooks:
 

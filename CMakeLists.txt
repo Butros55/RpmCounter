@@ -55,6 +55,8 @@ add_executable(rpmcounter_simulator
     simulator/rpm_simulator.cpp
     simulator/sdl_lvgl_window.cpp
     simulator/simulator_app.cpp
+    simulator/simulator_web_server.cpp
+    simulator/virtual_led_bar.cpp
     src/ui/ui_s3_main.cpp
     telemetry/simhub_http_listener.cpp
     telemetry/simhub_udp_listener.cpp
@@ -87,6 +89,7 @@ endif()
 add_executable(rpmcounter_simulator_tests
     simulator/rpm_simulator.cpp
     simulator/simulator_app.cpp
+    simulator/virtual_led_bar.cpp
     simulator/tests/simulator_app_tests.cpp
     telemetry/simhub_http_listener.cpp
     telemetry/simhub_udp_listener.cpp

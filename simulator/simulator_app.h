@@ -1,8 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <mutex>
+#include <vector>
 
 #include "telemetry/telemetry_service.h"
+#include "simulator_types.h"
 #include "ui/ui_runtime.h"
 
 enum class SimulatorCommand : uint8_t
@@ -28,9 +31,18 @@ public:
 
     void setBrightness(uint8_t value);
     void saveSettings(const UiSettings &settings);
+    void setWebServerPort(uint16_t port);
+    void applyLedBarConfig(const SimulatorLedBarConfig &config);
+    void updateUiDebugSnapshot(const UiDebugSnapshot &snapshot);
+    void queueUiAction(UiDebugAction action);
+    std::vector<UiDebugAction> takePendingUiActions();
 
     const UiRuntimeState &state() const;
     const TelemetryServiceConfig &telemetryConfig() const;
+    UiRuntimeState stateSnapshot() const;
+    TelemetryServiceConfig telemetryConfigSnapshot() const;
+    SimulatorLedBarConfig ledBarConfigSnapshot() const;
+    SimulatorStatusSnapshot statusSnapshot() const;
 
 private:
     enum class BleMode : uint8_t
@@ -48,16 +60,22 @@ private:
         Connected
     };
 
-    void applyBleMode();
-    void applyWifiMode();
-    void applyTelemetryFrame();
+    void applyBleModeLocked();
+    void applyWifiModeLocked();
+    void applyTelemetryFrameLocked();
+    void refreshWebStateLocked();
     void populateStaticLists();
 
     UiRuntimeState state_{};
     TelemetryService telemetryService_{};
     TelemetryServiceConfig telemetryConfig_{};
+    SimulatorLedBarConfig ledBarConfig_{};
+    UiDebugSnapshot uiDebugSnapshot_{};
     bool shiftOverrideEnabled_ = false;
     bool shiftOverrideValue_ = false;
     BleMode bleMode_ = BleMode::Connected;
     WifiModePreset wifiMode_ = WifiModePreset::Connected;
+    uint16_t webServerPort_ = 8765;
+    std::vector<UiDebugAction> pendingUiActions_{};
+    mutable std::mutex mutex_{};
 };

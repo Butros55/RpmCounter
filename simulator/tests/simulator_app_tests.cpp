@@ -8,6 +8,7 @@
 #include <thread>
 
 #include "simulator_app.h"
+#include "virtual_led_bar.h"
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -411,7 +412,14 @@ int main()
     std::this_thread::sleep_for(std::chrono::milliseconds(80));
     fallbackApp.tick(100);
     expect_true(fallbackApp.state().telemetryUsingFallback, "HTTP mode should use fallback when explicitly enabled");
+    expect_true(fallbackApp.state().telemetrySource == UiTelemetrySource::Simulator, "fallback should report simulator as active source");
     expect_true(fallbackApp.state().rpm > 0, "fallback simulator should still provide telemetry");
+    httpServer.set_live(R"({"speed":144,"gear":"4","rpms":5988,"maxRpm":7200})", "0.61");
+    std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    fallbackApp.tick(200);
+    expect_true(!fallbackApp.state().telemetryUsingFallback, "live SimHub data should disable fallback automatically");
+    expect_true(fallbackApp.state().telemetrySource == UiTelemetrySource::SimHubNetwork, "live SimHub data should become the active source automatically");
+    expect_true(fallbackApp.state().rpm == 5988, "live SimHub data should replace fallback RPM");
 
     SimulatorApp udpLiveApp;
     TelemetryServiceConfig udpLiveConfig{};
@@ -430,6 +438,28 @@ int main()
     expect_true(udpLiveApp.state().gear == 5, "UDP live mode should map gear");
     expect_true(!udpLiveApp.state().telemetryStale, "fresh UDP data should not be stale");
     expect_true(!udpLiveApp.state().telemetryUsingFallback, "fresh UDP data should not use fallback");
+
+    UiRuntimeState ledState{};
+    ledState.rpm = 6900;
+
+    SimulatorLedBarConfig casualConfig{};
+    casualConfig.mode = SimulatorLedMode::Casual;
+    const VirtualLedBarFrame casualFrame = build_virtual_led_bar_frame(ledState, casualConfig, 0);
+    expect_true(!casualFrame.blinkActive, "casual LED mode should stay solid at shift RPM");
+
+    SimulatorLedBarConfig gt3Config{};
+    gt3Config.mode = SimulatorLedMode::Gt3;
+    ledState.rpm = 2800;
+    const VirtualLedBarFrame gt3Frame = build_virtual_led_bar_frame(ledState, gt3Config, 0);
+    expect_true(gt3Frame.leds.front() != 0 && gt3Frame.leds.back() != 0, "GT3 LED mode should light both outer edges first");
+    expect_true(gt3Frame.leds.front() != gt3Frame.leds[gt3Frame.leds.size() / 2], "GT3 LED mode should keep the center visually darker at low fill");
+
+    SimulatorLedBarConfig aggressiveConfig{};
+    aggressiveConfig.mode = SimulatorLedMode::Aggressive;
+    ledState.rpm = 7000;
+    const VirtualLedBarFrame aggressiveFrame = build_virtual_led_bar_frame(ledState, aggressiveConfig, 0);
+    expect_true(aggressiveFrame.blinkActive, "aggressive LED mode should enter blink mode near max RPM");
+    expect_true(aggressiveFrame.litCount == aggressiveConfig.activeLedCount, "aggressive LED mode should drive the full bar during the shift blink");
 
     httpServer.stop();
     std::cout << "simulator_app_tests passed\n";
