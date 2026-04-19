@@ -2,6 +2,9 @@
 
 #include <cstdint>
 
+#include "src/telemetry/side_leds.h"
+#include "ui/ui_session_data.h"
+
 enum class TelemetryInputMode : uint8_t
 {
     Simulator = 0,
@@ -20,6 +23,8 @@ struct NormalizedTelemetryFrame
     int speedKmh = 0;
     int gear = 0;
     float throttle = 0.0f;
+    UiSessionData session{};
+    SideLedTelemetry sideLeds{};
     uint32_t timestampMs = 0;
     bool stale = false;
     bool usingFallback = false;

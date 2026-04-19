@@ -29,6 +29,7 @@ private:
     void updateSimulator(uint32_t nowMs);
     void updateSimHub(uint32_t nowMs);
     void updateWaitingFrame();
+    void enhanceTractionFrame(NormalizedTelemetryFrame &frame, uint32_t nowMs, const NormalizedTelemetryFrame *previousFrame, uint32_t previousFrameMs);
     void logStaleTransition(bool stale, bool usingFallback);
 
     TelemetryServiceConfig config_{};

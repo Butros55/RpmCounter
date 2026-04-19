@@ -1,8 +1,10 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 
+#include "src/telemetry/side_leds.h"
 #include "src/ui/ui_runtime.h"
 #include "telemetry/telemetry_types.h"
 
@@ -62,12 +64,34 @@ inline const char *simulator_led_mode_label(SimulatorLedMode mode)
     }
 }
 
+constexpr size_t kSimulatorGearCount = 8;
+using SimulatorGearRpmArray = std::array<int, kSimulatorGearCount>;
+using SimulatorGearLearnedArray = std::array<bool, kSimulatorGearCount>;
+
+inline SimulatorGearRpmArray simulator_default_gear_rpm_array(int value)
+{
+    SimulatorGearRpmArray result{};
+    result.fill(value);
+    return result;
+}
+
+inline SimulatorGearLearnedArray simulator_default_gear_learned_array(bool value)
+{
+    SimulatorGearLearnedArray result{};
+    result.fill(value);
+    return result;
+}
+
 struct SimulatorLedBarConfig
 {
     SimulatorLedMode mode = SimulatorLedMode::F1;
     bool autoScaleMaxRpm = true;
+    bool maxRpmPerGearEnabled = false;
     int fixedMaxRpm = 7000;
     int effectiveMaxRpm = 7000;
+    SimulatorGearRpmArray fixedMaxRpmByGear = simulator_default_gear_rpm_array(7000);
+    SimulatorGearRpmArray effectiveMaxRpmByGear = simulator_default_gear_rpm_array(7000);
+    SimulatorGearLearnedArray learnedMaxRpmByGear = simulator_default_gear_learned_array(false);
     int activeLedCount = 30;
     int brightness = 80;
     int startRpm = 1000;
@@ -114,7 +138,10 @@ struct SimulatorStatusSnapshot
     UiDebugSnapshot ui{};
     TelemetryServiceConfig telemetry{};
     SimulatorLedBarConfig ledBar{};
+    SideLedConfig sideLeds{};
     SimulatorDeviceConfig device{};
+    std::string bleTargetName = "OBD-II Dongle";
+    std::string bleTargetAddress = "66:1E:32:9D:2E:5D";
     uint16_t webPort = 8765;
     std::string webBaseUrl = "http://127.0.0.1:8765";
 };

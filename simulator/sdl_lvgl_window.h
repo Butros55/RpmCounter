@@ -32,6 +32,7 @@ public:
     void render();
     bool saveFramebufferBmp(const char *path) const;
     void setLedBarPreview(const VirtualLedBarFrame &frame);
+    void setDisplayBrightness(uint8_t value);
 
     lv_disp_t *display() const;
     int windowWidth() const;
@@ -61,6 +62,7 @@ private:
     int windowWidth_ = 0;
     int windowHeight_ = 0;
     uint32_t lastTickMs_ = 0;
+    uint8_t displayBrightness_ = 220;
 
     SDL_Window *window_ = nullptr;
     SDL_Renderer *renderer_ = nullptr;

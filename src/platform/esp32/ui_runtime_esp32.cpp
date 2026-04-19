@@ -119,10 +119,12 @@ namespace
 UiRuntimeState makeEsp32UiState()
 {
     UiRuntimeState state{};
+    const TelemetryRenderSnapshot telemetrySnapshot = telemetryCopyRenderSnapshot();
     state.settings.displayBrightness = cfg.displayBrightness;
     state.settings.tutorialSeen = cfg.uiTutorialSeen;
     state.settings.lastMenuIndex = cfg.uiLastMenuIndex;
     state.settings.nightMode = cfg.uiNightMode;
+    state.settings.showShiftStrip = cfg.uiShowShiftStrip;
     state.settings.telemetryPreference = toUiTelemetryPreference(cfg.telemetryPreference);
     state.settings.displayFocus = toUiDisplayFocusMetric(cfg.uiDisplayFocus);
 
@@ -160,6 +162,13 @@ UiRuntimeState makeEsp32UiState()
     state.rpm = g_currentRpm;
     state.speedKmh = g_vehicleSpeedKmh;
     state.shift = g_shiftBlinkActive;
+    state.shiftWindowActive = g_ledRenderDebug.lastShiftBlink;
+    state.ledStartRpm = cfg.rpmStartRpm;
+    state.ledMaxRpm = std::max(cfg.rpmStartRpm + 1, cfg.fixedMaxRpm);
+    state.sideLedConfig = cfg.sideLeds;
+    state.sideTelemetry = telemetrySnapshot.sideTelemetry;
+    state.sideLedFrame = telemetrySnapshot.sideLedFrame;
+    state.sideLedPriority = telemetrySnapshot.sideLedPriority;
     if (g_activeTelemetrySource == ActiveTelemetrySource::UsbSim)
     {
         state.telemetrySource = UiTelemetrySource::UsbBridge;
@@ -186,6 +195,10 @@ UiRuntimeState makeEsp32UiState()
     state.simHubConfigured = cfg.simHubHost.length() > 0;
     state.simHubReachable = g_simHubReachable;
     state.throttle = g_currentThrottle;
+    if (g_activeTelemetrySource == ActiveTelemetrySource::SimHubNetwork)
+    {
+        state.session = g_simHubSessionData;
+    }
     if (g_activeTelemetrySource == ActiveTelemetrySource::UsbSim)
     {
         state.telemetryTimestampMs = g_lastUsbTelemetryMs;
@@ -217,6 +230,7 @@ void saveEsp32UiSettings(const UiSettings &settings)
     cfg.uiTutorialSeen = settings.tutorialSeen;
     cfg.uiLastMenuIndex = settings.lastMenuIndex;
     cfg.uiNightMode = settings.nightMode;
+    cfg.uiShowShiftStrip = settings.showShiftStrip;
     switch (settings.displayFocus)
     {
     case UiDisplayFocusMetric::Gear:

@@ -4,6 +4,9 @@
 #include <string>
 #include <vector>
 
+#include "telemetry/side_leds.h"
+#include "ui_session_data.h"
+
 enum class UiWifiMode : uint8_t
 {
     ApOnly = 0,
@@ -90,6 +93,7 @@ struct UiSettings
     bool tutorialSeen = false;
     int lastMenuIndex = 0;
     bool nightMode = true;
+    bool showShiftStrip = true;
     UiTelemetryPreference telemetryPreference = UiTelemetryPreference::Auto;
     UiDisplayFocusMetric displayFocus = UiDisplayFocusMetric::Rpm;
 };
@@ -151,6 +155,14 @@ struct UiRuntimeState
     int rpm = 0;
     int speedKmh = 0;
     bool shift = false;
+    bool shiftWindowActive = false;
+    int ledStartRpm = 900;
+    int ledMaxRpm = 7200;
+    UiSessionData session{};
+    SideLedConfig sideLedConfig{};
+    SideLedTelemetry sideTelemetry{};
+    SideLedRenderFrame sideLedFrame{};
+    SideLedPriorityResult sideLedPriority{};
 };
 
 struct UiDebugSnapshot

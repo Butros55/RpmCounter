@@ -296,6 +296,265 @@ namespace
         return value;
     }
 
+    String sideLedColorHex(uint32_t color)
+    {
+        char buffer[8];
+        snprintf(buffer, sizeof(buffer), "#%06lX", static_cast<unsigned long>(color & 0xFFFFFFu));
+        return String(buffer);
+    }
+
+    bool requestBoolArg(const char *name, bool fallback)
+    {
+        if (!server.hasArg(name))
+        {
+            return fallback;
+        }
+        bool sawValue = false;
+        for (int i = 0; i < server.args(); ++i)
+        {
+            if (server.argName(i) != name)
+            {
+                continue;
+            }
+            sawValue = true;
+            String value = server.arg(i);
+            value.trim();
+            value.toLowerCase();
+            if (value == "1" || value == "on" || value == "true" || value == "yes")
+            {
+                return true;
+            }
+        }
+        return sawValue ? false : fallback;
+    }
+
+    SideLedPreset parseSideLedPresetArg(const String &value, SideLedPreset fallback)
+    {
+        String token = value;
+        token.trim();
+        token.toLowerCase();
+        if (token == "casual")
+        {
+            return SideLedPreset::Casual;
+        }
+        if (token == "minimal")
+        {
+            return SideLedPreset::Minimal;
+        }
+        if (token == "gt3")
+        {
+            return SideLedPreset::Gt3;
+        }
+        return fallback;
+    }
+
+    SideLedPriorityMode parseSideLedPriorityModeArg(const String &value, SideLedPriorityMode fallback)
+    {
+        String token = value;
+        token.trim();
+        token.toLowerCase();
+        if (token == "low")
+        {
+            return SideLedPriorityMode::Low;
+        }
+        if (token == "high")
+        {
+            return SideLedPriorityMode::High;
+        }
+        if (token == "override")
+        {
+            return SideLedPriorityMode::Override;
+        }
+        if (token == "normal")
+        {
+            return SideLedPriorityMode::Normal;
+        }
+        return fallback;
+    }
+
+    const char *sideLedPriorityModeName(SideLedPriorityMode mode)
+    {
+        switch (mode)
+        {
+        case SideLedPriorityMode::Low:
+            return "low";
+        case SideLedPriorityMode::High:
+            return "high";
+        case SideLedPriorityMode::Override:
+            return "override";
+        case SideLedPriorityMode::Normal:
+        default:
+            return "normal";
+        }
+    }
+
+    SideLedWarningPriorityMode parseSideLedWarningPriorityModeArg(const String &value,
+                                                                 SideLedWarningPriorityMode fallback)
+    {
+        String token = value;
+        token.trim();
+        token.toLowerCase();
+        if (token == "critical")
+        {
+            return SideLedWarningPriorityMode::CriticalOnly;
+        }
+        if (token == "override")
+        {
+            return SideLedWarningPriorityMode::AlwaysOverride;
+        }
+        if (token == "normal")
+        {
+            return SideLedWarningPriorityMode::Normal;
+        }
+        return fallback;
+    }
+
+    const char *sideLedWarningPriorityModeName(SideLedWarningPriorityMode mode)
+    {
+        switch (mode)
+        {
+        case SideLedWarningPriorityMode::CriticalOnly:
+            return "critical";
+        case SideLedWarningPriorityMode::AlwaysOverride:
+            return "override";
+        case SideLedWarningPriorityMode::Normal:
+        default:
+            return "normal";
+        }
+    }
+
+    SideLedTestPattern parseSideLedTestPatternArg(const String &value)
+    {
+        String token = value;
+        token.trim();
+        token.toLowerCase();
+        if (token == "accelerate")
+        {
+            return SideLedTestPattern::Accelerate;
+        }
+        if (token == "brake")
+        {
+            return SideLedTestPattern::Brake;
+        }
+        if (token == "traction-left" || token == "left-car")
+        {
+            return SideLedTestPattern::TractionLeft;
+        }
+        if (token == "traction-right" || token == "right-car")
+        {
+            return SideLedTestPattern::TractionRight;
+        }
+        if (token == "traction-both" || token == "both-cars")
+        {
+            return SideLedTestPattern::TractionBoth;
+        }
+        return SideLedTestPattern::None;
+    }
+
+    void appendSideLedConfigJson(String &json, const SideLedConfig &config)
+    {
+        json += ",\"sideLeds\":{";
+        json += "\"enabled\":" + String(config.enabled ? "true" : "false");
+        json += ",\"preset\":\"" + jsonEscape(String(side_led_preset_name(config.preset))) + "\"";
+        json += ",\"presetLabel\":\"" + jsonEscape(String(side_led_preset_label(config.preset))) + "\"";
+        json += ",\"ledCountPerSide\":" + String(config.ledCountPerSide);
+        json += ",\"brightness\":" + String(config.brightness);
+        json += ",\"allowSpotter\":" + String(config.allowSpotter ? "true" : "false");
+        json += ",\"allowFlags\":" + String(config.allowFlags ? "true" : "false");
+        json += ",\"allowWarnings\":" + String(config.allowWarnings ? "true" : "false");
+        json += ",\"allowTraction\":" + String(config.allowTraction ? "true" : "false");
+        json += ",\"blinkSpeedSlowMs\":" + String(config.blinkSpeedSlowMs);
+        json += ",\"blinkSpeedFastMs\":" + String(config.blinkSpeedFastMs);
+        json += ",\"blueFlagPriority\":\"" + jsonEscape(String(sideLedPriorityModeName(config.blueFlagPriority))) + "\"";
+        json += ",\"yellowFlagPriority\":\"" + jsonEscape(String(sideLedPriorityModeName(config.yellowFlagPriority))) + "\"";
+        json += ",\"warningPriorityMode\":\"" + jsonEscape(String(sideLedWarningPriorityModeName(config.warningPriorityMode))) + "\"";
+        json += ",\"invertLeftRight\":" + String(config.invertLeftRight ? "true" : "false");
+        json += ",\"mirrorMode\":" + String(config.mirrorMode ? "true" : "false");
+        json += ",\"closeCarBlinkingEnabled\":" + String(config.closeCarBlinkingEnabled ? "true" : "false");
+        json += ",\"severityLevelsEnabled\":" + String(config.severityLevelsEnabled ? "true" : "false");
+        json += ",\"idleAnimationEnabled\":" + String(config.idleAnimationEnabled ? "true" : "false");
+        json += ",\"testMode\":" + String(config.testMode ? "true" : "false");
+        json += "}";
+    }
+
+    void appendSideLedFrameJson(String &json, const SideLedRenderFrame &frame)
+    {
+        json += ",\"sideFrame\":{";
+        json += "\"source\":\"" + jsonEscape(String(side_led_source_name(frame.source))) + "\"";
+        json += ",\"priority\":\"" + jsonEscape(String(side_led_priority_name(frame.priority))) + "\"";
+        json += ",\"event\":\"" + jsonEscape(String(side_led_event_name(frame.event))) + "\"";
+        json += ",\"direction\":\"" + jsonEscape(String(side_led_traction_direction_name(frame.direction))) + "\"";
+        json += ",\"visible\":" + String(frame.visible ? "true" : "false");
+        json += ",\"blinkFast\":" + String(frame.blinkFast ? "true" : "false");
+        json += ",\"blinkSlow\":" + String(frame.blinkSlow ? "true" : "false");
+        json += ",\"ledCountPerSide\":" + String(frame.ledCountPerSide);
+        json += ",\"leftLevel\":" + String(frame.leftLevel);
+        json += ",\"rightLevel\":" + String(frame.rightLevel);
+        json += ",\"left\":[";
+        for (size_t i = 0; i < frame.left.size(); ++i)
+        {
+            if (i > 0)
+            {
+                json += ',';
+            }
+            json += "\"" + sideLedColorHex(frame.left[i]) + "\"";
+        }
+        json += "],\"right\":[";
+        for (size_t i = 0; i < frame.right.size(); ++i)
+        {
+            if (i > 0)
+            {
+                json += ',';
+            }
+            json += "\"" + sideLedColorHex(frame.right[i]) + "\"";
+        }
+        json += "]}";
+    }
+
+    void appendSideLedTelemetryJson(String &json, const SideLedTelemetry &telemetry)
+    {
+        json += ",\"sideTelemetry\":{";
+        json += "\"flag\":\"" + jsonEscape(String(side_led_flag_name(telemetry.flags.current))) + "\"";
+        json += ",\"flags\":{";
+        json += "\"green\":" + String(telemetry.flags.green ? "true" : "false");
+        json += ",\"yellow\":" + String(telemetry.flags.yellow ? "true" : "false");
+        json += ",\"blue\":" + String(telemetry.flags.blue ? "true" : "false");
+        json += ",\"red\":" + String(telemetry.flags.red ? "true" : "false");
+        json += ",\"white\":" + String(telemetry.flags.white ? "true" : "false");
+        json += ",\"black\":" + String(telemetry.flags.black ? "true" : "false");
+        json += ",\"orange\":" + String(telemetry.flags.orange ? "true" : "false");
+        json += ",\"checkered\":" + String(telemetry.flags.checkered ? "true" : "false");
+        json += "},\"spotter\":{";
+        json += "\"left\":" + String(telemetry.spotter.left ? "true" : "false");
+        json += ",\"right\":" + String(telemetry.spotter.right ? "true" : "false");
+        json += ",\"leftClose\":" + String(telemetry.spotter.leftClose ? "true" : "false");
+        json += ",\"rightClose\":" + String(telemetry.spotter.rightClose ? "true" : "false");
+        json += ",\"leftRear\":" + String(telemetry.spotter.leftRear ? "true" : "false");
+        json += ",\"rightRear\":" + String(telemetry.spotter.rightRear ? "true" : "false");
+        json += ",\"leftSeverity\":" + String(telemetry.spotter.leftSeverity);
+        json += ",\"rightSeverity\":" + String(telemetry.spotter.rightSeverity);
+        json += "},\"warnings\":{";
+        json += "\"pitLimiter\":" + String(telemetry.warnings.pitLimiter ? "true" : "false");
+        json += ",\"inPitlane\":" + String(telemetry.warnings.inPitlane ? "true" : "false");
+        json += ",\"lowFuel\":" + String(telemetry.warnings.lowFuel ? "true" : "false");
+        json += ",\"engine\":" + String(telemetry.warnings.engine ? "true" : "false");
+        json += ",\"oil\":" + String(telemetry.warnings.oil ? "true" : "false");
+        json += ",\"waterTemp\":" + String(telemetry.warnings.waterTemp ? "true" : "false");
+        json += ",\"damage\":" + String(telemetry.warnings.damage ? "true" : "false");
+        json += "},\"traction\":{";
+        json += "\"active\":" + String(telemetry.traction.active ? "true" : "false");
+        json += ",\"direction\":\"" + jsonEscape(String(side_led_traction_direction_name(telemetry.traction.direction))) + "\"";
+        json += ",\"throttle\":" + String(telemetry.traction.throttle, 3);
+        json += ",\"brake\":" + String(telemetry.traction.brake, 3);
+        json += ",\"leftSlip\":" + String(telemetry.traction.leftSlip, 3);
+        json += ",\"rightSlip\":" + String(telemetry.traction.rightSlip, 3);
+        json += ",\"leftLevel\":" + String(telemetry.traction.leftLevel);
+        json += ",\"rightLevel\":" + String(telemetry.traction.rightLevel);
+        json += ",\"leftCritical\":" + String(telemetry.traction.leftCritical ? "true" : "false");
+        json += ",\"rightCritical\":" + String(telemetry.traction.rightCritical ? "true" : "false");
+        json += "}}";
+    }
+
     void handleDevObdSend()
     {
         markHttpActivity("WEB_DEV_OBD_SEND");
@@ -2446,6 +2705,97 @@ namespace
             const int rawFocus = clampInt(server.arg("displayFocus").toInt(), 0, 2);
             cfg.uiDisplayFocus = static_cast<DisplayFocusMetric>(rawFocus);
         }
+        if (server.hasArg("showShiftStrip"))
+        {
+            cfg.uiShowShiftStrip = requestBoolArg("showShiftStrip", cfg.uiShowShiftStrip);
+        }
+
+        SideLedConfig sideConfig = cfg.sideLeds;
+        if (server.hasArg("sideEnabled"))
+        {
+            sideConfig.enabled = requestBoolArg("sideEnabled", sideConfig.enabled);
+        }
+        if (server.hasArg("sidePreset"))
+        {
+            sideConfig.preset = parseSideLedPresetArg(server.arg("sidePreset"), sideConfig.preset);
+        }
+        if (server.hasArg("sideLedCountPerSide"))
+        {
+            sideConfig.ledCountPerSide = static_cast<uint8_t>(clampInt(server.arg("sideLedCountPerSide").toInt(),
+                                                                       static_cast<int>(SIDE_LED_MIN_COUNT_PER_SIDE),
+                                                                       static_cast<int>(SIDE_LED_MAX_COUNT_PER_SIDE)));
+        }
+        if (server.hasArg("sideBrightness"))
+        {
+            sideConfig.brightness = static_cast<uint8_t>(clampInt(server.arg("sideBrightness").toInt(), 0, 255));
+        }
+        if (server.hasArg("sideAllowSpotter"))
+        {
+            sideConfig.allowSpotter = requestBoolArg("sideAllowSpotter", sideConfig.allowSpotter);
+        }
+        if (server.hasArg("sideAllowFlags"))
+        {
+            sideConfig.allowFlags = requestBoolArg("sideAllowFlags", sideConfig.allowFlags);
+        }
+        if (server.hasArg("sideAllowWarnings"))
+        {
+            sideConfig.allowWarnings = requestBoolArg("sideAllowWarnings", sideConfig.allowWarnings);
+        }
+        if (server.hasArg("sideAllowTraction"))
+        {
+            sideConfig.allowTraction = requestBoolArg("sideAllowTraction", sideConfig.allowTraction);
+        }
+        sideConfig.allowSpotter = false;
+        sideConfig.allowFlags = false;
+        sideConfig.allowWarnings = false;
+        if (server.hasArg("sideBlinkSpeedSlowMs"))
+        {
+            sideConfig.blinkSpeedSlowMs = static_cast<uint16_t>(clampInt(server.arg("sideBlinkSpeedSlowMs").toInt(), 80, 1500));
+        }
+        if (server.hasArg("sideBlinkSpeedFastMs"))
+        {
+            sideConfig.blinkSpeedFastMs = static_cast<uint16_t>(clampInt(server.arg("sideBlinkSpeedFastMs").toInt(), 40, 900));
+        }
+        if (server.hasArg("sideBlueFlagPriority"))
+        {
+            sideConfig.blueFlagPriority = parseSideLedPriorityModeArg(server.arg("sideBlueFlagPriority"), sideConfig.blueFlagPriority);
+        }
+        if (server.hasArg("sideYellowFlagPriority"))
+        {
+            sideConfig.yellowFlagPriority = parseSideLedPriorityModeArg(server.arg("sideYellowFlagPriority"), sideConfig.yellowFlagPriority);
+        }
+        if (server.hasArg("sideWarningPriorityMode"))
+        {
+            sideConfig.warningPriorityMode =
+                parseSideLedWarningPriorityModeArg(server.arg("sideWarningPriorityMode"), sideConfig.warningPriorityMode);
+        }
+        if (server.hasArg("sideInvertLeftRight"))
+        {
+            sideConfig.invertLeftRight = requestBoolArg("sideInvertLeftRight", sideConfig.invertLeftRight);
+        }
+        if (server.hasArg("sideMirrorMode"))
+        {
+            sideConfig.mirrorMode = requestBoolArg("sideMirrorMode", sideConfig.mirrorMode);
+        }
+        if (server.hasArg("sideCloseCarBlinkingEnabled"))
+        {
+            sideConfig.closeCarBlinkingEnabled =
+                requestBoolArg("sideCloseCarBlinkingEnabled", sideConfig.closeCarBlinkingEnabled);
+        }
+        if (server.hasArg("sideSeverityLevelsEnabled"))
+        {
+            sideConfig.severityLevelsEnabled = requestBoolArg("sideSeverityLevelsEnabled", sideConfig.severityLevelsEnabled);
+        }
+        if (server.hasArg("sideIdleAnimationEnabled"))
+        {
+            sideConfig.idleAnimationEnabled = requestBoolArg("sideIdleAnimationEnabled", sideConfig.idleAnimationEnabled);
+        }
+        if (server.hasArg("sideTestMode"))
+        {
+            sideConfig.testMode = requestBoolArg("sideTestMode", sideConfig.testMode);
+        }
+        normalize_side_led_config(sideConfig);
+        cfg.sideLeds = sideConfig;
 
         cfg.simHubHost = argTrimmed("simHubHost", cfg.simHubHost);
         cfg.simHubPort = static_cast<uint16_t>(clampInt(server.arg("simHubPort").toInt(), 1, 65535));
@@ -2711,12 +3061,44 @@ namespace
         json += ",\"gestureCount\":" + String(gestureInfo.gestureCount);
         json += ",\"gestureModeSwitchCount\":" + String(gestureInfo.modeSwitchCount);
         json += ",\"displayFocus\":" + String(static_cast<int>(cfg.uiDisplayFocus));
+        json += ",\"showShiftStrip\":" + String(cfg.uiShowShiftStrip ? "true" : "false");
+        appendSideLedConfigJson(json, cfg.sideLeds);
+        appendSideLedFrameJson(json, telemetrySnapshot.sideLedFrame);
+        appendSideLedTelemetryJson(json, telemetrySnapshot.sideTelemetry);
         json += ",\"simHubConfigured\":" + String(cfg.simHubHost.length() > 0 ? "true" : "false");
         json += ",\"bleConnectInProgress\":" + String(g_bleConnectInProgress ? "true" : "false");
         json += ",\"bleConnectTargetAddr\":\"" + jsonEscape(g_bleConnectTargetAddr) + "\"";
         json += ",\"bleConnectTargetName\":\"" + jsonEscape(g_bleConnectTargetName) + "\"";
         json += ",\"bleConnectError\":\"" + jsonEscape(g_bleConnectLastError) + "\"";
         json += "}";
+        server.send(200, "application/json", json);
+    }
+
+    void handleDevSideLedTest()
+    {
+        markHttpActivity("WEB_SIDE_TEST");
+        if (server.method() != HTTP_POST)
+        {
+            server.send(405, "application/json", "{\"status\":\"error\",\"reason\":\"method\"}");
+            return;
+        }
+
+        const SideLedTestPattern pattern =
+            server.hasArg("pattern") ? parseSideLedTestPatternArg(server.arg("pattern")) : SideLedTestPattern::None;
+        if (pattern == SideLedTestPattern::None)
+        {
+            g_sideLedTestState = SideLedTestState{};
+        }
+        else
+        {
+            g_sideLedTestState.active = true;
+            g_sideLedTestState.pattern = pattern;
+            g_sideLedTestState.untilMs = millis() + 2200UL;
+        }
+
+        String json = "{\"status\":\"ok\",\"pattern\":\"";
+        json += jsonEscape(String(side_led_test_pattern_name(pattern)));
+        json += "\"}";
         server.send(200, "application/json", json);
     }
 
@@ -3102,6 +3484,7 @@ void initWebUi()
     server.on("/dev/display-status", HTTP_GET, handleDevDisplayStatus);
     server.on("/dev/display-pattern", HTTP_POST, handleDevDisplayPattern);
     server.on("/dev/led-mode", HTTP_POST, handleDevLedMode);
+    server.on("/dev/side-led-test", HTTP_POST, handleDevSideLedTest);
     server.on("/dev/ambient-probe", HTTP_POST, handleDevAmbientProbe);
     server.on("/dev/gesture-probe", HTTP_POST, handleDevGestureProbe);
     server.on("/dev/obd-send", HTTP_POST, handleDevObdSend);

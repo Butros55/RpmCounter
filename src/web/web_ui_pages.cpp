@@ -9,6 +9,7 @@
 #include "hardware/ambient_light.h"
 #include "hardware/display.h"
 #include "hardware/gesture_sensor.h"
+#include "telemetry/telemetry_manager.h"
 #include "web_helpers.h"
 
 namespace
@@ -21,6 +22,23 @@ namespace
     String selectedAttr(bool value)
     {
         return value ? String(F(" selected")) : String();
+    }
+
+    String sideLedColorHex(uint32_t color)
+    {
+        char buffer[8];
+        snprintf(buffer, sizeof(buffer), "#%06lX", static_cast<unsigned long>(color & 0xFFFFFFu));
+        return String(buffer);
+    }
+
+    String sideLedPreviewColor(uint32_t color)
+    {
+        return color == 0 ? String(F("#26384d")) : sideLedColorHex(color);
+    }
+
+    String sideLedPreviewOpacity(uint32_t color)
+    {
+        return color == 0 ? String(F("0.45")) : String(F("1"));
     }
 
     String activeTelemetryLabel()
@@ -328,6 +346,7 @@ a{color:inherit;text-decoration:none}button,input,select,textarea{font:inherit}
 .range-wrap{display:grid;gap:10px}.range-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px}.range-title{font-weight:700}.range-value{font-size:12px;color:var(--muted)}input[type=range]{width:100%;margin:0;accent-color:var(--accent);background:transparent}
 .color-grid{display:grid;gap:12px;grid-template-columns:repeat(1,minmax(0,1fr))}.color-card input[type=color]{width:100%;min-height:52px;border:none;padding:0;border-radius:12px;background:transparent}.color-card input[type=color]::-webkit-color-swatch-wrapper{padding:0}.color-card input[type=color]::-webkit-color-swatch{border:none;border-radius:12px}.color-card input[type=color]::-moz-color-swatch{border:none;border-radius:12px}
 .led-preview{display:grid;grid-template-columns:repeat(15,minmax(0,1fr));gap:6px;padding:14px;border-radius:16px;border:1px solid var(--border);background:#0b121b}.led-dot{width:100%;aspect-ratio:1/1;border-radius:999px;background:#26384d}
+.side-preview{display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:14px;border-radius:16px;border:1px solid var(--border);background:#0b121b}.side-stack{display:grid;gap:10px}.side-stack.right{justify-items:end}.side-led-dot{width:16px;height:28px;border-radius:999px;background:#26384d;border:1px solid rgba(255,255,255,.08);box-shadow:inset 0 0 0 1px rgba(255,255,255,.04)}.side-meta{display:grid;gap:6px;text-align:center}.side-meta strong{font-size:17px;letter-spacing:-.02em}.button-grid{display:grid;gap:10px;grid-template-columns:repeat(2,minmax(0,1fr))}
 .button-row{display:flex;flex-wrap:wrap;gap:10px}.btn{appearance:none;border:none;min-height:48px;padding:12px 16px;border-radius:14px;font-weight:800;letter-spacing:-.01em;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px}
 .btn:disabled{opacity:.55;cursor:not-allowed}.btn-primary{background:linear-gradient(180deg,#46b0ff,#2bd0ff);color:#06111c}.btn-secondary{background:#1b2938;color:var(--text);border:1px solid var(--border)}.btn-danger{background:#26141a;color:#ffd7de;border:1px solid rgba(255,111,129,.28)}.btn-ghost{background:transparent;color:var(--text);border:1px solid var(--border)}
 .badge-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.badge-card strong{display:block;margin-top:6px;font-size:16px}.info-value{text-align:right;font-weight:700;word-break:break-word}.device-list{display:grid;gap:10px;margin-top:12px}.device-empty{margin-top:12px;padding:14px;border-radius:14px;border:1px dashed var(--border);color:var(--muted);text-align:center;font-size:13px}
@@ -338,7 +357,7 @@ a{color:inherit;text-decoration:none}button,input,select,textarea{font:inherit}
 .console{min-height:180px;max-height:280px;overflow:auto;padding:12px;border-radius:16px;border:1px solid var(--border);background:#071019;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}.console-line{margin:0 0 4px}.console-line.tx{color:#8fd0ff}.console-line.rx{color:#aef5bf}.console-line.err{color:#ff9cab}
 .spinner{display:inline-block;width:14px;height:14px;border-radius:50%;border:2px solid rgba(255,255,255,.18);border-top-color:currentColor;animation:spin 1s linear infinite}@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 .hidden{display:none!important}
-@media(min-width:720px){.hero{grid-template-columns:1.3fr .9fr}.panel-grid.two,.field-grid.two{grid-template-columns:repeat(2,minmax(0,1fr))}.color-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.info-list.compact{grid-template-columns:repeat(2,minmax(0,1fr))}.savebar{left:50%;right:auto;width:min(820px,calc(100% - 24px));transform:translateX(-50%);flex-direction:row;align-items:center;justify-content:space-between}.savebar-actions{width:min(340px,100%);flex:0 0 auto}}
+@media(min-width:720px){.hero{grid-template-columns:1.3fr .9fr}.panel-grid.two,.field-grid.two{grid-template-columns:repeat(2,minmax(0,1fr))}.color-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.info-list.compact{grid-template-columns:repeat(2,minmax(0,1fr))}.button-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.savebar{left:50%;right:auto;width:min(820px,calc(100% - 24px));transform:translateX(-50%);flex-direction:row;align-items:center;justify-content:space-between}.savebar-actions{width:min(340px,100%);flex:0 0 auto}}
 @media(min-width:980px){.app-grid{grid-template-columns:1.05fr .95fr;align-items:start}.dashboard-layout{grid-template-columns:1.05fr .95fr;align-items:start}.hero-card{padding:22px}}
 )CSS");
         page += F("</style></head><body><div class='app'><header class='topbar'><div class='topbar-row'><div class='brand'><span class='eyebrow'>RPMCounter / ShiftLight</span><h1>ShiftLight</h1><p>Leichtgewichtige Embedded-Weboberflaeche mit Live-Status, Telemetrie und Konfiguration.</p></div><nav class='tabs'>");
@@ -675,6 +694,35 @@ function saveSettings(){ const form = $('#settingsForm'); if(!form){ return Prom
 function setVehicleStatus(text, error){ updateText('vehicleStatus', text); updateText('settingsError', error || ''); }
 function telemetryTransportMode(data){ if(data?.simTransportMode){ return data.simTransportMode; } if(data?.simTransport === 'USB'){ return 'USB_ONLY'; } if(data?.simTransport === 'NETWORK'){ return 'NETWORK_ONLY'; } return 'AUTO'; }
 function friendlyWifiMode(mode){ if(mode === 'STA_ONLY'){ return 'Nur Heim-WLAN'; } if(mode === 'STA_WITH_AP_FALLBACK'){ return 'WLAN + AP Fallback'; } return 'Nur Access Point'; }
+function renderSidePreview(frame){
+  const left = frame?.left || [];
+  const right = frame?.right || [];
+  const ledCount = Math.max(4, Math.min(16, parseInt(frame?.ledCountPerSide ?? $('#sideLedCountPerSide')?.value ?? '8', 10) || 8));
+  for(let i = 0; i < 16; i += 1){
+    const leftEl = document.getElementById('settingsSideLeftLed' + (i + 1));
+    const rightEl = document.getElementById('settingsSideRightLed' + (i + 1));
+    const active = i < ledCount;
+    const leftColor = left[i] || '#26384d';
+    const rightColor = right[i] || '#26384d';
+    if(leftEl){
+      leftEl.style.display = active ? '' : 'none';
+      leftEl.style.backgroundColor = leftColor;
+      leftEl.style.opacity = (leftColor === '#000000' || leftColor === '#26384d') ? '0.45' : '1';
+    }
+    if(rightEl){
+      rightEl.style.display = active ? '' : 'none';
+      rightEl.style.backgroundColor = rightColor;
+      rightEl.style.opacity = (rightColor === '#000000' || rightColor === '#26384d') ? '0.45' : '1';
+    }
+  }
+}
+function triggerSideLedTest(pattern){
+  const done = beginRequest();
+  fetch('/dev/side-led-test', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'pattern=' + encodeURIComponent(pattern || '') })
+    .then(fetchStatus)
+    .catch(() => {})
+    .finally(done);
+}
 function updateStatus(data){
   if(!data){ return; }
   const transportMode = telemetryTransportMode(data);
@@ -707,6 +755,13 @@ function updateStatus(data){
   setPill('settingsSimHubPill', simTone, simText);
   updateText('activeTelemetryValue', activeTelemetry + fallbackSuffix);
   updateText('simHubStateValue', simText);
+  updateText('sideSourceValue', data.sideFrame?.source || 'off');
+  updateText('sideEventValue', data.sideFrame?.event || 'none');
+  updateText('sidePriorityValue', data.sideFrame?.direction || 'off');
+  updateText('sideFlagValue', (data.sideFrame?.ledCountPerSide ?? data.sideLeds?.ledCountPerSide ?? 0) + ' LEDs / Seite');
+  updateText('sideTractionValue', 'Grip Load ' + Math.round((data.sideTelemetry?.traction?.throttle ?? 0) * 100) + '% | Brake Load ' + Math.round((data.sideTelemetry?.traction?.brake ?? 0) * 100) + '% | Grip L ' + (data.sideTelemetry?.traction?.leftLevel ?? 0) + ' / R ' + (data.sideTelemetry?.traction?.rightLevel ?? 0));
+  updateText('sidePreviewStatus', (data.sideLeds?.enabled ? 'Seitenleisten aktiv' : 'Seitenleisten aus') + ' | ' + (data.sideFrame?.event || 'none') + ' | Richtung ' + (data.sideFrame?.direction || 'off'));
+  renderSidePreview(data.sideFrame);
   updateText('vehicleModel', data.vehicleModel || 'Noch kein Modell');
   updateText('vehicleVin', data.vehicleVin || 'Noch keine VIN');
   updateText('vehicleDiag', data.vehicleDiag || 'Keine Diagnose');
@@ -750,7 +805,7 @@ function refreshVehicle(){ settingsState.refreshActive = true; setVehicleStatus(
 function appendConsoleLine(text){ const box = $('#obdConsole'); if(!box || !text){ return; } const line = document.createElement('div'); const normalized = String(text).trim(); let className = 'console-line rx'; if(normalized.startsWith('>')){ className = 'console-line tx'; } else if(normalized.startsWith('!')){ className = 'console-line err'; } line.className = className; line.textContent = normalized; box.appendChild(line); box.scrollTop = box.scrollHeight; }
 function sendObdCommand(){ const input = $('#obdCmdInput'); const cmd = input?.value.trim(); if(!cmd){ return; } appendConsoleLine('> ' + cmd); const done = beginRequest(); setButtonLoading('obdSendBtn', true, 'Sende'); fetch('/dev/obd-send', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'cmd=' + encodeURIComponent(cmd) }).then((r) => r.json()).then((data) => { if(data?.lastObd){ appendConsoleLine('< ' + data.lastObd); } }).catch(() => appendConsoleLine('! Fehler beim Senden')).finally(() => { setButtonLoading('obdSendBtn', false); done(); }); }
 function refreshAdvancedDisplay(){ const done = beginRequest(); fetch('/dev/display-status').then((r) => r.json()).then((data) => { updateText('advDisplayReady', data.ready ? 'Bereit' : 'Nicht bereit'); updateText('advDisplayTouch', data.touchReady ? 'Touch aktiv' : 'Touch fehlt'); updateText('advDisplayLastError', data.lastError || 'Kein Fehler'); }).finally(done); }
-function initSettings(){ captureInitialSettingsState(); recomputeSettingsDirty(); syncSavebarSpace('settingsSaveBar'); setDevSection(); $$('input,select,textarea', $('#settingsForm')).forEach((el) => { el.addEventListener('input', () => { markDirty(); syncSavebarSpace('settingsSaveBar'); }); el.addEventListener('change', () => { markDirty(); syncSavebarSpace('settingsSaveBar'); }); }); $('#settingsSave')?.addEventListener('click', () => saveSettings().finally(() => syncSavebarSpace('settingsSaveBar'))); $('#settingsReset')?.addEventListener('click', () => window.location.reload()); $('#devModeToggle')?.addEventListener('change', () => { setDevSection(); markDirty(); syncSavebarSpace('settingsSaveBar'); }); $('#wifiScanBtn')?.addEventListener('click', startWifiScan); $('#wifiDisconnectBtn')?.addEventListener('click', disconnectWifi); $('#wifiModalCancel')?.addEventListener('click', closeWifiModal); $('#wifiModalConnect')?.addEventListener('click', submitWifiModal); $('#bleScanBtn')?.addEventListener('click', startBleScan); $('#btnVehicleRefresh')?.addEventListener('click', refreshVehicle); $('#obdSendBtn')?.addEventListener('click', sendObdCommand); $('#obdCmdInput')?.addEventListener('keydown', (ev) => { if(ev.key === 'Enter'){ ev.preventDefault(); sendObdCommand(); } }); $('#obdClearBtn')?.addEventListener('click', () => { $('#obdConsole').innerHTML = ''; }); $('#btnDisplayStatusAdvanced')?.addEventListener('click', refreshAdvancedDisplay); $('#btnDisplayBarsAdvanced')?.addEventListener('click', () => { const done = beginRequest(); fetch('/dev/display-pattern', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'pattern=bars' }).finally(() => { refreshAdvancedDisplay(); done(); }); }); $('#btnDisplayGridAdvanced')?.addEventListener('click', () => { const done = beginRequest(); fetch('/dev/display-pattern', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'pattern=grid' }).finally(() => { refreshAdvancedDisplay(); done(); }); }); $('#btnDisplayLogoAdvanced')?.addEventListener('click', () => { const done = beginRequest(); fetch('/dev/display-logo', { method:'POST' }).finally(() => { refreshAdvancedDisplay(); done(); }); }); window.addEventListener('resize', () => syncSavebarSpace('settingsSaveBar')); fetchStatus(); fetchWifiStatus(); fetchBleStatus(); refreshAdvancedDisplay(); setInterval(fetchStatus, 2200); setInterval(fetchWifiStatus, 2800); setInterval(fetchBleStatus, 3200); }
+function initSettings(){ captureInitialSettingsState(); recomputeSettingsDirty(); syncSavebarSpace('settingsSaveBar'); setDevSection(); renderSidePreview(); $$('input,select,textarea', $('#settingsForm')).forEach((el) => { el.addEventListener('input', () => { markDirty(); if(el.id === 'sideLedCountPerSide'){ renderSidePreview({ ledCountPerSide: el.value }); } syncSavebarSpace('settingsSaveBar'); }); el.addEventListener('change', () => { markDirty(); if(el.id === 'sideLedCountPerSide'){ renderSidePreview({ ledCountPerSide: el.value }); } syncSavebarSpace('settingsSaveBar'); }); }); $('#settingsSave')?.addEventListener('click', () => saveSettings().finally(() => syncSavebarSpace('settingsSaveBar'))); $('#settingsReset')?.addEventListener('click', () => window.location.reload()); $('#devModeToggle')?.addEventListener('change', () => { setDevSection(); markDirty(); syncSavebarSpace('settingsSaveBar'); }); $('#wifiScanBtn')?.addEventListener('click', startWifiScan); $('#wifiDisconnectBtn')?.addEventListener('click', disconnectWifi); $('#wifiModalCancel')?.addEventListener('click', closeWifiModal); $('#wifiModalConnect')?.addEventListener('click', submitWifiModal); $('#bleScanBtn')?.addEventListener('click', startBleScan); $('#btnVehicleRefresh')?.addEventListener('click', refreshVehicle); $('#btnSideAccel')?.addEventListener('click', () => triggerSideLedTest('accelerate')); $('#btnSideBrake')?.addEventListener('click', () => triggerSideLedTest('brake')); $('#btnSideTractionLeft')?.addEventListener('click', () => triggerSideLedTest('traction-left')); $('#btnSideTractionRight')?.addEventListener('click', () => triggerSideLedTest('traction-right')); $('#btnSideTractionBoth')?.addEventListener('click', () => triggerSideLedTest('traction-both')); $('#btnSideClear')?.addEventListener('click', () => triggerSideLedTest('')); $('#obdSendBtn')?.addEventListener('click', sendObdCommand); $('#obdCmdInput')?.addEventListener('keydown', (ev) => { if(ev.key === 'Enter'){ ev.preventDefault(); sendObdCommand(); } }); $('#obdClearBtn')?.addEventListener('click', () => { $('#obdConsole').innerHTML = ''; }); $('#btnDisplayStatusAdvanced')?.addEventListener('click', refreshAdvancedDisplay); $('#btnDisplayBarsAdvanced')?.addEventListener('click', () => { const done = beginRequest(); fetch('/dev/display-pattern', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'pattern=bars' }).finally(() => { refreshAdvancedDisplay(); done(); }); }); $('#btnDisplayGridAdvanced')?.addEventListener('click', () => { const done = beginRequest(); fetch('/dev/display-pattern', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'pattern=grid' }).finally(() => { refreshAdvancedDisplay(); done(); }); }); $('#btnDisplayLogoAdvanced')?.addEventListener('click', () => { const done = beginRequest(); fetch('/dev/display-logo', { method:'POST' }).finally(() => { refreshAdvancedDisplay(); done(); }); }); window.addEventListener('resize', () => syncSavebarSpace('settingsSaveBar')); fetchStatus(); fetchWifiStatus(); fetchBleStatus(); refreshAdvancedDisplay(); setInterval(fetchStatus, 2200); setInterval(fetchWifiStatus, 2800); setInterval(fetchBleStatus, 3200); }
 document.addEventListener('DOMContentLoaded', initSettings);
 )JS");
         page += F("</script>");
@@ -761,12 +816,14 @@ String buildSettingsPage(bool savedNotice)
 {
     const WifiStatus wifi = getWifiStatus();
     const DisplayDebugInfo displayInfo = displayGetDebugInfo();
+    const TelemetryRenderSnapshot telemetrySnapshot = telemetryCopyRenderSnapshot();
 
     String page;
-    page.reserve(26000);
+    page.reserve(36000);
     appendShellHead(page, F("ShiftLight Verbindung"), true);
     page += F("<section class='hero'><div class='hero-card hero-card--accent'><div class='hero-head'><div><div class='hero-kicker'>Verbindung & Telemetrie</div><div class='hero-title'>Netzwerk, SimHub und Fahrzeug</div><div class='hero-sub'>Alle Verbindungswege bleiben funktional, sind aber klarer gruppiert und mobil deutlich ruhiger.</div></div><div class='status-list'>");
     page += "<span class='pill neutral' id='settingsTelemetryPill'>" + htmlEscape(activeTelemetryLabel()) + "</span>";
+    page += "<span class='pill " + String(g_simHubConnectionState == SimHubConnectionState::Live ? "ok" : (cfg.simHubHost.length() > 0 ? "warn" : "bad")) + "' id='settingsSimHubPill'>" + htmlEscape(simHubStateLabel()) + "</span>";
     page += "<span class='pill " + String(wifi.staConnected ? "ok" : (wifi.apActive ? "warn" : "bad")) + "' id='settingsWifiPill'>" + (wifi.staConnected ? F("WLAN online") : (wifi.apActive ? F("AP aktiv") : F("WLAN offline"))) + "</span>";
     page += "<span class='pill " + String(g_connected ? "ok" : (g_bleConnectInProgress ? "warn" : "bad")) + "' id='settingsBlePill'>" + (g_connected ? F("BLE online") : (g_bleConnectInProgress ? F("BLE verbindet") : F("BLE offline"))) + "</span>";
     page += F("</div></div><div class='badge-grid'>");
@@ -793,7 +850,72 @@ String buildSettingsPage(bool savedNotice)
     page += "<option value='0'" + selectedAttr(cfg.uiDisplayFocus == DisplayFocusMetric::Rpm) + ">RPM gross</option>";
     page += "<option value='1'" + selectedAttr(cfg.uiDisplayFocus == DisplayFocusMetric::Gear) + ">Gang gross</option>";
     page += "<option value='2'" + selectedAttr(cfg.uiDisplayFocus == DisplayFocusMetric::Speed) + ">Geschwindigkeit gross</option>";
-    page += F("</select><div class='field-note'>Steuert die grosse Hauptanzeige auf dem ESP-Display waehrend der Fahrt.</div></div></div></section>");
+    page += F("</select><div class='field-note'>Steuert die grosse Hauptanzeige auf dem ESP-Display waehrend der Fahrt.</div></div>");
+    page += F("<div class='field' style='grid-column:1 / -1'><label for='showShiftStripToggle'>Obere LED-Leiste</label><input type='hidden' name='showShiftStrip' value='0'><div class='field-inline' id='showShiftStripToggle'><div><strong>Display-LED-Leiste anzeigen</strong><span>Blendet die obere Leiste ein oder aus und gibt dem Racing-Dashboard mehr Platz.</span></div><label class='switch'><input type='checkbox' name='showShiftStrip'");
+    page += checkedAttr(cfg.uiShowShiftStrip);
+    page += F("><span class='slider'></span></label></div></div></div></section>");
+
+    page += F("<section class='panel stack'><div class='panel-head'><div><h2 class='panel-title'>Side LEDs / Traction Bars</h2><div class='panel-copy'>Die seitlichen Leisten zeigen jetzt SimHub-Traction statt Spotter oder Flags. Beim Bremsen laufen sie von oben nach unten, beim Beschleunigen von unten nach oben.</div></div></div>");
+    page += F("<input type='hidden' name='sideEnabled' value='0'><div class='field-inline'><div><strong>Side LEDs aktiv</strong><span>Blendet die seitlichen Traction-Bars im Display ein oder aus. Die obere RPM-Leiste bleibt separat.</span></div><label class='switch'><input type='checkbox' name='sideEnabled'");
+    page += checkedAttr(cfg.sideLeds.enabled);
+    page += F("><span class='slider'></span></label></div>");
+    page += F("<div class='field-grid two'><div class='field'><label for='sidePreset'>Preset</label><select id='sidePreset' name='sidePreset'>");
+    page += "<option value='gt3'" + selectedAttr(cfg.sideLeds.preset == SideLedPreset::Gt3) + ">GT3</option>";
+    page += "<option value='casual'" + selectedAttr(cfg.sideLeds.preset == SideLedPreset::Casual) + ">Casual</option>";
+    page += "<option value='minimal'" + selectedAttr(cfg.sideLeds.preset == SideLedPreset::Minimal) + ">Minimal</option>";
+    page += F("</select><div class='field-note'>Die Presets legen Standardwerte fuer Helligkeit, LED-Anzahl und Reaktionsstil fest.</div></div>");
+    page += "<div class='field'><label for='sideBrightness'>Side LED Helligkeit</label><input type='range' id='sideBrightness' name='sideBrightness' min='0' max='255' value='" + String(cfg.sideLeds.brightness) + "'><div class='field-note'>" + String(cfg.sideLeds.brightness) + " / 255</div></div></div>";
+    page += "<div class='field-grid two'><div class='field'><label for='sideLedCountPerSide'>LEDs pro Seite</label><input type='range' id='sideLedCountPerSide' name='sideLedCountPerSide' min='" + String(static_cast<int>(SIDE_LED_MIN_COUNT_PER_SIDE)) + "' max='" + String(static_cast<int>(SIDE_LED_MAX_COUNT_PER_SIDE)) + "' value='" + String(cfg.sideLeds.ledCountPerSide) + "'><div class='field-note'>" + String(cfg.sideLeds.ledCountPerSide) + " LEDs je Seite</div></div>";
+    page += F("<div class='field'><input type='hidden' name='sideAllowTraction' value='0'><div class='field-inline'><div><strong>Traction aus SimHub</strong><span>Nutzt Brake, Throttle und Wheel-Slip aus SimHub fuer die seitlichen Bars.</span></div><label class='switch'><input type='checkbox' name='sideAllowTraction'");
+    page += checkedAttr(cfg.sideLeds.allowTraction);
+    page += F("><span class='slider'></span></label></div></div>");
+    page += F("<div class='field'><input type='hidden' name='sideCloseCarBlinkingEnabled' value='0'><div class='field-inline'><div><strong>Kritischen Slip blinken</strong><span>Bei starkem Wheel-Slip blinken die aktiven Segmente schnell.</span></div><label class='switch'><input type='checkbox' name='sideCloseCarBlinkingEnabled'");
+    page += checkedAttr(cfg.sideLeds.closeCarBlinkingEnabled);
+    page += F("><span class='slider'></span></label></div></div>");
+    page += F("<div class='field'><input type='hidden' name='sideTestMode' value='0'><div class='field-inline'><div><strong>Test Override</strong><span>Erlaubt die Testknopfe unten fuer Beschleunigen, Bremsen und Slip.</span></div><label class='switch'><input type='checkbox' name='sideTestMode'");
+    page += checkedAttr(cfg.sideLeds.testMode);
+    page += F("><span class='slider'></span></label></div></div></div>");
+    page += F("<div class='side-preview'><div class='side-stack'>");
+    for (size_t i = 0; i < SIDE_LED_MAX_COUNT_PER_SIDE; ++i)
+    {
+        page += "<span class='side-led-dot' id='settingsSideLeftLed" + String(i + 1) + "' style='background:" + sideLedPreviewColor(telemetrySnapshot.sideLedFrame.left[i]) + ";opacity:" + sideLedPreviewOpacity(telemetrySnapshot.sideLedFrame.left[i]) + ";display:" + String(i < cfg.sideLeds.ledCountPerSide ? "block" : "none") + "'></span>";
+    }
+    page += F("</div><div class='side-meta'><strong id='sideSourceValue'>");
+    page += htmlEscape(String(side_led_source_name(telemetrySnapshot.sideLedFrame.source)));
+    page += F("</strong><div id='sideEventValue'>");
+    page += htmlEscape(String(side_led_event_name(telemetrySnapshot.sideLedFrame.event)));
+    page += F("</div><div id='sidePriorityValue'>");
+    page += htmlEscape(String(side_led_traction_direction_name(telemetrySnapshot.sideLedFrame.direction)));
+    page += F("</div><div id='sideFlagValue'>");
+    page += String(cfg.sideLeds.ledCountPerSide);
+    page += F(" LEDs / Seite</div><div id='sideTractionValue'>Grip Load ");
+    page += String(static_cast<int>(telemetrySnapshot.sideTelemetry.traction.throttle * 100.0f));
+    page += F("% | Brake Load ");
+    page += String(static_cast<int>(telemetrySnapshot.sideTelemetry.traction.brake * 100.0f));
+    page += F("%</div></div><div class='side-stack right'>");
+    for (size_t i = 0; i < SIDE_LED_MAX_COUNT_PER_SIDE; ++i)
+    {
+        page += "<span class='side-led-dot' id='settingsSideRightLed" + String(i + 1) + "' style='background:" + sideLedPreviewColor(telemetrySnapshot.sideLedFrame.right[i]) + ";opacity:" + sideLedPreviewOpacity(telemetrySnapshot.sideLedFrame.right[i]) + ";display:" + String(i < cfg.sideLeds.ledCountPerSide ? "block" : "none") + "'></span>";
+    }
+    page += F("</div></div>");
+    page += "<div class='field-note' id='sidePreviewStatus'>" + String(cfg.sideLeds.enabled ? "Seitenleisten aktiv" : "Seitenleisten aus") + " | " + htmlEscape(String(side_led_event_name(telemetrySnapshot.sideLedFrame.event))) + " | Richtung " + htmlEscape(String(side_led_traction_direction_name(telemetrySnapshot.sideLedFrame.direction))) + "</div>";
+    page += F("<details class='panel details' style='padding:16px'><summary><div><h3 class='panel-title'>Feinabstimmung</h3><div class='panel-copy'>Blinktempo und Spiegelung fuer die seitlichen Traction-Bars.</div></div></summary><div class='stack' style='margin-top:14px'>");
+    page += "<div class='field-grid two'><div class='field'><label for='sideBlinkSpeedSlowMs'>Blink langsam (ms)</label><input type='number' id='sideBlinkSpeedSlowMs' name='sideBlinkSpeedSlowMs' min='80' max='1500' value='" + String(cfg.sideLeds.blinkSpeedSlowMs) + "'></div>";
+    page += "<div class='field'><label for='sideBlinkSpeedFastMs'>Blink schnell (ms)</label><input type='number' id='sideBlinkSpeedFastMs' name='sideBlinkSpeedFastMs' min='40' max='900' value='" + String(cfg.sideLeds.blinkSpeedFastMs) + "'></div></div>";
+    page += F("<div class='field-grid two'>");
+    page += F("<div class='field'><input type='hidden' name='sideInvertLeftRight' value='0'><div class='field-inline'><div><strong>Links / Rechts invertieren</strong><span>Tauscht beide Seiten fuer Sonderaufbauten.</span></div><label class='switch'><input type='checkbox' name='sideInvertLeftRight'");
+    page += checkedAttr(cfg.sideLeds.invertLeftRight);
+    page += F("><span class='slider'></span></label></div></div>");
+    page += F("<div class='field'><input type='hidden' name='sideMirrorMode' value='0'><div class='field-inline'><div><strong>Mirror Mode</strong><span>Spiegelt die staerkere Seite auf beide Leisten.</span></div><label class='switch'><input type='checkbox' name='sideMirrorMode'");
+    page += checkedAttr(cfg.sideLeds.mirrorMode);
+    page += F("><span class='slider'></span></label></div></div>");
+    page += F("<div class='field'><input type='hidden' name='sideSeverityLevelsEnabled' value='0'><div class='field-inline'><div><strong>Slip-Intensitaet nutzen</strong><span>Hoeherer Slip zieht die Bars pro Seite weiter auf.</span></div><label class='switch'><input type='checkbox' name='sideSeverityLevelsEnabled'");
+    page += checkedAttr(cfg.sideLeds.severityLevelsEnabled);
+    page += F("><span class='slider'></span></label></div></div>");
+    page += F("<div class='field'><input type='hidden' name='sideIdleAnimationEnabled' value='0'><div class='field-inline'><div><strong>Idle Animation</strong><span>Leichter Sweep wenn keine Traction-Daten anliegen.</span></div><label class='switch'><input type='checkbox' name='sideIdleAnimationEnabled'");
+    page += checkedAttr(cfg.sideLeds.idleAnimationEnabled);
+    page += F("><span class='slider'></span></label></div></div></div></div></details>");
+    page += F("<div class='button-grid'><button type='button' class='btn btn-secondary' id='btnSideAccel'>Beschleunigen</button><button type='button' class='btn btn-secondary' id='btnSideBrake'>Bremsen</button><button type='button' class='btn btn-secondary' id='btnSideTractionLeft'>Slip links</button><button type='button' class='btn btn-secondary' id='btnSideTractionRight'>Slip rechts</button><button type='button' class='btn btn-secondary' id='btnSideTractionBoth'>Slip beide</button><button type='button' class='btn btn-ghost' id='btnSideClear'>Test Clear</button></div></section>";
 
     page += F("<section class='panel stack'><div class='panel-head'><div><h2 class='panel-title'>WLAN</h2><div class='panel-copy'>Status, Quick Connect und persistente Zugangsdaten in einem Bereich.</div></div></div>");
     page += F("<div class='field'><label for='wifiMode'>WLAN Modus</label><select id='wifiMode' name='wifiMode'>");

@@ -4,6 +4,9 @@
 #include <Arduino.h>
 #include <vector>
 
+#include "telemetry/side_leds.h"
+#include "ui/ui_session_data.h"
+
 #if !defined(RPMCOUNTER_USE_NIMBLE) && __has_include(<NimBLEDevice.h>)
 #define RPMCOUNTER_USE_NIMBLE 1
 #endif
@@ -138,6 +141,8 @@ extern int g_simHubVehicleSpeedKmh;
 extern int g_simHubGear;
 extern float g_simHubThrottle;
 extern bool g_simHubPitLimiterActive;
+extern UiSessionData g_simHubSessionData;
+extern SideLedTelemetry g_simHubSideTelemetry;
 extern unsigned long g_lastSimHubTelemetryMs;
 extern unsigned long g_lastSimHubNetworkTelemetryMs;
 extern bool g_simHubEverReceived;
@@ -151,6 +156,9 @@ extern int g_usbSimVehicleSpeedKmh;
 extern int g_usbSimGear;
 extern float g_usbSimThrottle;
 extern bool g_usbSimPitLimiterActive;
+extern SideLedTelemetry g_usbSimSideTelemetry;
+
+extern SideLedTestState g_sideLedTestState;
 
 extern bool g_usbSerialConnected;
 extern bool g_usbBridgeConnected;

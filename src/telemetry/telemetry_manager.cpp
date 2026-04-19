@@ -36,6 +36,7 @@ namespace
     unsigned long g_lastDecayMs = 0;
     portMUX_TYPE g_telemetrySnapshotMux = portMUX_INITIALIZER_UNLOCKED;
     TelemetryRenderSnapshot g_renderSnapshot{};
+    SideLedController g_sideLedController{};
     unsigned long g_lastSnapshotPublishMs = 0;
     uint32_t g_snapshotPublishCount = 0;
     TelemetrySourceTransitionEvent g_sourceHistory[TELEMETRY_DEBUG_HISTORY_LEN]{};
@@ -468,6 +469,20 @@ namespace
 
         const ActiveTelemetrySource simSessionSource = chooseSimSessionSource(nextSource, mode);
         const SimSessionState simSessionState = trackSimSessionTransition(nowMs, simSessionSource, deriveSimSessionState(simSessionSource));
+        SideLedTelemetry sideTelemetry{};
+        switch (nextSource)
+        {
+        case ActiveTelemetrySource::UsbSim:
+            sideTelemetry = g_usbSimSideTelemetry;
+            break;
+        case ActiveTelemetrySource::SimHubNetwork:
+            sideTelemetry = g_simHubSideTelemetry;
+            break;
+        case ActiveTelemetrySource::Obd:
+        case ActiveTelemetrySource::None:
+        default:
+            break;
+        }
 
         TelemetryRenderSnapshot snapshot{};
         snapshot.source = nextSource;
@@ -477,6 +492,9 @@ namespace
         snapshot.gear = g_estimatedGear;
         snapshot.throttle = g_currentThrottle;
         snapshot.pitLimiter = g_pitLimiterActive;
+        snapshot.sideTelemetry = sideTelemetry;
+        snapshot.sideLedFrame = g_sideLedController.update(sideTelemetry, cfg.sideLeds, nowMs, &g_sideLedTestState);
+        snapshot.sideLedPriority = g_sideLedController.lastPriorityResult();
         snapshot.sampleTimestampMs = lastSampleForSource(nextSource);
         snapshot.telemetryFresh = sourceFreshForSnapshot(nextSource, usbFresh, simHubFresh, obdFresh);
         snapshot.fallbackActive = telemetrySourceIsFallback(nextSource, cfg.telemetryPreference, cfg.simTransportPreference);

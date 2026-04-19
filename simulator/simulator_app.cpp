@@ -1,11 +1,18 @@
 #include "simulator_app.h"
 
 #include <algorithm>
+#include <iostream>
 #include <string>
 #include <utility>
 
+#include "virtual_led_bar.h"
+
 namespace
 {
+    constexpr int kMinLedMaxRpm = 1000;
+    constexpr int kMaxLedMaxRpm = 14000;
+    constexpr int kMaxLedStartRpm = 12000;
+
     UiTelemetrySource to_ui_telemetry_source(TelemetryInputMode mode, bool usingFallback)
     {
         if (usingFallback)
@@ -34,11 +41,26 @@ namespace
     {
         return SimulatorDeviceConfig{};
     }
+
+    bool is_supported_drive_gear(int gear)
+    {
+        return gear >= 1 && gear <= static_cast<int>(kSimulatorGearCount);
+    }
+
+    size_t gear_index_for(int gear)
+    {
+        return static_cast<size_t>(std::clamp(gear, 1, static_cast<int>(kSimulatorGearCount)) - 1);
+    }
+
+    int clamp_led_max_rpm(int value, int startRpm)
+    {
+        return std::clamp(value, startRpm + 1, kMaxLedMaxRpm);
+    }
 }
 
 SimulatorApp::SimulatorApp()
 {
-    telemetryConfig_.mode = TelemetryInputMode::Simulator;
+    telemetryConfig_.mode = TelemetryInputMode::SimHub;
     telemetryConfig_.simHubTransport = SimHubTransport::HttpApi;
     telemetryConfig_.udpPort = 20888;
     telemetryConfig_.httpPort = 8888;
@@ -48,6 +70,8 @@ SimulatorApp::SimulatorApp()
     telemetryConfig_.allowSimulatorFallback = false;
     ledBarConfig_ = default_led_bar_config();
     deviceConfig_ = default_device_config();
+    state_.settings = UiSettings{};
+    loadPersistedState();
     reset();
 }
 
@@ -59,6 +83,8 @@ void SimulatorApp::configureTelemetry(const TelemetryServiceConfig &config)
         telemetryService_.configure(telemetryConfig_);
     }
     reset();
+    std::lock_guard<std::mutex> lock(mutex_);
+    persistStateLocked();
 }
 
 void SimulatorApp::reset()
@@ -84,7 +110,12 @@ void SimulatorApp::reset()
     state_.wifiMode = UiWifiMode::StaWithApFallback;
     state_.simTransportMode = telemetryConfig_.mode == TelemetryInputMode::SimHub ? UiSimTransportMode::NetworkOnly : UiSimTransportMode::Auto;
     state_.usbState = UiUsbState::Disabled;
-    maxObservedRpm_ = std::max(ledBarConfig_.startRpm + 1, ledBarConfig_.fixedMaxRpm);
+    normalizeLedBarConfigLocked();
+    normalizeSideLedConfigLocked();
+    syncLearnedMaxRpmLocked();
+    syncObservedMaxRpmLocked();
+    sideLedController_.reset();
+    sideLedTestState_ = SideLedTestState{};
 
     shiftOverrideEnabled_ = false;
     shiftOverrideValue_ = false;
@@ -198,6 +229,9 @@ void SimulatorApp::applyWifiModeLocked()
 void SimulatorApp::applyTelemetryFrameLocked()
 {
     const NormalizedTelemetryFrame &frame = telemetryService_.frame();
+    const int previousEffectiveMaxRpm = ledBarConfig_.effectiveMaxRpm;
+    const SimulatorGearRpmArray previousEffectiveMaxRpmByGear = ledBarConfig_.effectiveMaxRpmByGear;
+    const SimulatorGearLearnedArray previousLearnedMaxRpmByGear = ledBarConfig_.learnedMaxRpmByGear;
     state_.telemetrySource = to_ui_telemetry_source(telemetryConfig_.mode, frame.usingFallback);
     state_.telemetryStale = frame.stale;
     state_.telemetryUsingFallback = frame.usingFallback;
@@ -206,7 +240,9 @@ void SimulatorApp::applyTelemetryFrameLocked()
     state_.rpm = frame.rpm;
     state_.speedKmh = frame.speedKmh;
     state_.gear = frame.gear;
-    state_.shift = frame.rpm >= 5600;
+    state_.session = frame.session;
+    state_.sideLedConfig = sideLedConfig_;
+    state_.sideTelemetry = frame.sideLeds;
     state_.simHubConfigured = telemetryConfig_.mode == TelemetryInputMode::SimHub;
     state_.simHubReachable = !frame.stale;
     state_.simHubEndpoint = telemetryConfig_.mode == TelemetryInputMode::SimHub
@@ -217,12 +253,23 @@ void SimulatorApp::applyTelemetryFrameLocked()
     state_.wifiSuppressed = false;
     state_.usbState = UiUsbState::Disabled;
 
+    updateEffectiveLedMaxRpmLocked();
+    state_.ledStartRpm = ledBarConfig_.startRpm;
+    state_.ledMaxRpm = ledBarConfig_.effectiveMaxRpm;
+    const float ledRatio =
+        std::clamp((static_cast<float>(state_.rpm) - static_cast<float>(state_.ledStartRpm)) /
+                       static_cast<float>(std::max(1, state_.ledMaxRpm - state_.ledStartRpm)),
+                   0.0f,
+                   1.0f);
+    const VirtualLedBarFrame ledFrame = build_virtual_led_bar_frame(state_, ledBarConfig_, state_.telemetryTimestampMs);
+    state_.sideLedFrame = sideLedController_.update(frame.sideLeds, sideLedConfig_, state_.telemetryTimestampMs, &sideLedTestState_);
+    state_.sideLedPriority = sideLedController_.lastPriorityResult();
+    state_.shiftWindowActive = ledRatio >= (static_cast<float>(ledBarConfig_.blinkStartPct) / 100.0f);
+    state_.shift = ledFrame.blinkActive;
     if (shiftOverrideEnabled_)
     {
         state_.shift = shiftOverrideValue_;
     }
-
-    updateEffectiveLedMaxRpmLocked();
 
     if (telemetryConfig_.mode == TelemetryInputMode::SimHub)
     {
@@ -240,6 +287,15 @@ void SimulatorApp::applyTelemetryFrameLocked()
     }
 
     refreshWebStateLocked();
+
+    const bool ledLearningChanged =
+        previousEffectiveMaxRpm != ledBarConfig_.effectiveMaxRpm ||
+        previousEffectiveMaxRpmByGear != ledBarConfig_.effectiveMaxRpmByGear ||
+        previousLearnedMaxRpmByGear != ledBarConfig_.learnedMaxRpmByGear;
+    if (ledLearningChanged && ledBarConfig_.maxRpmPerGearEnabled && ledBarConfig_.autoScaleMaxRpm)
+    {
+        persistStateLocked();
+    }
 }
 
 void SimulatorApp::tick(uint32_t nowMs)
@@ -344,6 +400,7 @@ void SimulatorApp::saveSettings(const UiSettings &settings)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     state_.settings = settings;
+    persistStateLocked();
 }
 
 void SimulatorApp::setWebServerPort(uint16_t port)
@@ -357,19 +414,20 @@ void SimulatorApp::applyLedBarConfig(const SimulatorLedBarConfig &config)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     ledBarConfig_ = config;
-    ledBarConfig_.mode = simulator_led_mode_from_int(static_cast<int>(ledBarConfig_.mode));
-    ledBarConfig_.autoScaleMaxRpm = config.autoScaleMaxRpm;
-    ledBarConfig_.fixedMaxRpm = std::clamp(config.fixedMaxRpm, ledBarConfig_.startRpm + 1, 14000);
-    ledBarConfig_.activeLedCount = std::clamp(ledBarConfig_.activeLedCount, 1, 60);
-    ledBarConfig_.brightness = std::clamp(ledBarConfig_.brightness, 0, 255);
-    ledBarConfig_.startRpm = std::clamp(ledBarConfig_.startRpm, 0, 12000);
-    ledBarConfig_.fixedMaxRpm = std::clamp(ledBarConfig_.fixedMaxRpm, ledBarConfig_.startRpm + 1, 14000);
-    ledBarConfig_.greenEndPct = std::clamp(ledBarConfig_.greenEndPct, 0, 100);
-    ledBarConfig_.yellowEndPct = std::clamp(ledBarConfig_.yellowEndPct, ledBarConfig_.greenEndPct, 100);
-    ledBarConfig_.redEndPct = std::clamp(ledBarConfig_.redEndPct, ledBarConfig_.yellowEndPct, 100);
-    ledBarConfig_.blinkStartPct = std::clamp(ledBarConfig_.blinkStartPct, ledBarConfig_.redEndPct, 100);
-    ledBarConfig_.blinkSpeedPct = std::clamp(ledBarConfig_.blinkSpeedPct, 0, 100);
+    normalizeLedBarConfigLocked();
+    syncLearnedMaxRpmLocked();
+    syncObservedMaxRpmLocked();
     updateEffectiveLedMaxRpmLocked();
+    persistStateLocked();
+}
+
+void SimulatorApp::applySideLedConfig(const SideLedConfig &config)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    sideLedConfig_ = config;
+    normalizeSideLedConfigLocked();
+    applyTelemetryFrameLocked();
+    persistStateLocked();
 }
 
 void SimulatorApp::applyDeviceConfig(const SimulatorDeviceConfig &config)
@@ -393,6 +451,64 @@ void SimulatorApp::applyDeviceConfig(const SimulatorDeviceConfig &config)
     }
 
     applyWifiModeLocked();
+    persistStateLocked();
+}
+
+void SimulatorApp::connectWifi(const std::string &ssid, const std::string &password)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!ssid.empty())
+    {
+        deviceConfig_.staSsid = ssid;
+    }
+    deviceConfig_.staPassword = password;
+    wifiMode_ = WifiModePreset::Connected;
+    applyWifiModeLocked();
+    persistStateLocked();
+}
+
+void SimulatorApp::disconnectWifi()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    wifiMode_ = WifiModePreset::Offline;
+    applyWifiModeLocked();
+}
+
+void SimulatorApp::connectBleDevice(const std::string &name, const std::string &address)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!name.empty())
+    {
+        bleTargetName_ = name;
+    }
+    if (!address.empty())
+    {
+        bleTargetAddress_ = address;
+    }
+
+    if (telemetryConfig_.mode == TelemetryInputMode::SimHub)
+    {
+        persistStateLocked();
+        return;
+    }
+
+    bleMode_ = BleMode::Connected;
+    applyBleModeLocked();
+    applyTelemetryFrameLocked();
+    persistStateLocked();
+}
+
+void SimulatorApp::disconnectBle()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (telemetryConfig_.mode == TelemetryInputMode::SimHub)
+    {
+        return;
+    }
+
+    bleMode_ = BleMode::Disconnected;
+    applyBleModeLocked();
+    applyTelemetryFrameLocked();
 }
 
 void SimulatorApp::updateUiDebugSnapshot(const UiDebugSnapshot &snapshot)
@@ -443,6 +559,12 @@ SimulatorLedBarConfig SimulatorApp::ledBarConfigSnapshot() const
     return ledBarConfig_;
 }
 
+SideLedConfig SimulatorApp::sideLedConfigSnapshot() const
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return sideLedConfig_;
+}
+
 SimulatorDeviceConfig SimulatorApp::deviceConfigSnapshot() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -457,23 +579,175 @@ SimulatorStatusSnapshot SimulatorApp::statusSnapshot() const
     snapshot.ui = uiDebugSnapshot_;
     snapshot.telemetry = telemetryConfig_;
     snapshot.ledBar = ledBarConfig_;
+    snapshot.sideLeds = sideLedConfig_;
     snapshot.device = deviceConfig_;
+    snapshot.bleTargetName = bleTargetName_;
+    snapshot.bleTargetAddress = bleTargetAddress_;
     snapshot.webPort = webServerPort_;
     snapshot.webBaseUrl = "http://" + local_web_host(webServerPort_);
     return snapshot;
 }
 
+void SimulatorApp::normalizeLedBarConfigLocked()
+{
+    ledBarConfig_.mode = simulator_led_mode_from_int(static_cast<int>(ledBarConfig_.mode));
+    ledBarConfig_.startRpm = std::clamp(ledBarConfig_.startRpm, 0, kMaxLedStartRpm);
+    ledBarConfig_.fixedMaxRpm = clamp_led_max_rpm(ledBarConfig_.fixedMaxRpm, ledBarConfig_.startRpm);
+    ledBarConfig_.effectiveMaxRpm = clamp_led_max_rpm(ledBarConfig_.effectiveMaxRpm, ledBarConfig_.startRpm);
+    ledBarConfig_.activeLedCount = std::clamp(ledBarConfig_.activeLedCount, 1, 60);
+    ledBarConfig_.brightness = std::clamp(ledBarConfig_.brightness, 0, 255);
+    ledBarConfig_.greenEndPct = std::clamp(ledBarConfig_.greenEndPct, 0, 100);
+    ledBarConfig_.yellowEndPct = std::clamp(ledBarConfig_.yellowEndPct, ledBarConfig_.greenEndPct, 100);
+    ledBarConfig_.redEndPct = std::clamp(ledBarConfig_.redEndPct, ledBarConfig_.yellowEndPct, 100);
+    ledBarConfig_.blinkStartPct = std::clamp(ledBarConfig_.blinkStartPct, ledBarConfig_.redEndPct, 100);
+    ledBarConfig_.blinkSpeedPct = std::clamp(ledBarConfig_.blinkSpeedPct, 0, 100);
+
+    for (size_t i = 0; i < kSimulatorGearCount; ++i)
+    {
+        ledBarConfig_.fixedMaxRpmByGear[i] = clamp_led_max_rpm(ledBarConfig_.fixedMaxRpmByGear[i], ledBarConfig_.startRpm);
+        ledBarConfig_.effectiveMaxRpmByGear[i] = clamp_led_max_rpm(ledBarConfig_.effectiveMaxRpmByGear[i], ledBarConfig_.startRpm);
+    }
+}
+
+void SimulatorApp::normalizeSideLedConfigLocked()
+{
+    normalize_side_led_config(sideLedConfig_);
+}
+
+void SimulatorApp::syncObservedMaxRpmLocked()
+{
+    maxObservedRpm_ = std::max(ledBarConfig_.startRpm + 1, ledBarConfig_.effectiveMaxRpm);
+    for (size_t i = 0; i < kSimulatorGearCount; ++i)
+    {
+        const int gearFallback = clamp_led_max_rpm(ledBarConfig_.fixedMaxRpmByGear[i], ledBarConfig_.startRpm);
+        if (ledBarConfig_.learnedMaxRpmByGear[i])
+        {
+            maxObservedRpmByGear_[i] = std::max(ledBarConfig_.startRpm + 1, ledBarConfig_.effectiveMaxRpmByGear[i]);
+        }
+        else
+        {
+            maxObservedRpmByGear_[i] = std::max(ledBarConfig_.startRpm + 1, gearFallback);
+            ledBarConfig_.effectiveMaxRpmByGear[i] = gearFallback;
+        }
+    }
+}
+
+void SimulatorApp::syncLearnedMaxRpmLocked()
+{
+    if (!ledBarConfig_.maxRpmPerGearEnabled)
+    {
+        ledBarConfig_.learnedMaxRpmByGear.fill(false);
+    }
+}
+
 void SimulatorApp::updateEffectiveLedMaxRpmLocked()
 {
-    const int baselineMaxRpm = std::clamp(std::max(2000, ledBarConfig_.startRpm + 1), ledBarConfig_.startRpm + 1, 14000);
-    if (ledBarConfig_.autoScaleMaxRpm)
+    const int baselineMaxRpm = std::clamp(std::max(2000, ledBarConfig_.startRpm + 1), ledBarConfig_.startRpm + 1, kMaxLedMaxRpm);
+
+    if (ledBarConfig_.maxRpmPerGearEnabled && is_supported_drive_gear(state_.gear))
     {
-        maxObservedRpm_ = std::max(maxObservedRpm_, std::max(state_.rpm, baselineMaxRpm));
-        ledBarConfig_.effectiveMaxRpm = std::clamp(maxObservedRpm_, baselineMaxRpm, 14000);
+        const size_t gearIndex = gear_index_for(state_.gear);
+        const int configuredGearMax = std::max(baselineMaxRpm, clamp_led_max_rpm(ledBarConfig_.fixedMaxRpmByGear[gearIndex], ledBarConfig_.startRpm));
+        if (ledBarConfig_.autoScaleMaxRpm)
+        {
+            maxObservedRpmByGear_[gearIndex] = std::max(maxObservedRpmByGear_[gearIndex], std::max(state_.rpm, configuredGearMax));
+            ledBarConfig_.effectiveMaxRpmByGear[gearIndex] = std::clamp(maxObservedRpmByGear_[gearIndex], configuredGearMax, kMaxLedMaxRpm);
+            ledBarConfig_.learnedMaxRpmByGear[gearIndex] = true;
+        }
+        else
+        {
+            ledBarConfig_.effectiveMaxRpmByGear[gearIndex] = configuredGearMax;
+            maxObservedRpmByGear_[gearIndex] = configuredGearMax;
+        }
+        ledBarConfig_.effectiveMaxRpm = ledBarConfig_.effectiveMaxRpmByGear[gearIndex];
     }
     else
     {
-        ledBarConfig_.effectiveMaxRpm = std::clamp(ledBarConfig_.fixedMaxRpm, baselineMaxRpm, 14000);
-        maxObservedRpm_ = ledBarConfig_.effectiveMaxRpm;
+        if (ledBarConfig_.autoScaleMaxRpm)
+        {
+            maxObservedRpm_ = std::max(maxObservedRpm_, std::max(state_.rpm, baselineMaxRpm));
+            ledBarConfig_.effectiveMaxRpm = std::clamp(maxObservedRpm_, baselineMaxRpm, kMaxLedMaxRpm);
+        }
+        else
+        {
+            ledBarConfig_.effectiveMaxRpm = std::clamp(ledBarConfig_.fixedMaxRpm, baselineMaxRpm, kMaxLedMaxRpm);
+            maxObservedRpm_ = ledBarConfig_.effectiveMaxRpm;
+        }
     }
+
+    if (!ledBarConfig_.maxRpmPerGearEnabled)
+    {
+        for (size_t i = 0; i < kSimulatorGearCount; ++i)
+        {
+            ledBarConfig_.effectiveMaxRpmByGear[i] = ledBarConfig_.effectiveMaxRpm;
+        }
+    }
+}
+
+void SimulatorApp::loadPersistedState()
+{
+    SimulatorPersistedState persisted{};
+    persisted.settings = UiSettings{};
+    persisted.telemetry = telemetryConfig_;
+    persisted.ledBar = ledBarConfig_;
+    persisted.sideLeds = sideLedConfig_;
+    persisted.device = deviceConfig_;
+    persisted.bleTargetName = bleTargetName_;
+    persisted.bleTargetAddress = bleTargetAddress_;
+
+    std::string errorMessage;
+    if (!load_simulator_persisted_state(persisted, &errorMessage))
+    {
+        if (!errorMessage.empty())
+        {
+            std::cerr << "[sim] Persisted settings konnten nicht geladen werden: " << errorMessage << '\n';
+        }
+        return;
+    }
+
+    state_.settings = persisted.settings;
+    telemetryConfig_ = persisted.telemetry;
+    ledBarConfig_ = persisted.ledBar;
+    sideLedConfig_ = persisted.sideLeds;
+    deviceConfig_ = persisted.device;
+    bleTargetName_ = persisted.bleTargetName.empty() ? bleTargetName_ : persisted.bleTargetName;
+    bleTargetAddress_ = persisted.bleTargetAddress.empty() ? bleTargetAddress_ : persisted.bleTargetAddress;
+    normalizeLedBarConfigLocked();
+    normalizeSideLedConfigLocked();
+    syncLearnedMaxRpmLocked();
+    syncObservedMaxRpmLocked();
+}
+
+void SimulatorApp::persistStateLocked()
+{
+    SimulatorPersistedState persisted{};
+    persisted.settings = state_.settings;
+    persisted.telemetry = telemetryConfig_;
+    persisted.ledBar = ledBarConfig_;
+    persisted.sideLeds = sideLedConfig_;
+    persisted.device = deviceConfig_;
+    persisted.bleTargetName = bleTargetName_;
+    persisted.bleTargetAddress = bleTargetAddress_;
+
+    std::string errorMessage;
+    if (!save_simulator_persisted_state(persisted, &errorMessage) && !errorMessage.empty())
+    {
+        std::cerr << "[sim] Persisted settings konnten nicht gespeichert werden: " << errorMessage << '\n';
+    }
+}
+
+void SimulatorApp::triggerSideLedTest(SideLedTestPattern pattern, uint32_t nowMs)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    sideLedTestState_.active = pattern != SideLedTestPattern::None;
+    sideLedTestState_.pattern = pattern;
+    sideLedTestState_.untilMs = nowMs + 3500U;
+    applyTelemetryFrameLocked();
+}
+
+void SimulatorApp::clearSideLedTest()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    sideLedTestState_ = SideLedTestState{};
+    applyTelemetryFrameLocked();
 }

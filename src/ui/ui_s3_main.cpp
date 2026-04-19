@@ -13,7 +13,7 @@ namespace
     {
         Display = 0,
         Source,
-        Web
+        Session
     };
 
     enum class WebTarget : uint8_t
@@ -43,34 +43,6 @@ namespace
         lv_obj_t *caption = nullptr;
     };
 
-    struct DerivedRaceData
-    {
-        bool available = false;
-        float deltaSeconds = 0.0f;
-        uint32_t predictedLapMs = 0;
-        uint32_t lastLapMs = 0;
-        uint32_t bestLapMs = 0;
-        uint32_t sessionClockMs = 0;
-        int position = 0;
-        int totalPositions = 21;
-        int lap = 0;
-        int totalLaps = 12;
-        float fuelLiters = 0.0f;
-        float fuelAvgPerLap = 2.85f;
-        float fuelLapsRemaining = 0.0f;
-        float oilTempC = 0.0f;
-        float oilPressureBar = 0.0f;
-        float oilLevel = 0.0f;
-        float fuelPressureBar = 0.0f;
-        float waterTempC = 0.0f;
-        float batteryVolts = 0.0f;
-        int tractionControl = 3;
-        int tractionCut = 0;
-        int absLevel = 4;
-        float brakeBias = 53.0f;
-        int engineMap = 1;
-    };
-
     struct UiRefs
     {
         lv_disp_t *disp = nullptr;
@@ -81,6 +53,8 @@ namespace
         bool compact = false;
 
         std::array<lv_obj_t *, 16> shiftSegments{};
+        std::array<lv_obj_t *, SIDE_LED_MAX_COUNT_PER_SIDE> sideLeftSegments{};
+        std::array<lv_obj_t *, SIDE_LED_MAX_COUNT_PER_SIDE> sideRightSegments{};
 
         lv_obj_t *sourcePanel = nullptr;
         lv_obj_t *sourceTitle = nullptr;
@@ -195,6 +169,7 @@ namespace
 
     constexpr int kActionCount = 3;
     constexpr int kShiftSegmentCount = 16;
+    constexpr int kSideLedCount = static_cast<int>(SIDE_LED_MAX_COUNT_PER_SIDE);
     constexpr uint32_t kLogoDurationMs = 1400;
     constexpr uint32_t kUsbBridgeWebPort = 8765;
 
@@ -234,6 +209,11 @@ namespace
     bool compact_mode()
     {
         return g_ui.compact;
+    }
+
+    bool show_shift_strip_enabled()
+    {
+        return g_state.runtime.settings.showShiftStrip;
     }
 
     std::string gear_text(int gear)
@@ -454,9 +434,8 @@ namespace
 
     std::string source_status_meta()
     {
-        std::string meta = "WIFI ";
-        meta += g_state.runtime.currentSsid.empty() ? wifi_state_short() : g_state.runtime.currentSsid;
-        meta += "  |  BLE ";
+        std::string meta = g_state.runtime.currentSsid.empty() ? wifi_state_short() : g_state.runtime.currentSsid;
+        meta += "  |  ";
         meta += ble_state_short();
         return meta;
     }
@@ -476,23 +455,23 @@ namespace
             return "Waiting for live telemetry";
         }
 
-        if (!g_state.runtime.ip.empty())
+        if (g_state.runtime.shift)
         {
-            return "WEB READY";
+            return "SHIFT";
         }
-        if (!g_state.runtime.apIp.empty())
-        {
-            return "AP READY";
-        }
-        if (!g_state.runtime.simHubEndpoint.empty())
+        if (!g_state.runtime.simHubEndpoint.empty() && g_state.runtime.telemetrySource == UiTelemetrySource::SimHubNetwork)
         {
             return "SIM LIVE";
         }
-        if (!g_state.runtime.usbHost.empty())
+        if (!g_state.runtime.usbHost.empty() && g_state.runtime.telemetrySource == UiTelemetrySource::UsbBridge)
         {
             return "USB LIVE";
         }
-        return "ShiftLight ready";
+        if (g_state.runtime.telemetrySource == UiTelemetrySource::Esp32Obd)
+        {
+            return "OBD LIVE";
+        }
+        return "TRACK READY";
     }
 
     std::string action_label(HomeAction action)
@@ -503,10 +482,85 @@ namespace
             return "Display";
         case HomeAction::Source:
             return "Source";
-        case HomeAction::Web:
+        case HomeAction::Session:
         default:
-            return "Web";
+            return "Session";
         }
+    }
+
+    float active_led_ratio()
+    {
+        const int startRpm = std::max(0, g_state.runtime.ledStartRpm);
+        const int maxRpm = std::max(startRpm + 1, g_state.runtime.ledMaxRpm);
+        return std::clamp((static_cast<float>(g_state.runtime.rpm) - static_cast<float>(startRpm)) /
+                              static_cast<float>(std::max(1, maxRpm - startRpm)),
+                          0.0f,
+                          1.0f);
+    }
+
+    void set_object_y(lv_obj_t *obj, int y)
+    {
+        if (obj)
+        {
+            lv_obj_set_y(obj, y);
+        }
+    }
+
+    void set_object_pos(lv_obj_t *obj, int x, int y)
+    {
+        if (obj)
+        {
+            lv_obj_set_pos(obj, x, y);
+        }
+    }
+
+    int active_side_led_count()
+    {
+        const uint8_t configured = g_state.runtime.sideLedConfig.ledCountPerSide;
+        return std::clamp(static_cast<int>(configured),
+                          static_cast<int>(SIDE_LED_MIN_COUNT_PER_SIDE),
+                          static_cast<int>(SIDE_LED_MAX_COUNT_PER_SIDE));
+    }
+
+    int side_led_width()
+    {
+        return compact_mode() ? 8 : 10;
+    }
+
+    int side_led_height()
+    {
+        const int count = active_side_led_count();
+        if (count >= 14)
+        {
+            return compact_mode() ? 10 : 12;
+        }
+        if (count >= 10)
+        {
+            return compact_mode() ? 12 : 14;
+        }
+        if (count >= 8)
+        {
+            return compact_mode() ? 14 : 17;
+        }
+        return compact_mode() ? 16 : 20;
+    }
+
+    int side_led_gap()
+    {
+        const int count = active_side_led_count();
+        if (count >= 14)
+        {
+            return compact_mode() ? 3 : 4;
+        }
+        if (count >= 10)
+        {
+            return compact_mode() ? 4 : 6;
+        }
+        if (count >= 8)
+        {
+            return compact_mode() ? 5 : 8;
+        }
+        return compact_mode() ? 8 : 12;
     }
 
     std::string format_clock(uint32_t milliseconds)
@@ -567,9 +621,9 @@ namespace
         return std::string(buffer);
     }
 
-    DerivedRaceData derive_race_data()
+    UiSessionData build_derived_session_data()
     {
-        DerivedRaceData data{};
+        UiSessionData data{};
         if (g_state.runtime.telemetryStale && g_state.runtime.rpm <= 0 && g_state.runtime.speedKmh <= 0)
         {
             return data;
@@ -580,28 +634,95 @@ namespace
         const float throttle = std::clamp(g_state.runtime.throttle, 0.0f, 1.0f);
         const float timeS = static_cast<float>(now_ms()) / 1000.0f;
 
-        data.available = true;
+        data.hasAnyData = true;
+        data.hasDelta = true;
         data.deltaSeconds = 0.18f * std::sin(timeS * 0.9f) + (0.45f - speedRatio) * 0.32f;
+        data.hasPredictedLap = true;
         data.predictedLapMs = static_cast<uint32_t>(std::clamp(90500.0f - speedRatio * 12000.0f - throttle * 2600.0f, 76000.0f, 120000.0f));
+        data.hasLastLap = true;
         data.lastLapMs = static_cast<uint32_t>(std::max(60000.0f, data.predictedLapMs + 1150.0f + 650.0f * std::sin(timeS * 0.55f)));
+        data.hasBestLap = true;
         data.bestLapMs = static_cast<uint32_t>(std::max(60000.0f, data.predictedLapMs - 420.0f - 260.0f * std::cos(timeS * 0.45f)));
+        data.hasSessionClock = true;
         data.sessionClockMs = 17U * 60U * 1000U + (now_ms() % (47U * 60U * 1000U));
+        data.hasPosition = true;
         data.position = std::max(1, 5 - static_cast<int>(std::round(speedRatio * 2.0f)));
-        data.lap = 1 + static_cast<int>((timeS / std::max(1.0f, static_cast<float>(data.predictedLapMs) / 1000.0f))) % data.totalLaps;
+        data.hasTotalPositions = true;
+        data.totalPositions = 21;
+        data.hasLap = true;
+        data.lap = 1 + static_cast<int>((timeS / std::max(1.0f, static_cast<float>(data.predictedLapMs) / 1000.0f))) % 12;
+        data.hasTotalLaps = true;
+        data.totalLaps = 12;
+        data.hasFuelLiters = true;
         data.fuelLiters = std::max(2.4f, 12.0f - timeS * 0.015f);
+        data.hasFuelAvgPerLap = true;
+        data.fuelAvgPerLap = 2.85f;
+        data.hasFuelLapsRemaining = true;
         data.fuelLapsRemaining = data.fuelLiters / data.fuelAvgPerLap;
+        data.hasOilTemp = true;
         data.oilTempC = 77.0f + throttle * 10.0f + speedRatio * 3.5f;
+        data.hasOilPressure = true;
         data.oilPressureBar = 2.1f + throttle * 2.3f + rpmRatio * 1.0f;
+        data.hasOilLevel = true;
         data.oilLevel = 5.0f;
+        data.hasFuelPressure = true;
         data.fuelPressureBar = 2.3f + throttle * 0.9f;
+        data.hasWaterTemp = true;
         data.waterTempC = 77.0f + throttle * 8.0f + speedRatio * 2.5f;
+        data.hasBatteryVolts = true;
         data.batteryVolts = 14.0f + (g_state.runtime.usbConnected ? 0.2f : 0.0f) + (g_state.runtime.staConnected ? 0.1f : 0.0f);
+        data.hasTractionControl = true;
         data.tractionControl = 3;
+        data.hasTractionCut = true;
         data.tractionCut = g_state.runtime.shift ? 1 : 0;
+        data.hasAbs = true;
         data.absLevel = 4;
+        data.hasBrakeBias = true;
         data.brakeBias = 53.0f + 0.2f * std::sin(timeS * 0.4f);
+        data.hasEngineMap = true;
         data.engineMap = g_state.runtime.telemetrySource == UiTelemetrySource::SimHubNetwork ? 1 : 2;
         return data;
+    }
+
+    UiSessionData build_session_display_data()
+    {
+        if (g_state.runtime.session.hasAnyData)
+        {
+            return g_state.runtime.session;
+        }
+
+        if (g_state.runtime.telemetrySource == UiTelemetrySource::SimHubNetwork && !g_state.runtime.telemetryUsingFallback)
+        {
+            return UiSessionData{};
+        }
+
+        return build_derived_session_data();
+    }
+
+    std::string format_position_text(const UiSessionData &data)
+    {
+        if (data.hasPosition && data.hasTotalPositions)
+        {
+            return std::to_string(data.position) + "/" + std::to_string(data.totalPositions);
+        }
+        if (data.hasPosition)
+        {
+            return std::to_string(data.position);
+        }
+        return "--";
+    }
+
+    std::string format_lap_text(const UiSessionData &data)
+    {
+        if (data.hasLap && data.hasTotalLaps)
+        {
+            return std::to_string(data.lap) + "/" + std::to_string(data.totalLaps);
+        }
+        if (data.hasLap)
+        {
+            return std::to_string(data.lap);
+        }
+        return "--";
     }
 
     void set_label_text(lv_obj_t *label, const std::string &text)
@@ -938,9 +1059,9 @@ namespace
         case HomeAction::Source:
             show_source_picker();
             break;
-        case HomeAction::Web:
+        case HomeAction::Session:
         default:
-            show_web_link(WebTarget::Overview, UiScreenId::Home);
+            show_focus();
             break;
         }
     }
@@ -971,9 +1092,10 @@ namespace
             return;
         }
 
-        const float ratio = std::clamp((static_cast<float>(g_state.runtime.rpm) - 900.0f) / 6300.0f, 0.0f, 1.0f);
+        const bool visible = show_shift_strip_enabled();
+        const float ratio = active_led_ratio();
         const int activeSegments = std::clamp(static_cast<int>(std::round(ratio * static_cast<float>(kShiftSegmentCount))), 0, kShiftSegmentCount);
-        const bool blinkOn = !g_state.runtime.shift || ((now_ms() / 120U) % 2U) == 0U;
+        const bool blinkOn = !g_state.runtime.shiftWindowActive || g_state.runtime.shift;
 
         static const std::array<uint32_t, kShiftSegmentCount> palette = {
             0xF5F7FB, 0xF5F7FB,
@@ -991,10 +1113,143 @@ namespace
                 continue;
             }
 
+            if (!visible)
+            {
+                lv_obj_add_flag(segment, LV_OBJ_FLAG_HIDDEN);
+                continue;
+            }
+
+            lv_obj_clear_flag(segment, LV_OBJ_FLAG_HIDDEN);
+
             const bool lit = i < activeSegments && blinkOn;
             lv_obj_set_style_bg_color(segment, lit ? lv_color_hex(palette[static_cast<size_t>(i)]) : lv_color_hex(0x1B1F27), 0);
             lv_obj_set_style_bg_opa(segment, lit ? LV_OPA_COVER : LV_OPA_50, 0);
             lv_obj_set_style_border_opa(segment, lit ? LV_OPA_40 : LV_OPA_10, 0);
+        }
+    }
+
+    void update_side_led_layout()
+    {
+        const int ledWidth = side_led_width();
+        const int ledHeight = side_led_height();
+        const int gap = side_led_gap();
+        const int visibleCount = active_side_led_count();
+        const int totalHeight = visibleCount * ledHeight + (visibleCount - 1) * gap;
+        const int startY = std::max(18, (g_ui.height - totalHeight) / 2);
+        const int leftX = compact_mode() ? 2 : 4;
+        const int rightX = g_ui.width - ledWidth - (compact_mode() ? 2 : 4);
+
+        for (int i = 0; i < kSideLedCount; ++i)
+        {
+            const lv_coord_t sizeW = static_cast<lv_coord_t>(ledWidth);
+            const lv_coord_t sizeH = static_cast<lv_coord_t>(ledHeight);
+            lv_obj_set_size(g_ui.sideLeftSegments[static_cast<size_t>(i)], sizeW, sizeH);
+            lv_obj_set_size(g_ui.sideRightSegments[static_cast<size_t>(i)], sizeW, sizeH);
+            if (i >= visibleCount)
+            {
+                lv_obj_add_flag(g_ui.sideLeftSegments[static_cast<size_t>(i)], LV_OBJ_FLAG_HIDDEN);
+                lv_obj_add_flag(g_ui.sideRightSegments[static_cast<size_t>(i)], LV_OBJ_FLAG_HIDDEN);
+                continue;
+            }
+            lv_obj_clear_flag(g_ui.sideLeftSegments[static_cast<size_t>(i)], LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(g_ui.sideRightSegments[static_cast<size_t>(i)], LV_OBJ_FLAG_HIDDEN);
+            const int y = startY + i * (ledHeight + gap);
+            set_object_pos(g_ui.sideLeftSegments[static_cast<size_t>(i)], leftX, y);
+            set_object_pos(g_ui.sideRightSegments[static_cast<size_t>(i)], rightX, y);
+        }
+    }
+
+    void refresh_side_leds()
+    {
+        const bool enabled = g_state.runtime.sideLedConfig.enabled;
+        const uint32_t dimColor = g_state.runtime.sideLedConfig.colors.dim;
+        const int visibleCount = active_side_led_count();
+
+        for (int i = 0; i < kSideLedCount; ++i)
+        {
+            lv_obj_t *left = g_ui.sideLeftSegments[static_cast<size_t>(i)];
+            lv_obj_t *right = g_ui.sideRightSegments[static_cast<size_t>(i)];
+            if (!left || !right)
+            {
+                continue;
+            }
+
+            if (!enabled || i >= visibleCount)
+            {
+                lv_obj_add_flag(left, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_add_flag(right, LV_OBJ_FLAG_HIDDEN);
+                continue;
+            }
+
+            lv_obj_clear_flag(left, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(right, LV_OBJ_FLAG_HIDDEN);
+
+            const uint32_t leftColor = g_state.runtime.sideLedFrame.left[static_cast<size_t>(i)];
+            const uint32_t rightColor = g_state.runtime.sideLedFrame.right[static_cast<size_t>(i)];
+            const bool leftLit = leftColor != 0;
+            const bool rightLit = rightColor != 0;
+
+            lv_obj_set_style_bg_color(left, lv_color_hex(leftLit ? leftColor : dimColor), 0);
+            lv_obj_set_style_bg_opa(left, leftLit ? LV_OPA_COVER : LV_OPA_30, 0);
+            lv_obj_set_style_border_opa(left, leftLit ? LV_OPA_50 : LV_OPA_20, 0);
+            lv_obj_set_style_shadow_width(left, leftLit ? 10 : 0, 0);
+            lv_obj_set_style_shadow_color(left, lv_color_hex(leftLit ? leftColor : dimColor), 0);
+            lv_obj_set_style_shadow_opa(left, leftLit ? LV_OPA_50 : LV_OPA_0, 0);
+
+            lv_obj_set_style_bg_color(right, lv_color_hex(rightLit ? rightColor : dimColor), 0);
+            lv_obj_set_style_bg_opa(right, rightLit ? LV_OPA_COVER : LV_OPA_30, 0);
+            lv_obj_set_style_border_opa(right, rightLit ? LV_OPA_50 : LV_OPA_20, 0);
+            lv_obj_set_style_shadow_width(right, rightLit ? 10 : 0, 0);
+            lv_obj_set_style_shadow_color(right, lv_color_hex(rightLit ? rightColor : dimColor), 0);
+            lv_obj_set_style_shadow_opa(right, rightLit ? LV_OPA_50 : LV_OPA_0, 0);
+        }
+    }
+
+    void update_home_layout()
+    {
+        const int shiftOffset = show_shift_strip_enabled() ? (compact_mode() ? 28 : 32) : 0;
+        update_side_led_layout();
+
+        if (compact_mode())
+        {
+            set_object_pos(g_ui.compactStatusPanel, 12, 12 + shiftOffset);
+            set_object_pos(g_ui.compactSessionPanel, 12, 64 + shiftOffset);
+            set_object_pos(g_ui.compactHero, 12, 112 + shiftOffset);
+            const int tilesY = 292 + shiftOffset;
+            const int tileWidth = (g_ui.width - 32) / 3;
+            set_object_pos(g_ui.compactTiles[0].panel, 12, tilesY);
+            set_object_pos(g_ui.compactTiles[1].panel, 16 + tileWidth, tilesY);
+            set_object_pos(g_ui.compactTiles[2].panel, 20 + 2 * tileWidth, tilesY);
+            const int buttonY = g_ui.height - 72;
+            const int buttonWidth = (g_ui.width - 40) / 3;
+            for (int i = 0; i < kActionCount; ++i)
+            {
+                set_object_pos(g_ui.actionButtons[static_cast<size_t>(i)].button, 12 + i * (buttonWidth + 8), buttonY);
+            }
+            if (g_ui.footerHint)
+            {
+                lv_obj_align(g_ui.footerHint, LV_ALIGN_BOTTOM_MID, 0, -8);
+            }
+            return;
+        }
+
+        const int topY = 14 + shiftOffset;
+        const int dataY = 104 + shiftOffset;
+        const int bottomY = 292 + shiftOffset;
+        set_object_pos(g_ui.sourcePanel, 16, topY);
+        set_object_pos(g_ui.deltaPanel, (g_ui.width - 168) / 2, topY + 4);
+        set_object_pos(g_ui.sessionPanel, g_ui.width - 336, topY);
+        set_object_pos(g_ui.sensorPanel, 16, dataY);
+        set_object_pos(g_ui.centerPanel, 280, dataY);
+        set_object_pos(g_ui.lapsPanel, 464, dataY);
+        for (int i = 0; i < 5; ++i)
+        {
+            set_object_pos(g_ui.controlTiles[static_cast<size_t>(i)].panel, 16 + i * 88, bottomY);
+        }
+        set_object_pos(g_ui.fuelPanel, 464, bottomY);
+        if (g_ui.footerHint)
+        {
+            lv_obj_align(g_ui.footerHint, LV_ALIGN_BOTTOM_MID, 0, -8);
         }
     }
 
@@ -1011,7 +1266,7 @@ namespace
                 }
 
                 const bool selected = i == wrap_index(g_state.selectedAction, kActionCount);
-                const uint32_t accent = i == 0 ? 0xFFD74A : (i == 1 ? 0x56F28C : 0x5AAEFF);
+                const uint32_t accent = i == 0 ? 0xFFD74A : (i == 1 ? 0x56F28C : 0xFF8C38);
                 set_panel_accent(button.button, selected ? accent : 0x394252);
                 set_selected_outline(button.button, selected);
                 lv_obj_set_style_text_color(button.label, selected ? lv_color_hex(accent) : colorText, 0);
@@ -1034,15 +1289,16 @@ namespace
         }
 
         set_label_text(g_ui.compactStatusValue, source_status_value());
-        set_label_text(g_ui.compactSessionValue, secondary_status_text());
+        const UiSessionData session = build_session_display_data();
+        set_label_text(g_ui.compactSessionValue, session.hasSessionClock ? format_clock(session.sessionClockMs) + "  |  POS " + format_position_text(session) : secondary_status_text());
         set_panel_accent(g_ui.compactStatusPanel, source_accent_rgb(g_state.runtime.telemetrySource, g_state.runtime.telemetryStale));
-        set_panel_accent(g_ui.compactSessionPanel, 0x5AAEFF);
+        set_panel_accent(g_ui.compactSessionPanel, 0xF5F7FB);
 
         const UiDisplayFocusMetric focusMetric = g_state.runtime.settings.displayFocus;
         set_label_text(g_ui.compactHeroTitle, metric_title(focusMetric));
         set_label_text(g_ui.compactHeroValue, metric_value(focusMetric));
         set_label_text(g_ui.compactHeroUnit, metric_unit(focusMetric));
-        set_label_text(g_ui.compactHeroMeta, secondary_status_text());
+        set_label_text(g_ui.compactHeroMeta, g_state.runtime.shift ? "SHIFT" : source_status_value());
         lv_obj_set_style_text_color(g_ui.compactHeroValue, metric_color(focusMetric, g_state.runtime.shift), 0);
         set_panel_accent(g_ui.compactHero, g_state.runtime.shift ? 0xFF5A48 : 0xF5F7FB);
 
@@ -1056,13 +1312,12 @@ namespace
         set_label_text(g_ui.compactTiles[1].unit, "KM/H");
         lv_obj_set_style_text_color(g_ui.compactTiles[1].value, colorBlue, 0);
 
-        lv_label_set_text(g_ui.compactTiles[2].title, "STATE");
-        set_label_text(g_ui.compactTiles[2].value, g_state.runtime.telemetryStale ? "WAIT" : "LIVE");
-        set_label_text(g_ui.compactTiles[2].unit, telemetry_source_text(g_state.runtime.telemetrySource));
-        lv_obj_set_style_text_color(g_ui.compactTiles[2].value,
-                                    g_state.runtime.telemetryStale ? colorRed : source_color(g_state.runtime.telemetrySource, false), 0);
+        lv_label_set_text(g_ui.compactTiles[2].title, "LAP");
+        set_label_text(g_ui.compactTiles[2].value, format_lap_text(session));
+        set_label_text(g_ui.compactTiles[2].unit, "SESSION");
+        lv_obj_set_style_text_color(g_ui.compactTiles[2].value, colorPurple, 0);
 
-        set_label_text(g_ui.footerHint, "Tap center for focus   |   Display / Source / Web");
+        set_label_text(g_ui.footerHint, "Focus / Source / Session");
         refresh_home_selection();
     }
 
@@ -1099,7 +1354,7 @@ namespace
             return;
         }
 
-        const DerivedRaceData derived = derive_race_data();
+        const UiSessionData session = build_session_display_data();
         const uint32_t sourceAccent = source_accent_rgb(g_state.runtime.telemetrySource, g_state.runtime.telemetryStale);
 
         set_panel_accent(g_ui.sourcePanel, sourceAccent);
@@ -1107,22 +1362,22 @@ namespace
         set_label_text(g_ui.sourceMeta, source_status_meta());
 
         set_panel_accent(g_ui.deltaPanel, 0xFFD74A);
-        set_label_text(g_ui.deltaValue, derived.available ? format_signed_delta(derived.deltaSeconds) : "+0.000");
+        set_label_text(g_ui.deltaValue, session.hasDelta ? format_signed_delta(session.deltaSeconds) : "+0.000");
 
         set_panel_accent(g_ui.sessionPanel, 0xF5F7FB);
-        set_label_text(g_ui.sessionStats[0].value, derived.available ? format_clock(derived.sessionClockMs) : "--:--");
-        set_label_text(g_ui.sessionStats[1].value, derived.available ? (std::to_string(derived.position) + "/" + std::to_string(derived.totalPositions)) : "--");
-        set_label_text(g_ui.sessionStats[2].value, derived.available ? (std::to_string(derived.lap) + "/" + std::to_string(derived.totalLaps)) : "--");
+        set_label_text(g_ui.sessionStats[0].value, session.hasSessionClock ? format_clock(session.sessionClockMs) : "--:--");
+        set_label_text(g_ui.sessionStats[1].value, format_position_text(session));
+        set_label_text(g_ui.sessionStats[2].value, format_lap_text(session));
 
-        refresh_sensor_tile(g_ui.sensorTiles[0], "OIL TEMP", derived.available ? format_one_decimal(derived.oilTempC) : "--.-", "C", 0xF5F7FB);
-        refresh_sensor_tile(g_ui.sensorTiles[1], "OIL PRES", derived.available ? format_one_decimal(derived.oilPressureBar) : "--.-", "B", 0xF5F7FB);
-        refresh_sensor_tile(g_ui.sensorTiles[2], "OIL LVL", derived.available ? format_one_decimal(derived.oilLevel) : "--.-", "L", 0x56F28C);
-        refresh_sensor_tile(g_ui.sensorTiles[3], "FUEL P", derived.available ? format_one_decimal(derived.fuelPressureBar) : "--.-", "B", 0x5AAEFF);
-        refresh_sensor_tile(g_ui.sensorTiles[4], "WATER T", derived.available ? format_one_decimal(derived.waterTempC) : "--.-", "C", 0x5AAEFF);
-        refresh_sensor_tile(g_ui.sensorTiles[5], "BATT", derived.available ? format_one_decimal(derived.batteryVolts) : "--.-", "V", 0xF5F7FB);
+        refresh_sensor_tile(g_ui.sensorTiles[0], "OIL TEMP", session.hasOilTemp ? format_one_decimal(session.oilTempC) : "--.-", "C", 0xF5F7FB);
+        refresh_sensor_tile(g_ui.sensorTiles[1], "OIL PRES", session.hasOilPressure ? format_one_decimal(session.oilPressureBar) : "--.-", "B", 0xF5F7FB);
+        refresh_sensor_tile(g_ui.sensorTiles[2], "OIL LVL", session.hasOilLevel ? format_one_decimal(session.oilLevel) : "--.-", "L", 0x56F28C);
+        refresh_sensor_tile(g_ui.sensorTiles[3], "FUEL P", session.hasFuelPressure ? format_one_decimal(session.fuelPressureBar) : "--.-", "B", 0x5AAEFF);
+        refresh_sensor_tile(g_ui.sensorTiles[4], "WATER T", session.hasWaterTemp ? format_one_decimal(session.waterTempC) : "--.-", "C", 0x5AAEFF);
+        refresh_sensor_tile(g_ui.sensorTiles[5], "BATT", session.hasBatteryVolts ? format_one_decimal(session.batteryVolts) : "--.-", "V", 0xF5F7FB);
 
         set_panel_accent(g_ui.centerPanel, g_state.runtime.shift ? 0xFF5A48 : 0xF5F7FB);
-        set_label_text(g_ui.centerStatus, g_state.runtime.shift ? "SHIFT NOW" : secondary_status_text());
+        set_label_text(g_ui.centerStatus, g_state.runtime.shift ? "SHIFT" : source_status_value());
         set_label_text(g_ui.centerGear, gear_text(g_state.runtime.gear));
         set_label_text(g_ui.centerRpm, std::to_string(g_state.runtime.rpm));
         set_label_text(g_ui.centerSpeed, std::to_string(g_state.runtime.speedKmh) + " KM/H");
@@ -1131,28 +1386,28 @@ namespace
         lv_obj_set_style_text_color(g_ui.centerSpeed, colorText, 0);
 
         const int trackWidth = lv_obj_get_width(g_ui.centerBarTrack);
-        const float rpmRatio = std::clamp(static_cast<float>(g_state.runtime.rpm) / 7200.0f, 0.0f, 1.0f);
+        const float rpmRatio = active_led_ratio();
         const int fillWidth = std::max(12, static_cast<int>(std::round(rpmRatio * static_cast<float>(trackWidth))));
         lv_obj_set_width(g_ui.centerBarFill, fillWidth);
         lv_obj_set_style_bg_color(g_ui.centerBarFill, metric_color(UiDisplayFocusMetric::Rpm, g_state.runtime.shift), 0);
 
         set_panel_accent(g_ui.lapsPanel, 0xF5F7FB);
-        set_label_text(g_ui.lapsPredicted, derived.available ? format_lap_time(derived.predictedLapMs) : "--:--.---");
-        set_label_text(g_ui.lapsLast, derived.available ? format_lap_time(derived.lastLapMs) : "--:--.---");
-        set_label_text(g_ui.lapsBest, derived.available ? format_lap_time(derived.bestLapMs) : "--:--.---");
+        set_label_text(g_ui.lapsPredicted, session.hasPredictedLap ? format_lap_time(session.predictedLapMs) : "--:--.---");
+        set_label_text(g_ui.lapsLast, session.hasLastLap ? format_lap_time(session.lastLapMs) : "--:--.---");
+        set_label_text(g_ui.lapsBest, session.hasBestLap ? format_lap_time(session.bestLapMs) : "--:--.---");
 
-        refresh_control_tile(g_ui.controlTiles[0], "TC", derived.available ? std::to_string(derived.tractionControl) : "0", 0x5AAEFF);
-        refresh_control_tile(g_ui.controlTiles[1], "TC CUT", derived.available ? std::to_string(derived.tractionCut) : "0", 0x33B5FF);
-        refresh_control_tile(g_ui.controlTiles[2], "ABS", derived.available ? std::to_string(derived.absLevel) : "0", 0xFFD74A);
-        refresh_control_tile(g_ui.controlTiles[3], "BB", derived.available ? format_one_decimal(derived.brakeBias) : "0.0", 0xFF6A38);
-        refresh_control_tile(g_ui.controlTiles[4], "MAP", derived.available ? std::to_string(derived.engineMap) : "0", 0x7BFF4C);
+        refresh_control_tile(g_ui.controlTiles[0], "TC", session.hasTractionControl ? std::to_string(session.tractionControl) : "0", 0x5AAEFF);
+        refresh_control_tile(g_ui.controlTiles[1], "TC CUT", session.hasTractionCut ? std::to_string(session.tractionCut) : "0", 0x33B5FF);
+        refresh_control_tile(g_ui.controlTiles[2], "ABS", session.hasAbs ? std::to_string(session.absLevel) : "0", 0xFFD74A);
+        refresh_control_tile(g_ui.controlTiles[3], "BB", session.hasBrakeBias ? format_one_decimal(session.brakeBias) : "0.0", 0xFF6A38);
+        refresh_control_tile(g_ui.controlTiles[4], "MAP", session.hasEngineMap ? std::to_string(session.engineMap) : "0", 0x7BFF4C);
 
         set_panel_accent(g_ui.fuelPanel, 0xF5F7FB);
-        set_label_text(g_ui.fuelStats[0].value, derived.available ? format_one_decimal(derived.fuelLiters) : "0.0");
-        set_label_text(g_ui.fuelStats[1].value, derived.available ? format_two_decimals(derived.fuelAvgPerLap) : "0.00");
-        set_label_text(g_ui.fuelStats[2].value, derived.available ? format_one_decimal(derived.fuelLapsRemaining) : "0.0");
+        set_label_text(g_ui.fuelStats[0].value, session.hasFuelLiters ? format_one_decimal(session.fuelLiters) : "0.0");
+        set_label_text(g_ui.fuelStats[1].value, session.hasFuelAvgPerLap ? format_two_decimals(session.fuelAvgPerLap) : "0.00");
+        set_label_text(g_ui.fuelStats[2].value, session.hasFuelLapsRemaining ? format_one_decimal(session.fuelLapsRemaining) : "0.0");
 
-        set_label_text(g_ui.footerHint, "Center = Focus   |   Left box = Source   |   Right box = Web");
+        set_label_text(g_ui.footerHint, "Center = Focus   |   Left = Source   |   Right = Session");
         refresh_home_selection();
     }
 
@@ -1269,6 +1524,8 @@ namespace
     void refresh_view()
     {
         refresh_shift_strip();
+        refresh_side_leds();
+        update_home_layout();
         if (compact_mode())
         {
             refresh_home_compact();
@@ -1384,6 +1641,43 @@ namespace
             lv_obj_clear_flag(segment, LV_OBJ_FLAG_SCROLLABLE);
             g_ui.shiftSegments[static_cast<size_t>(i)] = segment;
         }
+    }
+
+    void build_side_leds()
+    {
+        const int ledWidth = side_led_width();
+        const int ledHeight = side_led_height();
+        const int radius = compact_mode() ? 4 : 5;
+
+        for (int i = 0; i < kSideLedCount; ++i)
+        {
+            lv_obj_t *left = lv_obj_create(g_ui.homeLayer);
+            lv_obj_remove_style_all(left);
+            lv_obj_set_size(left, ledWidth, ledHeight);
+            lv_obj_set_style_radius(left, radius, 0);
+            lv_obj_set_style_bg_color(left, lv_color_hex(0x10202A), 0);
+            lv_obj_set_style_bg_opa(left, LV_OPA_30, 0);
+            lv_obj_set_style_border_width(left, 1, 0);
+            lv_obj_set_style_border_color(left, colorWhiteLine, 0);
+            lv_obj_set_style_border_opa(left, LV_OPA_20, 0);
+            lv_obj_set_style_shadow_width(left, 0, 0);
+            lv_obj_clear_flag(left, LV_OBJ_FLAG_SCROLLABLE);
+            g_ui.sideLeftSegments[static_cast<size_t>(i)] = left;
+
+            lv_obj_t *right = lv_obj_create(g_ui.homeLayer);
+            lv_obj_remove_style_all(right);
+            lv_obj_set_size(right, ledWidth, ledHeight);
+            lv_obj_set_style_radius(right, radius, 0);
+            lv_obj_set_style_bg_color(right, lv_color_hex(0x10202A), 0);
+            lv_obj_set_style_bg_opa(right, LV_OPA_30, 0);
+            lv_obj_set_style_border_width(right, 1, 0);
+            lv_obj_set_style_border_color(right, colorWhiteLine, 0);
+            lv_obj_set_style_border_opa(right, LV_OPA_20, 0);
+            lv_obj_set_style_shadow_width(right, 0, 0);
+            lv_obj_clear_flag(right, LV_OBJ_FLAG_SCROLLABLE);
+            g_ui.sideRightSegments[static_cast<size_t>(i)] = right;
+        }
+        update_side_led_layout();
     }
 
     void build_landscape_home()
@@ -1605,8 +1899,8 @@ namespace
         lv_obj_add_event_cb(g_ui.focusOverlay, on_focus_click, LV_EVENT_CLICKED, nullptr);
         lv_obj_add_event_cb(g_ui.focusOverlay, on_focus_gesture, LV_EVENT_GESTURE, nullptr);
 
-        const int cardW = compact_mode() ? g_ui.width - 24 : std::min(520, g_ui.width - 80);
-        const int cardH = compact_mode() ? g_ui.height - 42 : std::min(250, g_ui.height - 90);
+        const int cardW = compact_mode() ? g_ui.width - 28 : std::min(500, g_ui.width - 120);
+        const int cardH = compact_mode() ? std::min(224, g_ui.height - 40) : std::min(220, g_ui.height - 110);
         g_ui.focusCard = lv_obj_create(g_ui.focusOverlay);
         lv_obj_remove_style_all(g_ui.focusCard);
         lv_obj_add_style(g_ui.focusCard, &styleOverlayCard, 0);
@@ -1646,8 +1940,8 @@ namespace
         lv_obj_add_flag(g_ui.sourceOverlay, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_event_cb(g_ui.sourceOverlay, on_source_gesture, LV_EVENT_GESTURE, nullptr);
 
-        const int cardW = compact_mode() ? g_ui.width - 24 : std::min(540, g_ui.width - 120);
-        const int cardH = compact_mode() ? 280 : 300;
+        const int cardW = compact_mode() ? g_ui.width - 28 : std::min(500, g_ui.width - 140);
+        const int cardH = compact_mode() ? 248 : 270;
         g_ui.sourceCard = lv_obj_create(g_ui.sourceOverlay);
         lv_obj_remove_style_all(g_ui.sourceCard);
         lv_obj_add_style(g_ui.sourceCard, &styleOverlayCard, 0);
@@ -1659,17 +1953,17 @@ namespace
 
         g_ui.sourcePickerTitle = make_text(g_ui.sourceCard, &lv_font_montserrat_24, colorText);
         lv_label_set_text(g_ui.sourcePickerTitle, "Telemetry Source");
-        lv_obj_align(g_ui.sourcePickerTitle, LV_ALIGN_TOP_LEFT, 0, 50);
+        lv_obj_align(g_ui.sourcePickerTitle, LV_ALIGN_TOP_LEFT, 0, 44);
 
         g_ui.sourcePickerSubtitle = make_text(g_ui.sourceCard, &lv_font_montserrat_16, colorMuted);
         lv_obj_set_width(g_ui.sourcePickerSubtitle, cardW - 28);
         lv_label_set_long_mode(g_ui.sourcePickerSubtitle, LV_LABEL_LONG_WRAP);
-        lv_obj_align(g_ui.sourcePickerSubtitle, LV_ALIGN_TOP_LEFT, 0, 84);
+        lv_obj_align(g_ui.sourcePickerSubtitle, LV_ALIGN_TOP_LEFT, 0, 76);
 
         for (int i = 0; i < 3; ++i)
         {
             g_ui.sourceOptions[static_cast<size_t>(i)] =
-                make_button(g_ui.sourceCard, 16, 128 + i * 48, cardW - 32, 40, "", on_source_option, reinterpret_cast<void *>(static_cast<intptr_t>(i)));
+                make_button(g_ui.sourceCard, 16, 116 + i * 42, cardW - 32, 36, "", on_source_option, reinterpret_cast<void *>(static_cast<intptr_t>(i)));
         }
 
         g_ui.sourceHint = make_text(g_ui.sourceCard, &lv_font_montserrat_16, colorMuted, LV_TEXT_ALIGN_CENTER);
@@ -1764,9 +2058,10 @@ namespace
         lv_obj_set_size(g_ui.homeLayer, LV_PCT(100), LV_PCT(100));
         lv_obj_clear_flag(g_ui.homeLayer, LV_OBJ_FLAG_SCROLLABLE);
 
+        build_shift_strip();
+        build_side_leds();
         if (compact_mode())
         {
-            build_shift_strip();
             build_compact_home();
         }
         else

@@ -4,6 +4,8 @@
 #include <Arduino.h>
 #include <BLEDevice.h>
 
+#include "telemetry/side_leds.h"
+
 constexpr int LED_PIN = 5;
 constexpr int NUM_LEDS = 30;
 constexpr int DEFAULT_BRIGHTNESS = 80;
@@ -97,7 +99,9 @@ struct AppConfig
     bool uiTutorialSeen;
     int uiLastMenuIndex;
     bool uiNightMode;
+    bool uiShowShiftStrip;
     DisplayFocusMetric uiDisplayFocus;
+    SideLedConfig sideLeds;
     bool useMph;
     TelemetryPreference telemetryPreference;
     SimTransportPreference simTransportPreference;

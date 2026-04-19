@@ -20,6 +20,15 @@ namespace
     {
         return 0xFF000000u | rgb;
     }
+
+    uint32_t apply_brightness(uint32_t argb, uint8_t brightness)
+    {
+        const uint32_t alpha = argb & 0xFF000000u;
+        const uint32_t red = ((argb >> 16) & 0xFFu) * brightness / 255u;
+        const uint32_t green = ((argb >> 8) & 0xFFu) * brightness / 255u;
+        const uint32_t blue = (argb & 0xFFu) * brightness / 255u;
+        return alpha | (red << 16) | (green << 8) | blue;
+    }
 }
 
 SdlLvglWindow::~SdlLvglWindow()
@@ -185,6 +194,11 @@ void SdlLvglWindow::setLedBarPreview(const VirtualLedBarFrame &frame)
     ledBarFrame_ = frame;
 }
 
+void SdlLvglWindow::setDisplayBrightness(uint8_t value)
+{
+    displayBrightness_ = value;
+}
+
 void SdlLvglWindow::render()
 {
     composeFrame();
@@ -298,7 +312,11 @@ void SdlLvglWindow::composeFrame()
     {
         const size_t srcOffset = static_cast<size_t>(y * width_);
         const size_t dstOffset = static_cast<size_t>((y + displayOffsetY_) * windowWidth_);
-        std::copy_n(framebuffer_.data() + srcOffset, width_, composedFramebuffer_.data() + dstOffset);
+        for (int x = 0; x < width_; ++x)
+        {
+            composedFramebuffer_[dstOffset + static_cast<size_t>(x)] =
+                apply_brightness(framebuffer_[srcOffset + static_cast<size_t>(x)], displayBrightness_);
+        }
     }
 }
 
@@ -314,7 +332,7 @@ void SdlLvglWindow::fillRect(int x, int y, int w, int h, uint32_t color)
         const size_t rowOffset = static_cast<size_t>(py * windowWidth_);
         for (int px = xStart; px < xEnd; ++px)
         {
-            composedFramebuffer_[rowOffset + static_cast<size_t>(px)] = color;
+            composedFramebuffer_[rowOffset + static_cast<size_t>(px)] = apply_brightness(color, displayBrightness_);
         }
     }
 }
@@ -336,7 +354,7 @@ void SdlLvglWindow::fillCircle(int cx, int cy, int radius, uint32_t color)
             const int dy = py - cy;
             if (dx * dx + dy * dy <= radiusSq)
             {
-                composedFramebuffer_[rowOffset + static_cast<size_t>(px)] = color;
+                composedFramebuffer_[rowOffset + static_cast<size_t>(px)] = apply_brightness(color, displayBrightness_);
             }
         }
     }

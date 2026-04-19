@@ -30,6 +30,8 @@ int g_simHubVehicleSpeedKmh = 0;
 int g_simHubGear = 0;
 float g_simHubThrottle = 0.0f;
 bool g_simHubPitLimiterActive = false;
+UiSessionData g_simHubSessionData{};
+SideLedTelemetry g_simHubSideTelemetry{};
 unsigned long g_lastSimHubTelemetryMs = 0;
 unsigned long g_lastSimHubNetworkTelemetryMs = 0;
 bool g_simHubEverReceived = false;
@@ -43,6 +45,9 @@ int g_usbSimVehicleSpeedKmh = 0;
 int g_usbSimGear = 0;
 float g_usbSimThrottle = 0.0f;
 bool g_usbSimPitLimiterActive = false;
+SideLedTelemetry g_usbSimSideTelemetry{};
+
+SideLedTestState g_sideLedTestState{};
 
 bool g_usbSerialConnected = false;
 bool g_usbBridgeConnected = false;
@@ -159,6 +164,8 @@ void initGlobalState()
     g_simHubGear = 0;
     g_simHubThrottle = 0.0f;
     g_simHubPitLimiterActive = false;
+    g_simHubSessionData = UiSessionData{};
+    g_simHubSideTelemetry = SideLedTelemetry{};
     g_lastSimHubTelemetryMs = 0;
     g_lastSimHubNetworkTelemetryMs = 0;
     g_simHubEverReceived = false;
@@ -172,6 +179,9 @@ void initGlobalState()
     g_usbSimGear = 0;
     g_usbSimThrottle = 0.0f;
     g_usbSimPitLimiterActive = false;
+    g_usbSimSideTelemetry = SideLedTelemetry{};
+
+    g_sideLedTestState = SideLedTestState{};
 
     g_usbSerialConnected = false;
     g_usbBridgeConnected = false;

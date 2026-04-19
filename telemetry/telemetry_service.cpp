@@ -76,12 +76,18 @@ const NormalizedTelemetryFrame &TelemetryService::frame() const
 
 void TelemetryService::updateSimulator(uint32_t nowMs)
 {
+    const NormalizedTelemetryFrame previousFrame = frame_;
+    const uint32_t previousFrameMs = frame_.timestampMs;
     simulator_.tick(nowMs);
     frame_ = simulator_.frame();
     frame_.timestampMs = nowMs;
     frame_.stale = false;
     frame_.usingFallback = false;
     frame_.live = true;
+    enhanceTractionFrame(frame_,
+                         nowMs,
+                         previousFrameMs > 0 ? &previousFrame : nullptr,
+                         previousFrameMs);
 }
 
 void TelemetryService::updateWaitingFrame()
@@ -121,6 +127,10 @@ void TelemetryService::updateSimHub(uint32_t nowMs)
     if (hasFreshSample)
     {
         sample.timestampMs = nowMs;
+        enhanceTractionFrame(sample,
+                             nowMs,
+                             hasLiveFrame_ ? &lastLiveFrame_ : nullptr,
+                             lastLiveFrameMs_);
         frame_ = sample;
         lastLiveFrame_ = sample;
         lastLiveFrameMs_ = nowMs;
@@ -150,6 +160,30 @@ void TelemetryService::updateSimHub(uint32_t nowMs)
     }
 
     logStaleTransition(frame_.stale, frame_.usingFallback);
+}
+
+void TelemetryService::enhanceTractionFrame(NormalizedTelemetryFrame &frame,
+                                            uint32_t nowMs,
+                                            const NormalizedTelemetryFrame *previousFrame,
+                                            uint32_t previousFrameMs)
+{
+    if (previousFrame == nullptr || previousFrameMs == 0 || nowMs <= previousFrameMs)
+    {
+        side_led_enhance_traction_state(frame.sideLeds.traction,
+                                        frame.speedKmh,
+                                        frame.speedKmh,
+                                        frame.rpm,
+                                        frame.rpm,
+                                        0);
+        return;
+    }
+
+    side_led_enhance_traction_state(frame.sideLeds.traction,
+                                    frame.speedKmh,
+                                    previousFrame->speedKmh,
+                                    frame.rpm,
+                                    previousFrame->rpm,
+                                    nowMs - previousFrameMs);
 }
 
 void TelemetryService::logStaleTransition(bool stale, bool usingFallback)

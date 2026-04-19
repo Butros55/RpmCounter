@@ -35,6 +35,12 @@ namespace
         return normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on";
     }
 
+    bool env_has_value(const char *name)
+    {
+        const char *value = std::getenv(name);
+        return value != nullptr && value[0] != '\0';
+    }
+
     uint16_t env_port_value(const char *name, uint16_t defaultValue)
     {
         const char *value = std::getenv(name);
@@ -87,17 +93,33 @@ namespace
         return value ? std::string(value) : std::string();
     }
 
-    TelemetryServiceConfig load_telemetry_config()
+    TelemetryServiceConfig apply_telemetry_env_overrides(const TelemetryServiceConfig &baseConfig)
     {
-        TelemetryServiceConfig config{};
-        config.mode = env_flag_enabled("SIM_MODE", false) ? TelemetryInputMode::Simulator : TelemetryInputMode::SimHub;
-        config.simHubTransport = SimHubTransport::HttpApi;
-        config.httpPort = env_port_value("SIMHUB_HTTP_PORT", 8888);
-        config.udpPort = env_port_value("SIMHUB_UDP_PORT", 20888);
-        config.pollIntervalMs = std::max<uint32_t>(15U, env_port_value("SIMHUB_POLL_INTERVAL_MS", 25));
-        config.staleTimeoutMs = 2000;
-        config.debugLogging = env_flag_enabled("SIM_DEBUG_TELEMETRY", false);
-        config.allowSimulatorFallback = env_flag_enabled("SIM_ALLOW_FALLBACK_SIMULATOR", false);
+        TelemetryServiceConfig config = baseConfig;
+        if (env_has_value("SIM_MODE"))
+        {
+            config.mode = env_flag_enabled("SIM_MODE", false) ? TelemetryInputMode::Simulator : TelemetryInputMode::SimHub;
+        }
+        if (env_has_value("SIMHUB_HTTP_PORT"))
+        {
+            config.httpPort = env_port_value("SIMHUB_HTTP_PORT", config.httpPort);
+        }
+        if (env_has_value("SIMHUB_UDP_PORT"))
+        {
+            config.udpPort = env_port_value("SIMHUB_UDP_PORT", config.udpPort);
+        }
+        if (env_has_value("SIMHUB_POLL_INTERVAL_MS"))
+        {
+            config.pollIntervalMs = std::max<uint32_t>(15U, env_port_value("SIMHUB_POLL_INTERVAL_MS", static_cast<uint16_t>(config.pollIntervalMs)));
+        }
+        if (env_has_value("SIM_DEBUG_TELEMETRY"))
+        {
+            config.debugLogging = env_flag_enabled("SIM_DEBUG_TELEMETRY", config.debugLogging);
+        }
+        if (env_has_value("SIM_ALLOW_FALLBACK_SIMULATOR"))
+        {
+            config.allowSimulatorFallback = env_flag_enabled("SIM_ALLOW_FALLBACK_SIMULATOR", config.allowSimulatorFallback);
+        }
 
         const std::string source = env_string_value("SIMHUB_SOURCE");
         if (!source.empty())
@@ -233,7 +255,6 @@ int main()
 {
     try
     {
-        const TelemetryServiceConfig telemetryConfig = load_telemetry_config();
         const std::string captureFramePath = env_string_value("SIM_CAPTURE_FRAME_PATH");
         const std::string startupActions = env_string_value("SIM_UI_ACTIONS");
         const bool exitOnCapture = env_flag_enabled("SIM_EXIT_ON_CAPTURE", false);
@@ -260,6 +281,7 @@ int main()
         }
 
         SimulatorApp app;
+        const TelemetryServiceConfig telemetryConfig = apply_telemetry_env_overrides(app.telemetryConfigSnapshot());
         app.configureTelemetry(telemetryConfig);
         app.setWebServerPort(webPort);
         UiDisplayHooks hooks{};
@@ -370,6 +392,7 @@ int main()
             ui_s3_loop(currentState);
             lv_timer_handler();
             app.updateUiDebugSnapshot(ui_s3_debug_snapshot());
+            window.setDisplayBrightness(static_cast<uint8_t>(std::clamp(currentState.settings.displayBrightness, 0, 255)));
             window.setLedBarPreview(build_virtual_led_bar_frame(currentState, app.ledBarConfigSnapshot(), nowMs));
             window.render();
 

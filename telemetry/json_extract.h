@@ -121,6 +121,29 @@ namespace telemetry_json
         return false;
     }
 
+    inline bool extract_json_loose_bool(const std::string &payload, std::initializer_list<const char *> keys, bool &value)
+    {
+        std::string token;
+        if (!extract_json_token(payload, keys, token))
+        {
+            return false;
+        }
+
+        std::transform(token.begin(), token.end(), token.begin(), [](unsigned char ch)
+                       { return static_cast<char>(std::tolower(ch)); });
+        if (token == "true" || token == "1" || token == "yes" || token == "on")
+        {
+            value = true;
+            return true;
+        }
+        if (token == "false" || token == "0" || token == "no" || token == "off")
+        {
+            value = false;
+            return true;
+        }
+        return false;
+    }
+
     inline bool extract_json_gear(const std::string &payload, std::initializer_list<const char *> keys, int &gear)
     {
         double numericGear = 0.0;

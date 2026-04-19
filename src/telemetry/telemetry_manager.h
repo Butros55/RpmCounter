@@ -2,6 +2,7 @@
 
 #include "core/config.h"
 #include "core/state.h"
+#include "telemetry/side_leds.h"
 
 enum class SimRuntimeTransportMode : uint8_t
 {
@@ -37,6 +38,9 @@ struct TelemetryRenderSnapshot
     int gear = 0;
     float throttle = 0.0f;
     bool pitLimiter = false;
+    SideLedTelemetry sideTelemetry{};
+    SideLedRenderFrame sideLedFrame{};
+    SideLedPriorityResult sideLedPriority{};
     unsigned long sampleTimestampMs = 0;
     bool telemetryFresh = false;
     bool fallbackActive = false;

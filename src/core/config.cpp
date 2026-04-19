@@ -50,6 +50,24 @@ namespace
         return static_cast<DisplayFocusMetric>(raw);
     }
 
+    SideLedPriorityMode clampSideLedPriorityMode(uint32_t raw)
+    {
+        if (raw > static_cast<uint32_t>(SideLedPriorityMode::Override))
+        {
+            return SideLedPriorityMode::Normal;
+        }
+        return static_cast<SideLedPriorityMode>(raw);
+    }
+
+    SideLedWarningPriorityMode clampSideLedWarningPriorityMode(uint32_t raw)
+    {
+        if (raw > static_cast<uint32_t>(SideLedWarningPriorityMode::AlwaysOverride))
+        {
+            return SideLedWarningPriorityMode::Normal;
+        }
+        return static_cast<SideLedWarningPriorityMode>(raw);
+    }
+
     bool shouldMigrateLegacyAmbientPins(int sdaPin, int sclPin)
     {
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
@@ -101,6 +119,7 @@ namespace
         cfg.greenLabel = sanitizeLabelValue(cfg.greenLabel, "Green");
         cfg.yellowLabel = sanitizeLabelValue(cfg.yellowLabel, "Yellow");
         cfg.redLabel = sanitizeLabelValue(cfg.redLabel, "Red");
+        normalize_side_led_config(cfg.sideLeds);
     }
 }
 
@@ -144,7 +163,9 @@ void initConfig()
     cfg.uiTutorialSeen = false;
     cfg.uiLastMenuIndex = 0;
     cfg.uiNightMode = true;
+    cfg.uiShowShiftStrip = true;
     cfg.uiDisplayFocus = DisplayFocusMetric::Rpm;
+    cfg.sideLeds = side_led_config_for_preset(SideLedPreset::Gt3);
     cfg.useMph = false;
     cfg.telemetryPreference = TelemetryPreference::Auto;
     cfg.simTransportPreference = SimTransportPreference::Auto;
@@ -213,7 +234,51 @@ void loadConfig()
     cfg.uiTutorialSeen = prefs.getBool("uiTutSeen", cfg.uiTutorialSeen);
     cfg.uiLastMenuIndex = clampInt(prefs.getInt("uiMenuIdx", cfg.uiLastMenuIndex), 0, 5);
     cfg.uiNightMode = prefs.getBool("uiNight", cfg.uiNightMode);
+    cfg.uiShowShiftStrip = prefs.getBool("uiShiftLed", cfg.uiShowShiftStrip);
     cfg.uiDisplayFocus = clampDisplayFocusMetric(prefs.getUInt("uiFocus", static_cast<uint32_t>(cfg.uiDisplayFocus)));
+    cfg.sideLeds.enabled = prefs.getBool("sideEn", cfg.sideLeds.enabled);
+    cfg.sideLeds.preset = side_led_preset_from_int(static_cast<int>(prefs.getUInt("sidePreset", static_cast<uint32_t>(cfg.sideLeds.preset))));
+    cfg.sideLeds.ledCountPerSide = static_cast<uint8_t>(clampInt(prefs.getUInt("sideCount", cfg.sideLeds.ledCountPerSide),
+                                                                  static_cast<int>(SIDE_LED_MIN_COUNT_PER_SIDE),
+                                                                  static_cast<int>(SIDE_LED_MAX_COUNT_PER_SIDE)));
+    cfg.sideLeds.brightness = static_cast<uint8_t>(clampInt(prefs.getUInt("sideBright", cfg.sideLeds.brightness), 0, 255));
+    cfg.sideLeds.allowSpotter = prefs.getBool("sideSpot", cfg.sideLeds.allowSpotter);
+    cfg.sideLeds.allowFlags = prefs.getBool("sideFlag", cfg.sideLeds.allowFlags);
+    cfg.sideLeds.allowWarnings = prefs.getBool("sideWarn", cfg.sideLeds.allowWarnings);
+    cfg.sideLeds.allowTraction = prefs.getBool("sideTract", cfg.sideLeds.allowTraction);
+    cfg.sideLeds.blinkSpeedSlowMs = static_cast<uint16_t>(clampInt(prefs.getUInt("sideBlinkS", cfg.sideLeds.blinkSpeedSlowMs), 80, 1500));
+    cfg.sideLeds.blinkSpeedFastMs = static_cast<uint16_t>(clampInt(prefs.getUInt("sideBlinkF", cfg.sideLeds.blinkSpeedFastMs), 40, 900));
+    cfg.sideLeds.blueFlagPriority = clampSideLedPriorityMode(prefs.getUInt("sideBluePr", static_cast<uint32_t>(cfg.sideLeds.blueFlagPriority)));
+    cfg.sideLeds.yellowFlagPriority = clampSideLedPriorityMode(prefs.getUInt("sideYellPr", static_cast<uint32_t>(cfg.sideLeds.yellowFlagPriority)));
+    cfg.sideLeds.warningPriorityMode = clampSideLedWarningPriorityMode(prefs.getUInt("sideWarnPr", static_cast<uint32_t>(cfg.sideLeds.warningPriorityMode)));
+    cfg.sideLeds.invertLeftRight = prefs.getBool("sideInvert", cfg.sideLeds.invertLeftRight);
+    cfg.sideLeds.mirrorMode = prefs.getBool("sideMirror", cfg.sideLeds.mirrorMode);
+    cfg.sideLeds.closeCarBlinkingEnabled = prefs.getBool("sideClose", cfg.sideLeds.closeCarBlinkingEnabled);
+    cfg.sideLeds.severityLevelsEnabled = prefs.getBool("sideSev", cfg.sideLeds.severityLevelsEnabled);
+    cfg.sideLeds.idleAnimationEnabled = prefs.getBool("sideIdle", cfg.sideLeds.idleAnimationEnabled);
+    cfg.sideLeds.testMode = prefs.getBool("sideTest", cfg.sideLeds.testMode);
+    cfg.sideLeds.minimumFlagHoldMs = static_cast<uint16_t>(clampInt(prefs.getUInt("sideHoldF", cfg.sideLeds.minimumFlagHoldMs), 0, 2000));
+    cfg.sideLeds.minimumWarningHoldMs = static_cast<uint16_t>(clampInt(prefs.getUInt("sideHoldW", cfg.sideLeds.minimumWarningHoldMs), 0, 2000));
+    cfg.sideLeds.minimumSpotterHoldMs = static_cast<uint16_t>(clampInt(prefs.getUInt("sideHoldS", cfg.sideLeds.minimumSpotterHoldMs), 0, 2000));
+    cfg.sideLeds.colors.dim = prefs.getUInt("sideColDim", cfg.sideLeds.colors.dim);
+    cfg.sideLeds.colors.spotter = prefs.getUInt("sideColSpot", cfg.sideLeds.colors.spotter);
+    cfg.sideLeds.colors.spotterClose = prefs.getUInt("sideColSpotC", cfg.sideLeds.colors.spotterClose);
+    cfg.sideLeds.colors.tractionLow = prefs.getUInt("sideColTrL", cfg.sideLeds.colors.tractionLow);
+    cfg.sideLeds.colors.tractionMedium = prefs.getUInt("sideColTrM", cfg.sideLeds.colors.tractionMedium);
+    cfg.sideLeds.colors.tractionHigh = prefs.getUInt("sideColTrH", cfg.sideLeds.colors.tractionHigh);
+    cfg.sideLeds.colors.flagGreen = prefs.getUInt("sideColFG", cfg.sideLeds.colors.flagGreen);
+    cfg.sideLeds.colors.flagYellow = prefs.getUInt("sideColFY", cfg.sideLeds.colors.flagYellow);
+    cfg.sideLeds.colors.flagBlue = prefs.getUInt("sideColFB", cfg.sideLeds.colors.flagBlue);
+    cfg.sideLeds.colors.flagRed = prefs.getUInt("sideColFR", cfg.sideLeds.colors.flagRed);
+    cfg.sideLeds.colors.flagWhite = prefs.getUInt("sideColFW", cfg.sideLeds.colors.flagWhite);
+    cfg.sideLeds.colors.flagBlack = prefs.getUInt("sideColFK", cfg.sideLeds.colors.flagBlack);
+    cfg.sideLeds.colors.flagCheckered = prefs.getUInt("sideColFC", cfg.sideLeds.colors.flagCheckered);
+    cfg.sideLeds.colors.warningLowFuel = prefs.getUInt("sideColWL", cfg.sideLeds.colors.warningLowFuel);
+    cfg.sideLeds.colors.warningEngine = prefs.getUInt("sideColWE", cfg.sideLeds.colors.warningEngine);
+    cfg.sideLeds.colors.warningOil = prefs.getUInt("sideColWO", cfg.sideLeds.colors.warningOil);
+    cfg.sideLeds.colors.warningWater = prefs.getUInt("sideColWW", cfg.sideLeds.colors.warningWater);
+    cfg.sideLeds.colors.warningDamage = prefs.getUInt("sideColWD", cfg.sideLeds.colors.warningDamage);
+    cfg.sideLeds.colors.warningPitLimiter = prefs.getUInt("sideColWP", cfg.sideLeds.colors.warningPitLimiter);
     cfg.useMph = prefs.getBool("useMph", cfg.useMph);
     cfg.telemetryPreference = clampTelemetryPreference(prefs.getUInt("telePref", static_cast<uint32_t>(cfg.telemetryPreference)));
     cfg.simTransportPreference = clampSimTransportPreference(prefs.getUInt("simTrans", static_cast<uint32_t>(cfg.simTransportPreference)));
@@ -284,7 +349,49 @@ void saveConfig()
     prefs.putBool("uiTutSeen", cfg.uiTutorialSeen);
     prefs.putInt("uiMenuIdx", cfg.uiLastMenuIndex);
     prefs.putBool("uiNight", cfg.uiNightMode);
+    prefs.putBool("uiShiftLed", cfg.uiShowShiftStrip);
     prefs.putUInt("uiFocus", static_cast<uint32_t>(cfg.uiDisplayFocus));
+    prefs.putBool("sideEn", cfg.sideLeds.enabled);
+    prefs.putUInt("sidePreset", static_cast<uint32_t>(cfg.sideLeds.preset));
+    prefs.putUInt("sideCount", cfg.sideLeds.ledCountPerSide);
+    prefs.putUInt("sideBright", cfg.sideLeds.brightness);
+    prefs.putBool("sideSpot", cfg.sideLeds.allowSpotter);
+    prefs.putBool("sideFlag", cfg.sideLeds.allowFlags);
+    prefs.putBool("sideWarn", cfg.sideLeds.allowWarnings);
+    prefs.putBool("sideTract", cfg.sideLeds.allowTraction);
+    prefs.putUInt("sideBlinkS", cfg.sideLeds.blinkSpeedSlowMs);
+    prefs.putUInt("sideBlinkF", cfg.sideLeds.blinkSpeedFastMs);
+    prefs.putUInt("sideBluePr", static_cast<uint32_t>(cfg.sideLeds.blueFlagPriority));
+    prefs.putUInt("sideYellPr", static_cast<uint32_t>(cfg.sideLeds.yellowFlagPriority));
+    prefs.putUInt("sideWarnPr", static_cast<uint32_t>(cfg.sideLeds.warningPriorityMode));
+    prefs.putBool("sideInvert", cfg.sideLeds.invertLeftRight);
+    prefs.putBool("sideMirror", cfg.sideLeds.mirrorMode);
+    prefs.putBool("sideClose", cfg.sideLeds.closeCarBlinkingEnabled);
+    prefs.putBool("sideSev", cfg.sideLeds.severityLevelsEnabled);
+    prefs.putBool("sideIdle", cfg.sideLeds.idleAnimationEnabled);
+    prefs.putBool("sideTest", cfg.sideLeds.testMode);
+    prefs.putUInt("sideHoldF", cfg.sideLeds.minimumFlagHoldMs);
+    prefs.putUInt("sideHoldW", cfg.sideLeds.minimumWarningHoldMs);
+    prefs.putUInt("sideHoldS", cfg.sideLeds.minimumSpotterHoldMs);
+    prefs.putUInt("sideColDim", cfg.sideLeds.colors.dim);
+    prefs.putUInt("sideColSpot", cfg.sideLeds.colors.spotter);
+    prefs.putUInt("sideColSpotC", cfg.sideLeds.colors.spotterClose);
+    prefs.putUInt("sideColTrL", cfg.sideLeds.colors.tractionLow);
+    prefs.putUInt("sideColTrM", cfg.sideLeds.colors.tractionMedium);
+    prefs.putUInt("sideColTrH", cfg.sideLeds.colors.tractionHigh);
+    prefs.putUInt("sideColFG", cfg.sideLeds.colors.flagGreen);
+    prefs.putUInt("sideColFY", cfg.sideLeds.colors.flagYellow);
+    prefs.putUInt("sideColFB", cfg.sideLeds.colors.flagBlue);
+    prefs.putUInt("sideColFR", cfg.sideLeds.colors.flagRed);
+    prefs.putUInt("sideColFW", cfg.sideLeds.colors.flagWhite);
+    prefs.putUInt("sideColFK", cfg.sideLeds.colors.flagBlack);
+    prefs.putUInt("sideColFC", cfg.sideLeds.colors.flagCheckered);
+    prefs.putUInt("sideColWL", cfg.sideLeds.colors.warningLowFuel);
+    prefs.putUInt("sideColWE", cfg.sideLeds.colors.warningEngine);
+    prefs.putUInt("sideColWO", cfg.sideLeds.colors.warningOil);
+    prefs.putUInt("sideColWW", cfg.sideLeds.colors.warningWater);
+    prefs.putUInt("sideColWD", cfg.sideLeds.colors.warningDamage);
+    prefs.putUInt("sideColWP", cfg.sideLeds.colors.warningPitLimiter);
     prefs.putBool("useMph", cfg.useMph);
     prefs.putUInt("telePref", static_cast<uint32_t>(cfg.telemetryPreference));
     prefs.putUInt("simTrans", static_cast<uint32_t>(cfg.simTransportPreference));
