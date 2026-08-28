@@ -93,6 +93,13 @@ namespace
         return true;
     }
 
+    void applyNoCacheHeaders()
+    {
+        server.sendHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+        server.sendHeader("Pragma", "no-cache");
+        server.sendHeader("Expires", "0");
+    }
+
     String currentIpString()
     {
         WifiStatus status = getWifiStatus();
@@ -2509,6 +2516,7 @@ namespace
         {
             return;
         }
+        applyNoCacheHeaders();
         server.send(200, "text/html", buildDashboardPage());
     }
 
@@ -2816,6 +2824,9 @@ namespace
         markHttpActivity("WEB_SAVE");
         applyConfigFromRequest(true);
         saveConfig();
+        ambientLightForceProbe();
+        gestureSensorForceProbe();
+        applyNoCacheHeaders();
         server.send(200, "text/plain", "OK");
     }
 
@@ -3000,6 +3011,9 @@ namespace
         json += ",\"ledLastQueuedEffect\":\"" + jsonEscape(String(ledBarEffectNameById(ledHistory.lastQueuedEffect))) + "\"";
         json += ",\"ledSessionEffectRequests\":" + String(ledHistory.sessionEffectRequests);
         json += ",\"ledSessionEffectSuppressions\":" + String(ledHistory.sessionEffectSuppressions);
+        const int activeMode = gestureSensorClampMode(cfg.mode);
+        json += ",\"mode\":" + String(activeMode);
+        json += ",\"modeName\":\"" + jsonEscape(String(gestureSensorModeName(activeMode))) + "\"";
         json += ",\"rpmStartRpm\":" + String(cfg.rpmStartRpm);
         json += ",\"ledManualBrightness\":" + String(cfg.brightness);
         json += ",\"ledConfiguredCount\":" + String(cfg.activeLedCount);
@@ -3071,6 +3085,7 @@ namespace
         json += ",\"bleConnectTargetName\":\"" + jsonEscape(g_bleConnectTargetName) + "\"";
         json += ",\"bleConnectError\":\"" + jsonEscape(g_bleConnectLastError) + "\"";
         json += "}";
+        applyNoCacheHeaders();
         server.send(200, "application/json", json);
     }
 
@@ -3099,6 +3114,7 @@ namespace
         String json = "{\"status\":\"ok\",\"pattern\":\"";
         json += jsonEscape(String(side_led_test_pattern_name(pattern)));
         json += "\"}";
+        applyNoCacheHeaders();
         server.send(200, "application/json", json);
     }
 
@@ -3138,6 +3154,7 @@ namespace
         }
         json += "]";
         json += "}";
+        applyNoCacheHeaders();
         server.send(200, "application/json", json);
     }
 
@@ -3274,6 +3291,7 @@ namespace
             return;
         }
         bool saved = server.hasArg("saved");
+        applyNoCacheHeaders();
         server.send(200, "text/html", buildSettingsPage(saved));
     }
 
@@ -3291,9 +3309,13 @@ namespace
 
         applyTelemetryConfigFromRequest();
         applyWifiConfigFromRequest();
+        cfg.gestureControlEnabled = server.hasArg("gestureControlEnabled");
+        gestureSensorOnConfigChanged();
         saveConfig();
+        gestureSensorForceProbe();
         setupWifiFromConfig(cfg);
 
+        applyNoCacheHeaders();
         server.sendHeader("Location", "/settings?saved=1", true);
         server.send(303, "text/plain", "Redirect");
     }
@@ -3334,6 +3356,7 @@ namespace
         json += ",\"lastError\":\"" + jsonEscape(info.lastError) + "\"";
         json += "}";
 
+        applyNoCacheHeaders();
         server.send(200, "application/json", json);
     }
 
@@ -3400,6 +3423,7 @@ namespace
         String json = "{\"status\":\"ok\",\"mode\":\"";
         json += ledBarGetDiagnosticModeName();
         json += "\"}";
+        applyNoCacheHeaders();
         server.send(200, "application/json", json);
     }
 
@@ -3420,6 +3444,7 @@ namespace
         json += ",\"deviceResponding\":" + String(ambientInfo.deviceResponding ? "true" : "false");
         json += ",\"lastError\":\"" + jsonEscape(ambientInfo.lastError) + "\"";
         json += "}";
+        applyNoCacheHeaders();
         server.send(200, "application/json", json);
     }
 

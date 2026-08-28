@@ -73,6 +73,8 @@ void ledBarRequestLogoPreview();
 void ledBarRequestLogoAnimation();
 void ledBarRequestLeavingAnimation();
 void ledBarRequestBrightnessPreview();
+void ledBarRequestGestureLeftFeedback();
+void ledBarRequestGestureRightFeedback();
 void ledBarRequestSimSessionTransition(SimSessionTransitionType transition);
 bool ledBarEffectActive();
 LedRenderHistoryInfo ledBarGetRenderHistoryInfo();

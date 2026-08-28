@@ -535,8 +535,15 @@ namespace
         }
 
         cfg.mode = nextMode;
+        if (direction == GestureDirection::Left)
+        {
+            ledBarRequestGestureLeftFeedback();
+        }
+        else if (direction == GestureDirection::Right)
+        {
+            ledBarRequestGestureRightFeedback();
+        }
         saveConfig();
-        ledBarInvalidateFrameCache();
 
         g_lastAcceptedGestureMs = nowMs;
         g_debug.lastGesture = direction;
@@ -698,11 +705,19 @@ void gestureSensorLoop()
 
 GestureSensorDebugInfo gestureSensorGetDebugInfo()
 {
+    refreshInterruptDebug();
     GestureSensorDebugInfo info = g_debug;
     info.enabled = cfg.gestureControlEnabled;
     info.sensorActive = cfg.gestureControlEnabled && g_sensorReady;
-    syncDebugPins();
-    info.sdaPin = g_debug.sdaPin;
-    info.sclPin = g_debug.sclPin;
+    if (g_sensorReady)
+    {
+        info.sensorDetected = true;
+        info.busInitialized = true;
+        info.deviceResponding = true;
+        info.ackResponding = true;
+        info.idReadOk = true;
+        info.configApplied = true;
+        info.usingSharedBus = true;
+    }
     return info;
 }

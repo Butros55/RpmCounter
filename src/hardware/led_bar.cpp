@@ -45,7 +45,9 @@ namespace
         EffectSimStandby = 11,
         EffectSimError = 12,
         EffectLogo = 13,
-        EffectLogoLeave = 14
+        EffectLogoLeave = 14,
+        EffectGestureLeft = 15,
+        EffectGestureRight = 16
     };
 
     enum class LedRenderWriter : uint8_t
@@ -60,7 +62,9 @@ namespace
         EffectLogoLeaving = 7,
         EffectSimReady = 8,
         EffectSimStandby = 9,
-        EffectSimError = 10
+        EffectSimError = 10,
+        EffectGestureLeft = 11,
+        EffectGestureRight = 12
     };
 
     enum class LedEffectType : uint8_t
@@ -71,7 +75,9 @@ namespace
         LogoLeaving = 3,
         SimReady = 4,
         SimStandby = 5,
-        SimError = 6
+        SimError = 6,
+        GestureLeft = 7,
+        GestureRight = 8
     };
 
     struct LedEffectState
@@ -91,6 +97,10 @@ namespace
     constexpr unsigned long SIM_READY_EFFECT_MS = 900;
     constexpr unsigned long SIM_STANDBY_EFFECT_MS = 700;
     constexpr unsigned long SIM_ERROR_EFFECT_MS = 720;
+    constexpr unsigned long GESTURE_TRANSITION_MS = 340;
+    constexpr float GESTURE_SWEEP_TAIL_LEDS = 2.6f;
+    constexpr uint8_t GESTURE_SWEEP_HEAD_BRIGHTNESS = 235;
+    constexpr uint8_t GESTURE_SWEEP_TAIL_BRIGHTNESS = 110;
     uint32_t g_ledFrameCache[NUM_LEDS] = {};
     bool g_ledFrameCacheValid = false;
     bool g_forceNextStripShow = true;
@@ -192,6 +202,10 @@ namespace
             return "effect-sim-standby";
         case LedRenderWriter::EffectSimError:
             return "effect-sim-error";
+        case LedRenderWriter::EffectGestureLeft:
+            return "effect-gesture-left";
+        case LedRenderWriter::EffectGestureRight:
+            return "effect-gesture-right";
         case LedRenderWriter::None:
         default:
             return "none";
@@ -214,6 +228,10 @@ namespace
             return "sim-standby";
         case LedEffectType::SimError:
             return "sim-error";
+        case LedEffectType::GestureLeft:
+            return "gesture-left";
+        case LedEffectType::GestureRight:
+            return "gesture-right";
         case LedEffectType::None:
         default:
             return "none";
@@ -276,7 +294,7 @@ namespace
         }
     }
 
-    void queueEffect(LedEffectType type, bool animationActive, bool brightnessPreview)
+    void queueEffect(LedEffectType type, bool animationActive, bool brightnessPreview, bool preserveBaseFrame = false)
     {
         portENTER_CRITICAL(&g_ledEffectMux);
         g_pendingEffectType = type;
@@ -285,7 +303,14 @@ namespace
         portEXIT_CRITICAL(&g_ledEffectMux);
         g_animationActive = animationActive;
         g_brightnessPreviewActive = brightnessPreview;
-        invalidateLedFrameCacheInternal();
+        if (preserveBaseFrame)
+        {
+            g_forceNextStripShow = true;
+        }
+        else
+        {
+            invalidateLedFrameCacheInternal();
+        }
     }
 
     bool isSimSessionEffect(LedEffectType type)
@@ -427,11 +452,38 @@ namespace
                            static_cast<uint8_t>(bVal * scale));
     }
 
+    uint32_t blendPackedColor(uint32_t from, uint32_t to, float amount)
+    {
+        amount = constrain(amount, 0.0f, 1.0f);
+        const float inv = 1.0f - amount;
+
+        const float fromG = static_cast<float>((from >> 16) & 0xFF);
+        const float fromR = static_cast<float>((from >> 8) & 0xFF);
+        const float fromB = static_cast<float>(from & 0xFF);
+        const float toG = static_cast<float>((to >> 16) & 0xFF);
+        const float toR = static_cast<float>((to >> 8) & 0xFF);
+        const float toB = static_cast<float>(to & 0xFF);
+
+        return strip.Color(static_cast<uint8_t>(lroundf((fromR * inv) + (toR * amount))),
+                           static_cast<uint8_t>(lroundf((fromG * inv) + (toG * amount))),
+                           static_cast<uint8_t>(lroundf((fromB * inv) + (toB * amount))));
+    }
+
     void clearFrame(uint32_t *frame)
     {
         for (int i = 0; i < NUM_LEDS; ++i)
         {
             frame[i] = 0;
+        }
+    }
+
+    void fillFrame(uint32_t *frame, uint32_t color)
+    {
+        clearFrame(frame);
+        const int ledCount = activeLedCount();
+        for (int i = 0; i < ledCount; ++i)
+        {
+            frame[i] = color;
         }
     }
 
@@ -895,6 +947,37 @@ namespace
         }
     }
 
+    void renderGestureTransitionFrame(uint32_t *frame, bool moveLeft, float t)
+    {
+        const int ledCount = activeLedCount();
+        clearFrame(frame);
+        if (ledCount <= 0)
+        {
+            return;
+        }
+
+        const float eased = smoothStep(t);
+        const float travelStart = moveLeft ? static_cast<float>(ledCount - 1) : 0.0f;
+        const float travelEnd = moveLeft ? 0.0f : static_cast<float>(ledCount - 1);
+        const float headPosition = travelStart + ((travelEnd - travelStart) * eased);
+
+        for (int i = 0; i < ledCount; ++i)
+        {
+            const float distance = fabsf(static_cast<float>(i) - headPosition);
+            if (distance > GESTURE_SWEEP_TAIL_LEDS)
+            {
+                continue;
+            }
+
+            const float local = 1.0f - (distance / GESTURE_SWEEP_TAIL_LEDS);
+            const float intensity = smoothStep(local);
+            const uint8_t brightness =
+                static_cast<uint8_t>(lroundf(GESTURE_SWEEP_TAIL_BRIGHTNESS +
+                                             ((GESTURE_SWEEP_HEAD_BRIGHTNESS - GESTURE_SWEEP_TAIL_BRIGHTNESS) * intensity)));
+            frame[i] = strip.Color(brightness, brightness, brightness);
+        }
+    }
+
     bool renderActiveEffect(unsigned long nowMs, uint32_t *frame, LedRenderWriter &writer, LedFrameMode &mode)
     {
         if (g_effectState.type == LedEffectType::None)
@@ -1029,6 +1112,23 @@ namespace
             {
                 clearEffectIfFinished();
             }
+            return true;
+        }
+        case LedEffectType::GestureLeft:
+        case LedEffectType::GestureRight:
+        {
+            if (elapsed >= GESTURE_TRANSITION_MS)
+            {
+                clearEffectIfFinished();
+                return false;
+            }
+            renderGestureTransitionFrame(frame,
+                                         g_effectState.type == LedEffectType::GestureLeft,
+                                         min(1.0f, elapsed / static_cast<float>(GESTURE_TRANSITION_MS)));
+            writer = g_effectState.type == LedEffectType::GestureLeft ? LedRenderWriter::EffectGestureLeft
+                                                                      : LedRenderWriter::EffectGestureRight;
+            mode = g_effectState.type == LedEffectType::GestureLeft ? LedFrameMode::EffectGestureLeft
+                                                                    : LedFrameMode::EffectGestureRight;
             return true;
         }
         case LedEffectType::None:
@@ -1171,6 +1271,10 @@ const char *ledBarGetLastRenderModeName()
         return "logo";
     case LedFrameMode::EffectLogoLeave:
         return "logo-leave";
+    case LedFrameMode::EffectGestureLeft:
+        return "gesture-left";
+    case LedFrameMode::EffectGestureRight:
+        return "gesture-right";
     case LedFrameMode::None:
     default:
         return "none";
@@ -1231,6 +1335,16 @@ void ledBarRequestLogoPreview()
 void ledBarRequestBrightnessPreview()
 {
     ledBarRequestLogoPreview();
+}
+
+void ledBarRequestGestureLeftFeedback()
+{
+    queueEffect(LedEffectType::GestureLeft, false, false, true);
+}
+
+void ledBarRequestGestureRightFeedback()
+{
+    queueEffect(LedEffectType::GestureRight, false, false, true);
 }
 
 void ledBarRequestLogoAnimation()

@@ -622,3 +622,5 @@ Der Agent soll (im Kommentar/Report) Rückfragen signalisieren, wenn:
 - Crashlogs/Backtraces erwähnt werden, aber der konkrete Log fehlt.
 - ein fundamentaler Wechsel der BLE‑Library oder Plattform nötig wäre.
 - Build‑Fehler nur durch potenziell riskante, nicht-triviale Änderungen lösbar erscheinen.
+
+## Imported Claude Cowork project instructions

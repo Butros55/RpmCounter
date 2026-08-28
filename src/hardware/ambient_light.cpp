@@ -22,6 +22,9 @@ namespace
     constexpr uint32_t AMBIENT_MIN_READ_GAP_MS = 6;
     constexpr uint32_t AMBIENT_RETRY_INTERVAL_MS = 3000;
     constexpr uint32_t AMBIENT_SAMPLE_SETTLE_MARGIN_MS = 4;
+    constexpr uint8_t AMBIENT_PRIVATE_BUS_MAX_READ_ERRORS = 3;
+    constexpr uint8_t AMBIENT_SHARED_BUS_MAX_READ_ERRORS = 8;
+    constexpr uint8_t AMBIENT_SHARED_BUS_READ_RETRIES = 3;
     constexpr float AMBIENT_BRIGHTNESS_SLEW_MIN_PER_16MS = 1.4f;
     constexpr float AMBIENT_BRIGHTNESS_SLEW_MAX_PER_16MS = 10.8f;
     constexpr float AMBIENT_BRIGHTNESS_DOWN_MULTIPLIER = 3.2f;
@@ -108,6 +111,11 @@ namespace
     bool validLux(float lux)
     {
         return !isnan(lux) && !isinf(lux) && lux >= 0.0f;
+    }
+
+    uint8_t maxReadErrorsBeforeReset()
+    {
+        return g_usingSharedBus ? AMBIENT_SHARED_BUS_MAX_READ_ERRORS : AMBIENT_PRIVATE_BUS_MAX_READ_ERRORS;
     }
 
     void updateDesiredBrightnessFromLux(bool smoothOutput)
@@ -373,7 +381,23 @@ namespace
 
     bool readLiveLux(float &luxOut, uint16_t &alsOut, uint16_t &whiteOut)
     {
-        if (!readAlsRaw(alsOut))
+        const uint8_t attempts = g_usingSharedBus ? AMBIENT_SHARED_BUS_READ_RETRIES : 1;
+        bool alsReadOk = false;
+        for (uint8_t attempt = 0; attempt < attempts; ++attempt)
+        {
+            if (readAlsRaw(alsOut))
+            {
+                alsReadOk = true;
+                break;
+            }
+
+            if ((attempt + 1U) < attempts)
+            {
+                delay(1);
+            }
+        }
+
+        if (!alsReadOk)
         {
             return false;
         }
@@ -506,8 +530,8 @@ namespace
         g_debug.readErrorCount++;
         g_debug.lastError = reason;
         LOG_WARN("AMBIENT", "READ_FAIL",
-                 String("reason=") + String(reason) + " count=" + g_consecutiveReadErrors);
-        if (g_consecutiveReadErrors >= 3)
+                  String("reason=") + String(reason) + " count=" + g_consecutiveReadErrors);
+        if (g_consecutiveReadErrors >= maxReadErrorsBeforeReset())
         {
             g_sensorReady = false;
             g_debug.sensorDetected = false;
@@ -756,5 +780,11 @@ AmbientLightDebugInfo ambientLightGetDebugInfo()
     info.sensorActive = cfg.autoBrightnessEnabled && g_sensorReady;
     info.sdaPin = cfg.ambientLightSdaPin;
     info.sclPin = cfg.ambientLightSclPin;
+    if (g_sensorReady)
+    {
+        info.sensorDetected = true;
+        info.busInitialized = true;
+        info.deviceResponding = true;
+    }
     return info;
 }
